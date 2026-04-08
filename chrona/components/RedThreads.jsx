@@ -7,17 +7,16 @@
 
 import { useMemo } from 'react';
 
-/** The central "ME" position (percentage-based, mapped to viewBox 0-1000) */
-const ME = { x: 500, y: 500 };
-
 /**
  * Convert percentage position to viewBox coordinates (0-1000 scale)
  */
 function toViewBox(pos) {
-  return { x: pos.x * 10, y: pos.y * 10 };
+  return { x: (pos?.x ?? 50) * 10, y: (pos?.y ?? 50) * 10 };
 }
 
-export default function RedThreads({ categories, tasks }) {
+export default function RedThreads({ categories, tasks, mePosition = { x: 50, y: 50 } }) {
+  const meViewBox = toViewBox(mePosition);
+
   const paths = useMemo(() => {
     const lines = [];
 
@@ -25,7 +24,7 @@ export default function RedThreads({ categories, tasks }) {
     categories.forEach((cat) => {
       const to = toViewBox(cat.position);
       lines.push(
-        <ThreadPath key={`me-${cat.id}`} from={ME} to={to} />
+        <ThreadPath key={`me-${cat.id}`} from={meViewBox} to={to} />
       );
     });
 
@@ -45,11 +44,11 @@ export default function RedThreads({ categories, tasks }) {
     });
 
     return lines;
-  }, [categories, tasks]);
+  }, [categories, tasks, meViewBox]);
 
   return (
     <svg
-      className="absolute inset-0 w-full h-full pointer-events-none z-10"
+      className="absolute inset-0 w-full h-full"
       viewBox="0 0 1000 1000"
       preserveAspectRatio="none"
       xmlns="http://www.w3.org/2000/svg"

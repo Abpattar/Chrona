@@ -98,7 +98,7 @@ body {
   font-family: "Newsreader", serif;
   color: #1c1c18;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 /* ---- Paper Grain Overlay ---- */
@@ -131,6 +131,7 @@ body {
 
 /* ---- Ruled Paper (Exam Style) ---- */
 .ruled-paper {
+  background-color: #ffffff;
   background-image: linear-gradient(#916f6e 1px, transparent 1px);
   background-size: 100% 1.5rem;
   padding-top: 1.5rem !important;
@@ -158,6 +159,7 @@ body {
 /* ---- Punched Paper (Personal Style) ---- */
 .punched-paper {
   position: relative;
+  background-color: #ffffff;
 }
 .punched-paper::before {
   content: '';

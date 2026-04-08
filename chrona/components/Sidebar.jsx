@@ -4,6 +4,8 @@
 
 'use client';
 
+import Link from 'next/link';
+
 const MAIN_NAV_ITEMS = [
   { icon: 'task_alt', label: 'Priority Tasks', active: true },
   { icon: 'event', label: 'Upcoming', active: false },
@@ -16,7 +18,7 @@ const BOTTOM_NAV_ITEMS = [
   { icon: 'logout', label: 'Logout' },
 ];
 
-export default function Sidebar({ onAddItem }) {
+export default function Sidebar({ onAddItem, activeItem, onNavigate }) {
   return (
     <aside
       id="sidebar"
@@ -36,7 +38,12 @@ export default function Sidebar({ onAddItem }) {
         style={{ fontFamily: 'Newsreader, serif' }}
       >
         {MAIN_NAV_ITEMS.map((item) => (
-          <SidebarNavItem key={item.label} {...item} />
+          <SidebarNavItem 
+            key={item.label} 
+            {...item} 
+            active={item.label === activeItem}
+            onClick={() => onNavigate(item.label)}
+          />
         ))}
       </nav>
 
@@ -44,7 +51,7 @@ export default function Sidebar({ onAddItem }) {
       <button
         id="add-new-item-btn"
         onClick={onAddItem}
-        className="mt-12 uppercase px-4 py-3 text-sm tracking-widest active:scale-95 transition-transform"
+        className="mt-12 uppercase px-4 py-3 text-sm tracking-widest active:scale-95 transition-transform font-bold"
         style={{
           fontFamily: 'Space Grotesk, sans-serif',
           backgroundColor: '#ad170c',
@@ -90,12 +97,12 @@ function SidebarHeader() {
   );
 }
 
-function SidebarNavItem({ icon, label, active }) {
+function SidebarNavItem({ icon, label, active, onClick }) {
   return (
-    <a
-      href="#"
+    <button
       id={`sidebar-${label.toLowerCase().replace(/\s+/g, '-')}`}
-      className="flex items-center gap-3 transition-all group"
+      onClick={onClick}
+      className="flex items-center gap-3 transition-all group appearance-none bg-transparent border-none p-0 text-left outline-none cursor-pointer"
       style={{
         color: active ? '#ad170c' : '#1c1c18',
         fontWeight: active ? 700 : 400,
@@ -120,14 +127,17 @@ function SidebarNavItem({ icon, label, active }) {
     >
       <span className="material-symbols-outlined">{icon}</span>
       {label}
-    </a>
+    </button>
   );
 }
 
 function SidebarBottomLink({ icon, label }) {
+  const isLogout = label === 'Logout';
+  const Component = isLogout ? Link : 'a';
+
   return (
-    <a
-      href="#"
+    <Component
+      href={isLogout ? "/login" : "#"}
       className="flex items-center gap-3 transition-colors"
       style={{ color: 'inherit' }}
       onMouseEnter={(e) => {
@@ -139,6 +149,6 @@ function SidebarBottomLink({ icon, label }) {
     >
       <span className="material-symbols-outlined">{icon}</span>
       {label}
-    </a>
+    </Component>
   );
 }

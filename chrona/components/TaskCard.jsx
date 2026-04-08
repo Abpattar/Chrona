@@ -1,24 +1,40 @@
 // ============================================================
 // TaskCard.jsx — Individual task card styled per category
+// Supports drag-to-place via onPositionChange callback
 // ============================================================
 
 'use client';
 
-export default function TaskCard({ task, categoryStyle, categoryName }) {
+import { useDragNode } from '@/hooks/useDragNode';
+
+export default function TaskCard({ task, categoryStyle, categoryName, onPositionChange, containerRef, zoom }) {
   const rotation = task.rotation;
+
+  const { handleMouseDown } = useDragNode(
+    task.id,
+    task.position,
+    onPositionChange,
+    containerRef,
+    zoom
+  );
 
   return (
     <div
       id={`task-${task.id}`}
       data-no-pan="true"
-      className="absolute z-20 transition-transform cursor-pointer"
+      className="absolute z-20 select-none"
       style={{
         top: `${task.position.y}%`,
         left: `${task.position.x}%`,
         transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        cursor: 'grab',
+        transition: 'transform 0.15s ease',
       }}
+      onMouseDown={handleMouseDown}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = `translate(-50%, -50%) rotate(${rotation > 0 ? -1 : 1}deg)`;
+        if (!e.buttons) {
+          e.currentTarget.style.transform = `translate(-50%, -50%) rotate(${rotation > 0 ? -1 : 1}deg)`;
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;

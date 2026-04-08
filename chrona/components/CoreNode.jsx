@@ -2,17 +2,28 @@
 // CoreNode.jsx — The central "ME" node
 // ============================================================
 
-'use client';
+import { useDragNode } from '@/hooks/useDragNode';
 
-export default function CoreNode() {
+export default function CoreNode({ position, onPositionChange, containerRef, zoom }) {
+  const { handleMouseDown } = useDragNode(
+    'me',
+    position,
+    onPositionChange,
+    containerRef,
+    zoom
+  );
+
   return (
     <div
       id="core-node-me"
       data-no-pan="true"
-      className="relative z-30 transition-transform cursor-move"
-      style={{ transform: 'rotate(1deg)' }}
+      className="relative z-30 select-none"
+      style={{ transform: 'rotate(1deg)', cursor: 'grab' }}
+      onMouseDown={handleMouseDown}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'rotate(0deg)';
+        if (!e.buttons) {
+          e.currentTarget.style.transform = 'rotate(0deg)';
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'rotate(1deg)';

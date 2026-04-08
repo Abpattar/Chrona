@@ -4,26 +4,51 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { defaultCategories, defaultTasks } from '@/lib/data';
 import PaperGrain from '@/components/PaperGrain';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MindMapCanvas from '@/components/MindMapCanvas';
 import FloatingActionButton from '@/components/FloatingActionButton';
+import AddItemModal from '@/components/AddItemModal';
+import UpcomingView from '@/components/UpcomingView';
 
 export default function Home() {
-  // ---- State: categories & tasks ----
-  const [categories] = useState(defaultCategories);
-  const [tasks] = useState(defaultTasks);
+  // ---- View state: controls what the user sees ----
+  const [currentView, setCurrentView] = useState('Priority Tasks'); // or 'Upcoming'
+
+  // ---- Mutable state for positions (enables drag-to-place + live wires) ----
+  const [categories, setCategories] = useState(defaultCategories);
+  const [tasks, setTasks] = useState(defaultTasks);
+  const [mePosition, setMePosition] = useState({ x: 50, y: 50 });
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleMePositionChange = useCallback((_, newPos) => {
+    setMePosition(newPos);
+  }, []);
+
+  // ---- Update a single category's position ----
+  const handleCategoryPositionChange = useCallback((id, newPos) => {
+    setCategories((prev) =>
+      prev.map((cat) => (cat.id === id ? { ...cat, position: newPos } : cat))
+    );
+  }, []);
+
+  // ---- Update a single task's position ----
+  const handleTaskPositionChange = useCallback((id, newPos) => {
+    setTasks((prev) =>
+      prev.map((task) => (task.id === id ? { ...task, position: newPos } : task))
+    );
+  }, []);
 
   // ---- Handlers ----
-  const handleAddItem = () => {
-    console.log('Add new item clicked');
-  };
-
-  const handleNewGoal = () => {
-    console.log('New goal FAB clicked');
+  const handleAddItem = () => setIsModalOpen(true);
+  const handleNewGoal = () => setIsModalOpen(true);
+  
+  const handleProcessEvent = (description) => {
+    console.log('Processing event:', description);
+    // Future logic: AI extraction or adding a new task/category
   };
 
   return (
@@ -35,13 +60,35 @@ export default function Home() {
       <Header />
 
       {/* Fixed sidebar */}
-      <Sidebar onAddItem={handleAddItem} />
+      <Sidebar 
+        onAddItem={handleAddItem} 
+        activeItem={currentView}
+        onNavigate={setCurrentView}
+      />
 
-      {/* Pannable mind map canvas */}
-      <MindMapCanvas categories={categories} tasks={tasks} />
+      {/* Main Content: Conditionally rendered views */}
+      {currentView === 'Upcoming' ? (
+        <UpcomingView />
+      ) : (
+        <MindMapCanvas
+          categories={categories}
+          tasks={tasks}
+          mePosition={mePosition}
+          onCategoryPositionChange={handleCategoryPositionChange}
+          onTaskPositionChange={handleTaskPositionChange}
+          onMePositionChange={handleMePositionChange}
+        />
+      )}
 
       {/* Floating action button */}
       <FloatingActionButton onClick={handleNewGoal} />
+
+      {/* Add Item Modal Overlay */}
+      <AddItemModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onProcess={handleProcessEvent}
+      />
     </>
   );
 }

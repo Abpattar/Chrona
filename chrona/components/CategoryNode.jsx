@@ -1,26 +1,41 @@
 // ============================================================
 // CategoryNode.jsx — Category label node on the mind map
 // Renders different visual styles per category type
+// Supports drag-to-place via onPositionChange callback
 // ============================================================
 
 'use client';
 
-export default function CategoryNode({ category }) {
+import { useDragNode } from '@/hooks/useDragNode';
+
+export default function CategoryNode({ category, onPositionChange, containerRef, zoom }) {
   const styleClass = getCategoryCardClass(category.style);
   const rotation = category.rotation;
+
+  const { handleMouseDown } = useDragNode(
+    category.id,
+    category.position,
+    onPositionChange,
+    containerRef,
+    zoom
+  );
 
   return (
     <div
       id={`category-${category.id}`}
       data-no-pan="true"
-      className="absolute z-20 transition-transform"
+      className="absolute z-20 transition-transform select-none"
       style={{
         top: `${category.position.y}%`,
         left: `${category.position.x}%`,
         transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        cursor: 'grab',
       }}
+      onMouseDown={handleMouseDown}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+        if (!e.buttons) {
+          e.currentTarget.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
