@@ -4,7 +4,9 @@
    globals.css — Design System for the Analog Mind Map
    ============================================================ */
 
-@theme {
+/* ---- Tailwind v4 Design Tokens ---- */
+@theme inline {
+  /* Primary palette */
   --color-primary: #ad170c;
   --color-primary-container: #d13323;
   --color-primary-fixed: #ffdad4;
@@ -13,14 +15,28 @@
   --color-on-primary-container: #fff1ef;
   --color-on-primary-fixed: #410000;
   --color-on-primary-fixed-variant: #930000;
+
+  /* Secondary palette */
   --color-secondary: #5f5e5e;
   --color-secondary-container: #e4e2e1;
+  --color-secondary-fixed: #e4e2e1;
+  --color-secondary-fixed-dim: #c8c6c6;
   --color-on-secondary: #ffffff;
   --color-on-secondary-container: #656464;
+  --color-on-secondary-fixed: #1b1c1c;
+  --color-on-secondary-fixed-variant: #474747;
+
+  /* Tertiary palette */
   --color-tertiary: #5f5744;
   --color-tertiary-container: #786f5b;
   --color-tertiary-fixed: #ede1c9;
+  --color-tertiary-fixed-dim: #d1c5ae;
   --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #fff4de;
+  --color-on-tertiary-fixed: #211b0c;
+  --color-on-tertiary-fixed-variant: #4d4634;
+
+  /* Surface & Background */
   --color-surface: #fcf9f2;
   --color-surface-dim: #dcdad3;
   --color-surface-bright: #fcf9f2;
@@ -30,23 +46,40 @@
   --color-surface-container-highest: #e5e2db;
   --color-surface-container-lowest: #ffffff;
   --color-surface-variant: #e5e2db;
+  --color-surface-tint: #b82014;
   --color-background: #fcf9f2;
   --color-on-background: #1c1c18;
   --color-on-surface: #1c1c18;
   --color-on-surface-variant: #5c3f3f;
+
+  /* Error */
   --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
   --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+
+  /* Outline */
   --color-outline: #916f6e;
   --color-outline-variant: #e6bdbc;
+
+  /* Inverse */
   --color-inverse-surface: #31312c;
   --color-inverse-on-surface: #f3f0e9;
   --color-inverse-primary: #ffb4a8;
+
+  /* Crimson thread color */
   --color-crimson: #DC143C;
+
+  /* Sticky note */
   --color-sticky: #fef3c7;
+
+  /* Fonts */
   --font-headline: "Space Grotesk", sans-serif;
   --font-body: "Newsreader", serif;
   --font-label: "Work Sans", sans-serif;
   --font-handdrawn: "Permanent Marker", cursive;
+
+  /* Sharp corners (0px border-radius) */
   --radius-sm: 0px;
   --radius-md: 0px;
   --radius-lg: 0px;
@@ -65,13 +98,16 @@ body {
   font-family: "Newsreader", serif;
   color: #1c1c18;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 /* ---- Paper Grain Overlay ---- */
 .paper-grain {
   position: fixed;
-  top: 0; left: 0; width: 100%; height: 100%;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   opacity: 0.04;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
@@ -83,20 +119,31 @@ body {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
+/* ---- Red Thread (SVG Paths) ---- */
+.red-thread {
+  stroke: #DC143C;
+  stroke-width: 2.5;
+  fill: none;
+  stroke-dasharray: 4 2;
+  filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.15));
+  stroke-linecap: round;
+}
+
 /* ---- Ruled Paper (Exam Style) ---- */
 .ruled-paper {
+  background-color: #ffffff;
   background-image: linear-gradient(#916f6e 1px, transparent 1px);
   background-size: 100% 1.5rem;
   padding-top: 1.5rem !important;
 }
 
-/* ---- Sticky Note ---- */
+/* ---- Sticky Note (Hackathon / Other) ---- */
 .sticky-note {
   background-color: #fef3c7;
   box-shadow: 2px 5px 15px rgba(0, 0, 0, 0.1);
 }
 
-/* ---- Torn Edge ---- */
+/* ---- Torn Edge (Hackathon / Other) ---- */
 .torn-edge {
   clip-path: polygon(
     0% 2%, 2% 0%, 98% 0%, 100% 2%,
@@ -109,20 +156,25 @@ body {
   );
 }
 
-/* ---- Punched Paper (Personal) ---- */
-.punched-paper { position: relative; }
+/* ---- Punched Paper (Personal Style) ---- */
+.punched-paper {
+  position: relative;
+  background-color: #ffffff;
+}
 .punched-paper::before {
   content: '';
   position: absolute;
-  left: 8px; top: 15px;
-  width: 10px; height: 10px;
+  left: 8px;
+  top: 15px;
+  width: 10px;
+  height: 10px;
   background: #fcf9f2;
   border-radius: 50%;
   box-shadow: 0 40px 0 #fcf9f2, 0 80px 0 #fcf9f2;
-  border: 1px solid rgba(0,0,0,0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* ---- Paper Slip ---- */
+/* ---- Paper Slip (Generic Task Card) ---- */
 .paper-slip {
   box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.1);
   position: relative;
@@ -131,8 +183,10 @@ body {
 .paper-slip::after {
   content: '';
   position: absolute;
-  bottom: 0; right: 0;
-  width: 20px; height: 20px;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
   background: linear-gradient(135deg, transparent 50%, rgba(0, 0, 0, 0.05) 50%);
 }
 
@@ -142,101 +196,13 @@ body {
   color: #410000;
 }
 
-/* ---- Scrollbar ---- */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background-color: #e6bdbc; }
-
-/* ---- Modal backdrop ---- */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(28, 28, 24, 0.4);
-  backdrop-filter: blur(4px);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* ---- Scrollbar styling ---- */
+::-webkit-scrollbar {
+  width: 6px;
 }
-
-/* ---- Modal card ---- */
-.modal-card {
-  background: #fcf9f2;
-  box-shadow: 10px 15px 50px rgba(28,28,24,0.2);
-  padding: 2rem;
-  min-width: 400px;
-  max-width: 500px;
-  position: relative;
-}
-
-/* ---- Form input (underline style) ---- */
-.form-input-underline {
+::-webkit-scrollbar-track {
   background: transparent;
-  border: none;
-  border-bottom: 2px solid #916f6e;
-  outline: none;
-  width: 100%;
-  padding: 8px 0;
-  font-family: "Newsreader", serif;
-  font-size: 1rem;
-  color: #1c1c18;
-  transition: border-color 0.2s;
 }
-.form-input-underline:focus {
-  border-bottom-color: #ad170c;
-}
-.form-input-underline::placeholder {
-  color: rgba(28,28,24,0.4);
-  font-style: italic;
-}
-
-/* ---- Form select ---- */
-.form-select {
-  background: #f6f3ec;
-  border: none;
-  border-bottom: 2px solid #916f6e;
-  outline: none;
-  width: 100%;
-  padding: 8px 4px;
-  font-family: "Work Sans", sans-serif;
-  font-size: 0.875rem;
-  color: #1c1c18;
-  cursor: pointer;
-  appearance: none;
-  transition: border-color 0.2s;
-}
-.form-select:focus {
-  border-bottom-color: #ad170c;
-}
-
-/* ---- Calendar view ---- */
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-}
-.calendar-cell {
-  aspect-ratio: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 4px;
-  font-family: "Work Sans", sans-serif;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-.calendar-cell:hover {
-  background-color: rgba(173,23,12,0.05);
-}
-.calendar-cell-today {
-  background-color: rgba(173,23,12,0.08);
-  font-weight: 700;
-}
-.calendar-dot {
-  width: 5px; height: 5px;
-  border-radius: 50%;
-  background-color: #ad170c;
-  margin-top: 2px;
+::-webkit-scrollbar-thumb {
+  background-color: #e6bdbc;
 }
