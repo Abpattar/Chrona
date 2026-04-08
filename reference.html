@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Personal Mind Map - Scheduling</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Newsreader:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&amp;family=Work+Sans:wght@300;400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed-variant": "#930000",
+                        "primary-fixed-dim": "#ffb4a8",
+                        "surface-tint": "#b82014",
+                        "on-background": "#1c1c18",
+                        "primary": "#ad170c",
+                        "primary-container": "#d13323",
+                        "surface-container-high": "#ebe8e1",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-on-surface": "#f3f0e9",
+                        "inverse-primary": "#ffb4a8",
+                        "on-surface-variant": "#5c3f3f",
+                        "on-error": "#ffffff",
+                        "on-tertiary-container": "#fff4de",
+                        "error": "#ba1a1a",
+                        "on-primary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "secondary-fixed-dim": "#c8c6c6",
+                        "secondary-fixed": "#e4e2e1",
+                        "on-primary-container": "#fff1ef",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#5f5744",
+                        "surface-dim": "#dcdad3",
+                        "outline-variant": "#e6bdbc",
+                        "surface": "#fcf9f2",
+                        "primary-fixed": "#ffdad4",
+                        "on-secondary-fixed-variant": "#474747",
+                        "on-error-container": "#93000a",
+                        "secondary-container": "#e4e2e1",
+                        "tertiary-fixed-dim": "#d1c5ae",
+                        "on-tertiary-fixed": "#211b0c",
+                        "surface-container-low": "#f6f3ec",
+                        "inverse-surface": "#31312c",
+                        "secondary": "#5f5e5e",
+                        "surface-container-highest": "#e5e2db",
+                        "on-tertiary-fixed-variant": "#4d4634",
+                        "on-secondary": "#ffffff",
+                        "on-surface": "#1c1c18",
+                        "tertiary-container": "#786f5b",
+                        "outline": "#916f6e",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "surface-variant": "#e5e2db",
+                        "on-primary-fixed": "#410000",
+                        "tertiary-fixed": "#ede1c9",
+                        "background": "#fcf9f2",
+                        "on-secondary-container": "#656464",
+                        "surface-container": "#f1eee7",
+                        "surface-bright": "#fcf9f2"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Newsreader"],
+                        "label": ["Work Sans"],
+                        "handdrawn": ["Permanent Marker"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-image: 
+                radial-gradient(#1c1c18 0.5px, transparent 0.5px),
+                linear-gradient(to right, rgba(28,28,24,0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(28,28,24,0.02) 1px, transparent 1px);
+            background-size: 20px 20px, 40px 40px, 40px 40px;
+            background-color: #fcf9f2;
+        }
+        .paper-grain {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            opacity: 0.04;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            z-index: 100;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .red-thread {
+            stroke: #DC143C;
+            stroke-width: 2.5;
+            fill: none;
+            stroke-dasharray: 4 2;
+            filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.15));
+            stroke-linecap: round;
+        }
+        .ruled-paper {
+            background-image: linear-gradient(#916f6e 1px, transparent 1px);
+            background-size: 100% 1.5rem;
+            padding-top: 1.5rem !important;
+        }
+        .sticky-note {
+            background-color: #fef3c7;
+            box-shadow: 2px 5px 15px rgba(0,0,0,0.1);
+        }
+        .torn-edge {
+            clip-path: polygon(0% 2%, 2% 0%, 98% 0%, 100% 2%, 100% 95%, 98% 98%, 95% 94%, 92% 99%, 88% 93%, 85% 97%, 80% 92%, 75% 98%, 70% 93%, 65% 97%, 60% 91%, 55% 98%, 50% 94%, 45% 98%, 40% 92%, 35% 97%, 30% 91%, 25% 99%, 20% 92%, 15% 98%, 10% 93%, 5% 97%, 0% 92%);
+        }
+        .punched-paper {
+            position: relative;
+        }
+        .punched-paper::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 15px;
+            width: 10px;
+            height: 10px;
+            background: #fcf9f2;
+            border-radius: 50%;
+            box-shadow: 0 40px 0 #fcf9f2, 0 80px 0 #fcf9f2;
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        .paper-slip {
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.1);
+            position: relative;
+            background-color: #fff;
+        }
+        .paper-slip::after {
+            content: '';
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 20px; height: 20px;
+            background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.05) 50%);
+        }
+    </style>
+</head>
+<body class="font-body text-on-surface min-h-screen overflow-x-hidden selection:bg-primary-fixed selection:text-on-primary-fixed">
+<div class="paper-grain"></div>
+<!-- TopAppBar -->
+<header class="flex justify-between items-center px-8 w-full top-0 left-0 z-50 fixed bg-[#fcf9f2] dark:bg-[#1c1c18] h-16 bg-gradient-to-b from-[#1c1c18]/5 to-transparent border-b border-black/5">
+<div class="flex items-center gap-8">
+<h1 class="text-2xl font-bold font-['Space_Grotesk'] text-[#1c1c18] dark:text-[#fcf9f2] uppercase tracking-tighter">My Schedule</h1>
+<nav class="hidden md:flex gap-6 font-['Space_Grotesk'] uppercase tracking-tighter text-sm">
+<a class="text-[#ad170c] border-b-2 border-[#ad170c] pb-1 hover:rotate-1 hover:text-[#ad170c] transition-transform" href="#">Today</a>
+<a class="text-[#1c1c18] dark:text-[#fcf9f2] opacity-70 hover:rotate-1 hover:text-[#ad170c] transition-transform" href="#">Calendar</a>
+<a class="text-[#1c1c18] dark:text-[#fcf9f2] opacity-70 hover:rotate-1 hover:text-[#ad170c] transition-transform" href="#">Habits</a>
+<a class="text-[#1c1c18] dark:text-[#fcf9f2] opacity-70 hover:rotate-1 hover:text-[#ad170c] transition-transform" href="#">Journal</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-on-surface opacity-70 hover:rotate-1 transition-transform">push_pin</button>
+<button class="material-symbols-outlined text-on-surface opacity-70 hover:rotate-1 transition-transform">settings</button>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full z-40 flex flex-col p-6 overflow-hidden bg-[#fcf9f2] dark:bg-[#1c1c18] w-64 shadow-[10px_0_30px_rgba(28,28,24,0.06)] bg-[#1c1c18]/5">
+<div class="mt-20 mb-10">
+<div class="font-['Space_Grotesk'] font-black uppercase text-[#1c1c18] text-xl">Personal Board</div>
+<div class="font-['Newsreader'] italic text-lg opacity-80">Life Design</div>
+</div>
+<nav class="flex flex-col gap-8 font-['Newsreader'] italic text-lg">
+<a class="flex items-center gap-3 text-[#ad170c] font-bold italic underline decoration-wavy group" href="#">
+<span class="material-symbols-outlined" data-icon="task_alt">task_alt</span>
+            Priority Tasks
+        </a>
+<a class="flex items-center gap-3 text-[#1c1c18] dark:text-[#fcf9f2] opacity-60 hover:translate-x-1 hover:text-[#ad170c] transition-all group" href="#">
+<span class="material-symbols-outlined" data-icon="event">event</span>
+            Upcoming
+        </a>
+<a class="flex items-center gap-3 text-[#1c1c18] dark:text-[#fcf9f2] opacity-60 hover:translate-x-1 hover:text-[#ad170c] transition-all group" href="#">
+<span class="material-symbols-outlined" data-icon="flag">flag</span>
+            Long-term Goals
+        </a>
+<a class="flex items-center gap-3 text-[#1c1c18] dark:text-[#fcf9f2] opacity-60 hover:translate-x-1 hover:text-[#ad170c] transition-all group" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+            Archived Logs
+        </a>
+</nav>
+<button class="mt-12 bg-primary text-on-primary font-headline uppercase px-4 py-3 active:scale-95 duration-75 text-sm tracking-widest">
+        Add New Item
+    </button>
+<div class="mt-auto flex flex-col gap-4 font-['Newsreader'] italic text-md opacity-60">
+<a class="flex items-center gap-3 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+            Resources
+        </a>
+<a class="flex items-center gap-3 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+            Logout
+        </a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="ml-64 pt-16 min-h-screen relative overflow-hidden">
+<!-- SVG Red Threads Layer -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none z-10" xmlns="http://www.w3.org/2000/svg">
+<!-- Hub Connections: ME to Categories -->
+<!-- Core (50%, 50%) to Hackathon (50%, 35%) -->
+<path class="red-thread" d="M 50% 48% L 50% 36%"></path>
+<!-- Core (50%, 50%) to Exam (75%, 50%) -->
+<path class="red-thread" d="M 52% 50% L 74% 50%"></path>
+<!-- Core (50%, 50%) to Personal (25%, 50%) -->
+<path class="red-thread" d="M 48% 50% L 26% 50%"></path>
+<!-- Core (50%, 50%) to Other (55%, 75%) -->
+<path class="red-thread" d="M 50% 52% Q 52% 60% 55% 73%"></path>
+<!-- Hackathon Category to Tasks -->
+<!-- Hackathon (50%, 35%) to Hackzion (30%, 15%) -->
+<path class="red-thread" d="M 50% 35% Q 40% 25% 30% 16%"></path>
+<!-- Hackathon (50%, 35%) to Nexify (85%, 15%) -->
+<path class="red-thread" d="M 50% 35% Q 70% 25% 84% 16%"></path>
+<!-- Exam Category to Tasks -->
+<!-- Exam (75%, 50%) to Math Exam Top (95%, 25%) -->
+<path class="red-thread" d="M 75% 50% Q 85% 40% 94% 26%"></path>
+<!-- Exam (75%, 50%) to Math Exam Bottom (95%, 70%) -->
+<path class="red-thread" d="M 75% 50% Q 85% 60% 94% 69%"></path>
+<!-- Personal Category to Tasks -->
+<!-- Personal (25%, 50%) to 5KM Running (5%, 28%) -->
+<path class="red-thread" d="M 25% 50% Q 15% 40% 6% 29%"></path>
+<!-- Personal (25%, 50%) to Acharya Fest (5%, 80%) -->
+<path class="red-thread" d="M 25% 50% Q 15% 65% 6% 79%"></path>
+<!-- Other Category to Tasks -->
+<!-- Other (55%, 75%) to Test Probe (30%, 95%) -->
+<path class="red-thread" d="M 55% 75% Q 45% 85% 31% 94%"></path>
+<!-- Other (55%, 75%) to Vinciapest (80%, 95%) -->
+<path class="red-thread" d="M 55% 75% Q 65% 85% 79% 94%"></path>
+</svg>
+<!-- Mind Map Content -->
+<div class="relative w-full h-[1000px] p-12 flex items-center justify-center">
+<!-- THE CORE (Center) -->
+<div class="relative z-30 transform rotate-1 hover:rotate-0 transition-transform cursor-move">
+<div class="absolute -top-4 left-1/2 -translate-x-1/2 text-primary z-40 drop-shadow-md">
+<span class="material-symbols-outlined text-4xl" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-surface-container-lowest p-10 shadow-[10px_15px_40px_rgba(28,28,24,0.1)] border-b-4 border-primary/20 flex flex-col items-center">
+<div class="font-handdrawn text-7xl uppercase tracking-widest text-on-surface">ME</div>
+</div>
+</div>
+<!-- CATEGORY: HACKATHON (Center Top) -->
+<div class="absolute top-[35%] left-[50%] -translate-x-1/2 -translate-y-1/2 z-20 transform -rotate-2 hover:rotate-0 transition-transform">
+<div class="absolute -top-4 left-1/2 -translate-x-1/2 text-primary z-40 drop-shadow-sm">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="sticky-note torn-edge px-8 py-5">
+<div class="font-headline font-bold text-xl uppercase tracking-widest text-primary">HACKATHON</div>
+</div>
+</div>
+<!-- CATEGORY: EXAM (Center Right) -->
+<div class="absolute top-[50%] right-[25%] -translate-y-1/2 z-20 transform rotate-3 hover:rotate-0 transition-transform">
+<div class="absolute -top-4 left-1/2 -translate-x-1/2 text-primary z-40 drop-shadow-sm">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-surface-container-high ruled-paper px-10 py-5 shadow-lg min-w-[140px] text-center border-l-4 border-primary/20">
+<div class="font-headline font-bold text-xl uppercase tracking-widest text-primary">EXAM</div>
+</div>
+</div>
+<!-- CATEGORY: PERSONAL (Center Left) -->
+<div class="absolute top-[50%] left-[25%] -translate-y-1/2 z-20 transform -rotate-1 hover:rotate-0 transition-transform">
+<div class="absolute -top-4 left-1/2 -translate-x-1/2 text-primary z-40 drop-shadow-sm">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-white punched-paper pl-10 pr-6 py-6 shadow-lg border-l-2 border-primary/10">
+<div class="font-headline font-bold text-xl uppercase tracking-widest text-primary">PERSONAL</div>
+</div>
+</div>
+<!-- CATEGORY: OTHER (Center Bottom) -->
+<div class="absolute bottom-[25%] left-[55%] -translate-x-1/2 z-20 transform rotate-2 hover:rotate-0 transition-transform">
+<div class="absolute -top-4 left-1/2 -translate-x-1/2 text-primary z-40 drop-shadow-sm">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="sticky-note px-10 py-5 rotate-1">
+<div class="font-headline font-bold text-xl uppercase tracking-widest text-primary">OTHER</div>
+</div>
+</div>
+<!-- TASKS: From HACKATHON -->
+<div class="absolute top-[15%] left-[30%] z-20 transform -rotate-3 hover:rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="paper-slip p-5 w-52 border-t-4 border-primary/30">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">HACKZION HACKATHON</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Apr 9, 12:00AM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">HACKATHON</div>
+</div>
+</div>
+<div class="absolute top-[15%] right-[15%] z-20 transform rotate-2 hover:-rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="paper-slip p-5 w-52 border-t-4 border-primary/30">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">NEXIFY '26</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Apr 17, 12:00AM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">HACKATHON</div>
+</div>
+</div>
+<!-- TASKS: From EXAM -->
+<div class="absolute top-[25%] right-[5%] z-20 transform -rotate-2 hover:rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-surface-container-high ruled-paper p-5 w-52 shadow-md border-r-2 border-primary/10">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">MATH EXAM</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Apr 9, 4:00PM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">EXAM</div>
+</div>
+</div>
+<div class="absolute bottom-[30%] right-[5%] z-20 transform rotate-1 hover:-rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-surface-container-high ruled-paper p-5 w-52 shadow-md border-r-2 border-primary/10">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">MATH EXAM</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Mar 22, 9:00AM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">EXAM</div>
+</div>
+</div>
+<!-- TASKS: From PERSONAL -->
+<div class="absolute top-[28%] left-[5%] z-20 transform -rotate-6 hover:rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-white punched-paper pl-10 pr-5 py-5 w-52 shadow-md border-l-2 border-primary/10">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">5KM RUNNING</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Mar 22, 5:00AM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">PERSONAL</div>
+</div>
+</div>
+<div class="absolute bottom-[20%] left-[5%] z-20 transform rotate-4 hover:-rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="bg-white punched-paper pl-10 pr-5 py-5 w-52 shadow-md border-l-2 border-primary/10">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">ACHARYA FEST</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Invalid Date</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/10 text-primary inline-block">PERSONAL</div>
+</div>
+</div>
+<!-- TASKS: From OTHER -->
+<div class="absolute bottom-[5%] left-[30%] z-20 transform -rotate-1 hover:rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="sticky-note torn-edge p-5 w-52">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">TEST_PROBE</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Invalid Date</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/20 text-primary inline-block">OTHER</div>
+</div>
+</div>
+<div class="absolute bottom-[5%] right-[20%] z-20 transform rotate-3 hover:-rotate-1 transition-transform cursor-pointer">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-primary z-40">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">push_pin</span>
+</div>
+<div class="sticky-note torn-edge p-5 w-52">
+<div class="font-headline font-bold text-sm uppercase tracking-tight">VINCIAPEST</div>
+<div class="font-body italic text-xs text-on-surface/70 mt-1">Apr 10, 12:00AM</div>
+<div class="mt-3 text-[9px] font-label font-bold uppercase px-1.5 py-0.5 bg-primary/20 text-primary inline-block">OTHER</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Contextual FAB -->
+<button class="fixed bottom-8 right-8 z-50 bg-primary text-on-primary p-4 shadow-xl active:scale-95 transition-all flex items-center gap-2 group">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+<span class="font-headline uppercase text-sm tracking-widest hidden group-hover:inline">New Goal</span>
+</button>
+</body></html>
