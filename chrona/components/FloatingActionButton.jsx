@@ -1,5 +1,5 @@
 // ============================================================
-// FloatingActionButton.jsx — Bottom-right FAB for new goals
+// FloatingActionButton.jsx — Opens the add-item modal
 // ============================================================
 
 'use client';

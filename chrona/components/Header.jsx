@@ -1,16 +1,12 @@
 // ============================================================
-// Header.jsx — Top app bar with nav tabs and action icons
+// Header.jsx — Top bar with nav tabs and view switching
 // ============================================================
 
 'use client';
 
-import { useState } from 'react';
-
 const NAV_TABS = ['Today', 'Calendar', 'Habits', 'Journal'];
 
-export default function Header() {
-  const [activeTab, setActiveTab] = useState('Today');
-
+export default function Header({ activeView, onViewChange }) {
   return (
     <header
       id="header-bar"
@@ -21,7 +17,6 @@ export default function Header() {
         borderBottom: '1px solid rgba(0,0,0,0.05)',
       }}
     >
-      {/* Left: Title + Nav */}
       <div className="flex items-center gap-8">
         <h1
           className="text-2xl font-bold uppercase tracking-tighter"
@@ -29,7 +24,6 @@ export default function Header() {
         >
           My Schedule
         </h1>
-
         <nav
           className="hidden md:flex gap-6 uppercase tracking-tighter text-sm"
           style={{ fontFamily: 'Space Grotesk, sans-serif' }}
@@ -38,14 +32,12 @@ export default function Header() {
             <NavTab
               key={tab}
               label={tab}
-              isActive={tab === activeTab}
-              onClick={() => setActiveTab(tab)}
+              isActive={tab === activeView}
+              onClick={() => onViewChange(tab)}
             />
           ))}
         </nav>
       </div>
-
-      {/* Right: Action Icons */}
       <div className="flex items-center gap-4">
         <HeaderIcon icon="push_pin" />
         <HeaderIcon icon="settings" />
@@ -54,7 +46,6 @@ export default function Header() {
   );
 }
 
-// ---- Nav tab button ----
 function NavTab({ label, isActive, onClick }) {
   return (
     <button
@@ -64,15 +55,12 @@ function NavTab({ label, isActive, onClick }) {
       style={{
         color: isActive ? '#ad170c' : '#1c1c18',
         opacity: isActive ? 1 : 0.7,
+        border: 'none',
         borderBottom: isActive ? '2px solid #ad170c' : '2px solid transparent',
-        fontFamily: 'Space Grotesk, sans-serif',
         background: 'none',
         cursor: 'pointer',
-        border: 'none',
-        borderBottomWidth: '2px',
-        borderBottomStyle: 'solid',
-        borderBottomColor: isActive ? '#ad170c' : 'transparent',
-        paddingBottom: '4px',
+        fontFamily: 'inherit',
+        fontSize: 'inherit',
       }}
     >
       {label}
@@ -80,19 +68,11 @@ function NavTab({ label, isActive, onClick }) {
   );
 }
 
-// ---- Header icon button ----
 function HeaderIcon({ icon }) {
   return (
     <button
       className="material-symbols-outlined transition-transform hover:rotate-1"
-      style={{
-        color: '#1c1c18',
-        opacity: 0.7,
-        background: 'none',
-        cursor: 'pointer',
-        border: 'none',
-        fontSize: '24px',
-      }}
+      style={{ color: '#1c1c18', opacity: 0.7, background: 'none', cursor: 'pointer', border: 'none' }}
     >
       {icon}
     </button>

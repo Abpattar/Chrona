@@ -1,12 +1,10 @@
 // ============================================================
-// CategoryNode.jsx — Category label node on the mind map
-// Renders different visual styles per category type
+// CategoryNode.jsx — Category label with style-specific visuals
 // ============================================================
 
 'use client';
 
 export default function CategoryNode({ category }) {
-  const styleClass = getCategoryCardClass(category.style);
   const rotation = category.rotation;
 
   return (
@@ -26,11 +24,8 @@ export default function CategoryNode({ category }) {
         e.currentTarget.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
       }}
     >
-      {/* Push Pin */}
       <CategoryPin />
-
-      {/* Category Card — styled by type */}
-      <div className={styleClass}>
+      <div className={getCategoryClass(category.style)}>
         <div
           className="font-bold text-xl uppercase tracking-widest"
           style={{ fontFamily: 'Space Grotesk, sans-serif', color: '#ad170c' }}
@@ -42,7 +37,6 @@ export default function CategoryNode({ category }) {
   );
 }
 
-// ---- Pin icon for categories ----
 function CategoryPin() {
   return (
     <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-40 drop-shadow-sm">
@@ -56,20 +50,13 @@ function CategoryPin() {
   );
 }
 
-// ---- Map category style → CSS classes ----
-function getCategoryCardClass(style) {
+function getCategoryClass(style) {
   const base = 'px-8 py-5 min-w-[140px] text-center';
-
   switch (style) {
-    case 'hackathon':
-      return `${base} sticky-note torn-edge`;
-    case 'exam':
-      return `${base} ruled-paper shadow-lg`;
-    case 'personal':
-      return `${base} punched-paper shadow-lg`;
-    case 'other':
-      return `${base} sticky-note`;
-    default:
-      return `${base} bg-white shadow-md`;
+    case 'hackathon': return `${base} sticky-note torn-edge`;
+    case 'exam':      return `${base} ruled-paper shadow-lg bg-[#ebe8e1]`;
+    case 'personal':  return `${base} punched-paper pl-10 pr-6 py-6 shadow-lg bg-white`;
+    case 'other':     return `${base} sticky-note`;
+    default:          return `${base} bg-white shadow-md`;
   }
 }

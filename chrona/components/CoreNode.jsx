@@ -1,5 +1,5 @@
 // ============================================================
-// CoreNode.jsx — The central "ME" node
+// CoreNode.jsx — Central "ME" node (opaque background)
 // ============================================================
 
 'use client';
@@ -9,19 +9,12 @@ export default function CoreNode() {
     <div
       id="core-node-me"
       data-no-pan="true"
-      className="relative z-30 transition-transform cursor-move"
+      className="relative z-20 transition-transform cursor-move"
       style={{ transform: 'rotate(1deg)' }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'rotate(0deg)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'rotate(1deg)';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = 'rotate(0deg)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = 'rotate(1deg)'; }}
     >
-      {/* Push Pin */}
       <PushPin size="text-4xl" />
-
-      {/* Card */}
       <div
         className="p-10 flex flex-col items-center"
         style={{
@@ -41,16 +34,12 @@ export default function CoreNode() {
   );
 }
 
-// ---- Push Pin Icon ----
 function PushPin({ size = 'text-2xl' }) {
   return (
     <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-40 drop-shadow-md">
       <span
         className={`material-symbols-outlined ${size}`}
-        style={{
-          color: '#ad170c',
-          fontVariationSettings: "'FILL' 1",
-        }}
+        style={{ color: '#ad170c', fontVariationSettings: "'FILL' 1" }}
       >
         push_pin
       </span>

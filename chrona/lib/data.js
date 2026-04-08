@@ -1,8 +1,7 @@
 // ============================================================
-// data.js — Seed data matching the Stitch reference exactly
+// data.js — Seed data matching the Stitch reference
 // ============================================================
 
-// ---- Categories (positioned around the "ME" center) --------
 export const defaultCategories = [
   {
     id: 'hackathon',
@@ -34,9 +33,7 @@ export const defaultCategories = [
   },
 ];
 
-// ---- Tasks (positioned around their parent category) --------
 export const defaultTasks = [
-  // Hackathon tasks
   {
     id: 'hackzion',
     categoryId: 'hackathon',
@@ -53,8 +50,6 @@ export const defaultTasks = [
     position: { x: 72, y: 12 },
     rotation: 2,
   },
-
-  // Exam tasks
   {
     id: 'math-exam-1',
     categoryId: 'exam',
@@ -71,8 +66,6 @@ export const defaultTasks = [
     position: { x: 88, y: 65 },
     rotation: 1,
   },
-
-  // Personal tasks
   {
     id: '5km-running',
     categoryId: 'personal',
@@ -89,8 +82,6 @@ export const defaultTasks = [
     position: { x: 8, y: 75 },
     rotation: 4,
   },
-
-  // Other tasks
   {
     id: 'test-probe',
     categoryId: 'other',
