@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global Reset ──────────────────────────────── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  height: 100%;
+}
+
+body {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  color: #e2e8f0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: radial-gradient(ellipse at top, #0f1c3f 0%, #070d1f 60%, #050a18 100%);
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+/* ─── Utility: Glass Panel ──────────────────────── */
+@layer utilities {
+  .glass {
+    background: rgba(15, 25, 60, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-strong {
+    background: rgba(15, 25, 60, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* ─── Scrollbar ─────────────────────────────────── */
+@media (min-width: 640px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #070d1f;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(77, 163, 255, 0.3);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(77, 163, 255, 0.5);
+  }
+}
+
+@media (max-width: 639px) {
+  ::-webkit-scrollbar {
+    width: 0;
+  }
+}
+
+/* ─── React Flow Overrides (Dark Theme) ─────────── */
+.react-flow__background {
+  background-color: transparent !important;
+}
+
+.react-flow__controls {
+  background: rgba(15, 25, 60, 0.8) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  overflow: hidden !important;
+}
+
+.react-flow__controls button {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #94a3b8 !important;
+  fill: #94a3b8 !important;
+  width: 32px !important;
+  height: 32px !important;
+  transition: all 0.15s ease !important;
+}
+
+.react-flow__controls button:last-child {
+  border-bottom: none !important;
+}
+
+.react-flow__controls button:hover {
+  background: rgba(77, 163, 255, 0.15) !important;
+  fill: #4da3ff !important;
+  color: #4da3ff !important;
+}
+
+.react-flow__minimap {
+  background: rgba(15, 25, 60, 0.8) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.react-flow__edge path {
+  stroke-width: 2 !important;
+  opacity: 0.85 !important;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+/* Prevent page scroll when interacting with the mindmap */
+.react-flow__pane {
+  touch-action: none !important;
+}
