@@ -1,0 +1,40 @@
+{
+  "project": "Chrona",
+  "deliverable": "Architecture pack plus progressive application implementation",
+  "created_on": "2026-10-15",
+  "updated_on": "2026-10-15",
+  "status": "Implementation started. P01 complete on Ubuntu; P02 in progress.",
+  "phase": "Sequential implementation, one OpenCode agent, one repository",
+  "source_documents": [
+    "source-references/Chrona_Project_Requirements_Document.pdf",
+    "source-references/Universal_Software_Development_Master_Prompt_V2.pdf"
+  ],
+  "implementation_agent": "One OpenCode agent, sequential phases, one repository",
+  "implementation_phases": 8,
+  "completed_phases": ["P01"],
+  "document_manifest": "ARCHIVE_INVENTORY.md",
+  "implementation": {
+    "app_source": "app/src/main/kotlin/com/chrona/app",
+    "build_entry_points": ["scripts/verify.sh", "scripts/verify.ps1"],
+    "verified_toolchain": {
+      "jdk": "17",
+      "gradle": "8.13",
+      "agp": "8.13.2",
+      "kotlin": "2.2.21",
+      "ksp": "2.2.21-2.0.5",
+      "compose_bom": "2026.06.00",
+      "navigation_compose": "2.9.8",
+      "lifecycle": "2.10.0",
+      "room": "2.8.5",
+      "min_sdk": 26,
+      "compile_sdk": 36,
+      "target_sdk": 36,
+      "version_source": "gradle/libs.versions.toml"
+    },
+    "open_blockers": [
+      "Windows clean-clone build/test/lint has not been run (no Windows host available)",
+      "Emulator/device instrumentation has not been run (/dev/kvm not accessible to the build user)"
+    ]
+  },
+  "important_note": "No backend, no remote AI, no provider secrets, and no participant study exist. See PROGRESS.md for exactly what was run and verified."
+}
