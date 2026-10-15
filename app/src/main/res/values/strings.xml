@@ -8,6 +8,4 @@
     <string name="nav_board">Board</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
-
-    <string name="phase_banner">Foundation build · P02 adds tasks and storage</string>
 </resources>

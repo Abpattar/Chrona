@@ -18,15 +18,19 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.chrona.app.di.AppContainer
 import com.chrona.app.ui.board.BoardScreen
 import com.chrona.app.ui.history.HistoryScreen
 import com.chrona.app.ui.schedule.ScheduleScreen
 import com.chrona.app.ui.settings.SettingsScreen
-import com.chrona.app.ui.today.TodayScreen
+import com.chrona.app.ui.today.TodayRoute
 
 /** Navigation shell: five top-level destinations, all peers (UI-001). */
 @Composable
-fun ChronaNavHost(navController: NavHostController = rememberNavController()) {
+fun ChronaNavHost(
+    container: AppContainer,
+    navController: NavHostController = rememberNavController(),
+) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
@@ -37,12 +41,7 @@ fun ChronaNavHost(navController: NavHostController = rememberNavController()) {
                     NavigationBarItem(
                         selected = currentRoute == destination.route,
                         onClick = { navController.navigateToTopLevel(destination) },
-                        icon = {
-                            Icon(
-                                imageVector = destination.icon,
-                                contentDescription = null,
-                            )
-                        },
+                        icon = { Icon(imageVector = destination.icon, contentDescription = null) },
                         label = { Text(stringResource(destination.labelRes)) },
                         modifier = Modifier.semantics { testTag = "nav_${destination.route}" },
                     )
@@ -55,7 +54,9 @@ fun ChronaNavHost(navController: NavHostController = rememberNavController()) {
             startDestination = ChronaDestination.TODAY.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(ChronaDestination.TODAY.route) { TodayScreen() }
+            composable(ChronaDestination.TODAY.route) {
+                TodayRoute(container)
+            }
             composable(ChronaDestination.SCHEDULE.route) { ScheduleScreen() }
             composable(ChronaDestination.BOARD.route) { BoardScreen() }
             composable(ChronaDestination.HISTORY.route) { HistoryScreen() }
@@ -65,8 +66,8 @@ fun ChronaNavHost(navController: NavHostController = rememberNavController()) {
 }
 
 /**
- * Top-level destinations keep a single entry on the back stack, so switching
- * tabs never grows an unbounded history the user has to back out of.
+ * Top-level destinations keep a single entry on the back stack, so switching tabs never grows
+ * an unbounded history the user has to back out of.
  */
 private fun NavHostController.navigateToTopLevel(destination: ChronaDestination) {
     navigate(destination.route) {
