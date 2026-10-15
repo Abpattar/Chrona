@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Chrona</string>
+
+    <!-- Navigation destinations -->
+    <string name="nav_today">Today</string>
+    <string name="nav_schedule">Schedule</string>
+    <string name="nav_board">Board</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="phase_banner">Foundation build · P02 adds tasks and storage</string>
+</resources>

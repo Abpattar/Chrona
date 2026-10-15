@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Theme.Chrona only paints the pre-Compose window background so launch is
+        seamless. System bar colours and icon contrast are owned by
+        enableEdgeToEdge() plus the Compose design system (ui/design/Theme.kt),
+        so there is exactly one source of truth and no API-level style split.
+    -->
+    <style name="Theme.Chrona" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/chrona_paper</item>
+    </style>
+</resources>

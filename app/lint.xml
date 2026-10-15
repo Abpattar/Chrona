@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+        Chrona treats lint as a gate, not advice: accessibility and localisation
+        problems fail the build because they are confirmed MUST requirements
+        (ACC-001, MASTER_REQUIREMENTS.md §6).
+    -->
+    <issue id="ContentDescription" severity="error" />
+    <issue id="DuplicateStrings" severity="error" />
+    <issue id="HardcodedText" severity="error" />
+    <issue id="LabelFor" severity="error" />
+
+    <!--
+        "A newer version is available" is informational on purpose. Chrona pins a
+        deliberately API-36 matrix (see DECISIONS.md ADR-018/ADR-018a); upgrading
+        AndroidX past these pins requires compileSdk 37 + AGP 9.x and therefore an
+        owner-approved decision, not an automatic dependency bump.
+    -->
+    <issue id="GradleDependency" severity="informational" />
+    <issue id="AndroidGradlePluginVersion" severity="informational" />
+    <issue id="NewerVersionAvailable" severity="informational" />
+
+    <!--
+        allowBackup=false plus data-extraction excludes are deliberate MVP
+        decisions, not oversights: task data stays on device by design.
+    -->
+    <issue id="AllowBackup" severity="informational" />
+
+    <issue id="UnusedResources" severity="warning" />
+</lint>

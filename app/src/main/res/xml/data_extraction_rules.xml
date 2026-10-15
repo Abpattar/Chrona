@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    P01 backup/data-extraction policy: opt out of cloud backup and device transfer
+    so private task data is not copied off the device by default. A deliberate,
+    user-initiated export path is provided instead (P07).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

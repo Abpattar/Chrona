@@ -1,0 +1,32 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+release/
+
+# IDE (user-local only)
+.idea/
+*.iml
+.kotlin/
+.DS_Store
+
+# Signing material must never enter the repository
+*.jks
+*.keystore
+keystore.properties
+
+# Chrona user data exports and local databases
+*.db
+*.sqlite
+*.sqlite3
+chrona-export*.json
+
+# Verification artefacts that may contain user content
+screenshots/
+artifacts/

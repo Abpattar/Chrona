@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A pinned note: paper rectangle plus pin head. Matches APP_VISUAL_SPEC.md. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFE9C46A"
+        android:pathData="M34,32 h40 a4,4 0 0 1 4,4 v40 a4,4 0 0 1 -4,4 h-40 a4,4 0 0 1 -4,-4 v-40 a4,4 0 0 1 4,-4 z" />
+    <path
+        android:fillColor="#FF6D6875"
+        android:pathData="M54,24 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 z" />
+    <path
+        android:fillColor="#FF4A4E69"
+        android:pathData="M42,48 h24 v4 h-24 z" />
+    <path
+        android:fillColor="#FF4A4E69"
+        android:pathData="M42,58 h18 v4 h-18 z" />
+    <path
+        android:fillColor="#FFC1666B"
+        android:pathData="M42,68 h12 v4 h-12 z" />
+</vector>
