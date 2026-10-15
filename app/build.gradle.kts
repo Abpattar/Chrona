@@ -40,6 +40,13 @@ android {
         }
     }
 
+    // Exported schemas are the input to migration tests from P02 onward. Never suppress this.
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+        arg("room.incremental", "true")
+        arg("room.generateKotlin", "true")
+    }
+
     buildFeatures {
         compose = true
     }
