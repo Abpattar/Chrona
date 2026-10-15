@@ -3,6 +3,63 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-15 — P02 Local data and first end-to-end task slice
+
+### Added
+- `domain/model/` — canonical value types from `SHARED_CONTRACT.md`: `TaskId`, `EventId`,
+  `RelationId`, `RevisionId`, `Priority`, `TaskStatus`, `RelationType`, `Flexibility`,
+  `TaskOrigin`, plus `Task`, `CalendarEvent`, `TaskRelationship`, `TimeWindow`/`TimeRange`,
+  `UserPreferences`, and the `Outcome`/`Failure` families used instead of exceptions.
+- `domain/task/TaskValidator` — field-level rules with plain-language reasons, returning all
+  problems at once so a correction UI can show them together.
+- `domain/task/TaskStatusMachine` — the only place a status may change. There is deliberately
+  no transition a card dismissal could map onto.
+- `domain/relation/RelationGraph` — canonical `DEPENDS_ON` direction, self-edge rejection,
+  cycle detection and a deterministic topological order.
+- `data/local/` — Room database v1 (tasks, calendar_events, task_relationships,
+  task_status_log) with foreign keys, indices, exported schema at `app/schemas/` and
+  **no** destructive-migration fallback.
+- `data/local/EntityMappers` — the single boundary between storage rows and domain records.
+- `data/repository/` — `TaskRepository`, `EventRepository`, `RelationshipRepository` and their
+  Room implementations, all returning typed outcomes.
+- `usecase/` — create, list, edit, start, complete, postpone, skip, archive, restore, delete,
+  and manual fixed-commitment create/list/delete.
+- `di/AppContainer` — manual composition root with injectable clock and ID generator.
+- `ui/taskeditor/TaskEditorSheet` — typed creation: title, details, duration, due date,
+  priority. Typing is the complete first path; P03 voice will enter here.
+- `ui/today/` — Today list reading the same repository as every other surface, with
+  start/done/later actions, explicit priority and status text, and a fixed-commitment section.
+- `ui/design/PriorityStyle` — yellow/blue/green note accents always paired with a text label.
+
+### Changed
+- `MainActivity` now builds the UI from `AppContainer`; `ChronaApplication` owns it lazily.
+- `ChronaNavHost` takes the container and hosts a real Today surface.
+- `app/build.gradle.kts` exports Room schemas for migration testing.
+
+### Fixed during P02
+- **Idempotence.** Completing an already-completed task bumped the version and wrote a second
+  History row. Now short-circuited in the use case (the domain rule) and again inside the
+  repository transaction (the write boundary P06 handlers reach directly).
+- **Domain row mismatch.** Title trimming happened only in the storage mapper, so the in-memory
+  record and the stored row disagreed. Trimming now happens at the use-case boundary.
+- **Room could not process `TaskRelationshipEntity`** because domain mappers shared the entity
+  file. Mapping moved to `data/local/EntityMappers.kt`.
+- **Task listing had no total order.** Replaced with an explicit total `ORDER BY` plus a
+  repository-side limit.
+- **`RelationshipRepository.delete` deleted by source task**, not by relation id. Added a
+  dedicated `deleteById` query.
+
+### Verification (P02)
+Exact commands and per-test results are in `PROGRESS.md` → "P02". Summary:
+
+| Layer | Cases | Result |
+|---|---|---|
+| JVM unit (validators, state machine, relations, use cases) | 65 | PASS |
+| Room integration (real SQLite via Robolectric) | 17 | PASS |
+| `scripts/verify.sh` (clean + assemble + unit tests + lint) | — | PASS |
+| Android lint | — | PASS, 0 errors / 0 warnings |
+| Compose instrumentation | 9 | NOT RUN — emulator boots but `am start` is rejected |
+
 ## 2026-10-15 — P01 Repository foundation and cross-OS build gate
 
 ### Added

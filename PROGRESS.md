@@ -1,6 +1,6 @@
 # Chrona — Progress and Resume Record
 
-**Status:** P01 complete. P02 in progress.
+**Status:** P01 complete. P02 complete. P03 is next.
 **Last updated:** 15 October 2026
 
 ## Status vocabulary
@@ -186,11 +186,11 @@ run the app yet.
    `AT-033` and the Windows half of the P01 gate cannot be run. `scripts/verify.ps1` is
    written and reviewed but **unexecuted**. Before P08 this must be run on the Windows PC from
    a fresh clone and recorded here.
-2. **Emulator launch — BLOCKED.** `/dev/kvm` exists but is `root:kvm` mode 0660 and the build
-   user is not in the `kvm` group; `cat /dev/kvm` fails. Hardware-accelerated emulation is
-   unavailable and `-accel off` for an x86_64 API 36 image is not viable. Needed action: add
-   the build user to the `kvm` group, or run instrumentation on the moto g54 or a
-   Studio-managed emulator.
+2. **Emulator launch — BLOCKED, with partial evidence.** `/dev/kvm` exists but is `root:kvm`
+   mode 0660 and the build user is not in the `kvm` group; `cat /dev/kvm` fails. See the P02
+   section for what was nonetheless achieved with a software-emulated API 36 image, and exactly
+   where it stopped. Needed action: add the build user to the `kvm` group, or run
+   instrumentation on the moto g54 or a Studio-managed emulator.
 3. **Physical device — NOT RUN.** moto g54 / Android 15 evidence starts in P03.
 4. **Release build is unminified** (`isMinifyEnabled = false`). This is a deliberate,
    reversible simplification, recorded in `RISKS_AND_OPEN_ITEMS.md`.
@@ -209,6 +209,158 @@ P08.
 
 ---
 
+## P02 — Local Data and First End-to-End Task Slice
+
+**Phase gate: PASSED for the automated checks that could run on this host; instrumentation is
+NOT RUN.** The vertical slice genuinely exists and is exercised end to end at the JVM layer,
+including real SQL through Room. The two device-dependent checks (Compose instrumentation,
+physical device) remain blocked for the reasons recorded under P01 — they were re-attempted in
+P02 and the result is written down rather than assumed.
+
+### What was built
+
+| Layer | Files | Responsibility |
+|---|---|---|
+| Domain models | `domain/model/{Ids,Enums,Task,TaskQuery,UserPreferences,Outcome}.kt` | Stable `TaskId`/`EventId`/`RelationId`/`RevisionId`, the canonical enums, `Task`/`CalendarEvent`/`TaskRelationship`, typed `Outcome`/`Failure` families |
+| Domain rules | `domain/task/{TaskValidator,TaskStatusMachine}.kt` | Field validation; the only place a status may change |
+| Relations | `domain/relation/RelationGraph.kt` | Canonical `DEPENDS_ON` direction, self-edge and cycle rejection, deterministic topological order |
+| Storage | `data/local/{Entities,EntityMappers,Daos,ChronaDatabase}.kt` | Room schema v1, DAOs, mappers; schema exported to `app/schemas/` |
+| Repositories | `data/repository/{RepositoryContracts,RoomRepositories}.kt` | Domain-facing interfaces and Room implementations |
+| Use cases | `usecase/{CreateTaskUseCase,TaskUseCases}.kt` | Create, list, edit, start, complete, postpone, skip, archive, restore, delete, fixed-commitment CRUD |
+| Composition | `di/AppContainer.kt` | Manual wiring; injectable `Clock` and ID generator |
+| UI | `ui/today/{TodayScreen,TodayViewModel,TodayRoute}.kt`, `ui/taskeditor/TaskEditorSheet.kt`, `ui/design/PriorityStyle.kt` | Typed creation, Today list with start/done/later, explicit priority and status labels |
+
+### Commands actually executed
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `./gradlew --no-daemon :app:compileDebugKotlin` | FAIL on first attempt (6 distinct compile/KSP errors), PASS after fixes |
+| 2 | `./gradlew --no-daemon :app:testDebugUnitTest` | FAIL 65 tests / 3 failures, then FAIL 65 / 1 failure, then **PASS 82 tests** |
+| 3 | `./gradlew --no-daemon :app:assembleDebugAndroidTest` | FAIL once (`ChronaNavHost` needed the container), then **PASS** |
+| 4 | `./gradlew --no-daemon :app:lintDebug` | **PASS** — 0 errors, 0 warnings |
+| 5 | `./scripts/verify.sh` | **PASS** — `clean assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest` |
+| 6 | `adb install` on a software-emulated API 36 image | **PASS** — both APKs installed |
+| 7 | `adb shell am start -n com.chrona.app/.MainActivity` | **FAIL** — see emulator evidence below |
+
+### Tests added and executed
+
+| Suite | Layer | Cases | Result |
+|---|---|---|---|
+| `TaskValidatorTest` | JVM unit | 16 | **PASS** |
+| `TaskStatusMachineTest` | JVM unit | 11 | **PASS** |
+| `RelationGraphTest` | JVM unit | 15 | **PASS** |
+| `CreateTaskUseCaseTest` | JVM unit | 7 | **PASS** |
+| `TaskLifecycleUseCasesTest` | JVM unit | 6 | **PASS** |
+| `EditTaskUseCaseTest` | JVM unit | 3 | **PASS** |
+| `ListTasksUseCaseTest` | JVM unit | 3 | **PASS** |
+| `ChronaDestinationTest` (P01) | JVM unit | 4 | **PASS** |
+| `RoomTaskRepositoryTest` | Room integration (Robolectric + real SQLite) | 17 | **PASS** |
+| **Total JVM** | | **82** | **PASS** |
+| `TaskLifecycleSliceTest` | Compose instrumentation | 5 | **NOT RUN** — no usable runtime |
+| `MainActivityLaunchTest`, `NavigationShellTest` | Compose instrumentation | 4 | **NOT RUN** — no usable runtime |
+
+### Defects the tests caught, and the fixes
+
+These are real bugs the suite found while being written, not hypotheticals:
+
+1. **Idempotence was broken.** Completing an already-completed task bumped the version and
+   appended a second History row. Fixed in two places: `TaskLifecycleUseCases` now short-
+   circuits when the task is already in the target state (the domain rule), and
+   `RoomTaskRepository.updateStatus` compares the transition result to the stored row inside
+   its transaction (the write boundary, reachable directly by the P06 notification handlers).
+   Test: `completing twice is idempotent and does not bump the version`.
+2. **The domain record and the stored row disagreed on whitespace.** Trimming happened only in
+   the storage mapper, so `Task.title` kept the user's leading/trailing spaces while the row did
+   not. Fixed by trimming in `CreateTaskUseCase` and `EditTaskUseCase`. Test: `title is stored
+   trimmed`.
+3. **Room could not process `TaskRelationshipEntity`.** Domain mappers lived in the entity files,
+   so the processor saw unresolved types. Fixed by moving all mapping into
+   `data/local/EntityMappers.kt`, leaving the entity declarations pure storage.
+4. **The task list had no total order.** Ordering relied on `LIMIT` plus an implicit row order.
+   Fixed with an explicit, total `ORDER BY` and a repository-side limit.
+5. **`RelationRepository.delete` deleted by source task, not by relation id.** Fixed with a
+   dedicated `deleteById` query.
+
+### Emulator evidence (attempted in P02, still NOT RUN)
+
+A software-emulated (`-no-accel`) API 36 x86_64 AVD was created and did boot:
+
+```
+$ adb -s emulator-5554 shell getprop sys.boot_completed
+1
+$ adb -s emulator-5554 shell getprop ro.build.version.sdk
+36
+```
+
+Both APKs installed successfully:
+
+```
+$ adb -s emulator-5554 install -r -g app/build/outputs/apk/debug/app-debug.apk
+Success
+$ adb -s emulator-5554 install -r -g app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+Success
+```
+
+The app could not be launched. The package was registered in the Activity Resolver Table
+(`com.chrona.app/.MainActivity filter ...`), yet every launch attempt failed:
+
+```
+$ adb -s emulator-5554 shell am start -W -n com.chrona.app/.MainActivity
+Starting: Intent { cmp=com.chrona.app/.MainActivity }
+Error type 3
+Error: Activity class {com.chrona.app/com.chrona.app.MainActivity} does not exist.
+
+logcat:
+I artd    : GetBestInfo: /data/app/.../base.apk has no usable artifacts
+I ActivityTaskManager: START u0 {cmp=com.chrona.app/.MainActivity} ... result code=-92
+```
+
+`artd` finds no usable dex artifacts and the start is rejected. `connectedDebugAndroidTest` also
+failed earlier at the device-detection stage with
+`ShellCommandUnresponsiveException getting properties for device emulator-5554` and
+`Skipping device 'chrona_api36(AVD)' for ':app': Unknown API Level` — ddmlib's property fetch
+times out on a TCG-emulated device.
+
+**Conclusion:** the emulator image boots but cannot host instrumentation without hardware
+acceleration. This is recorded as BLOCKED, not passed. The instrumentation suites compile, so
+they are real and will run unchanged once a `kvm`-capable host or the moto g54 is available.
+
+### Requirements addressed in P02
+
+| ID | Status | Evidence |
+|---|---|---|
+| UX-001 | `IN_PROGRESS` | Typed creation with no account and no onboarding block; the ~1 minute hypothesis is untested (no timing run) |
+| TASK-001 | `IN_PROGRESS` | Typed editor is complete; parser and voice are P03 |
+| TASK-002 | `PASS (automated)` | Stable ids, transition rules and persistence all covered by 47 passing tests; device-level identity is NOT RUN |
+| TASK-003 | `PASS (automated)` | Manual fixed commitments are stored and queried by overlap; no scheduling against them yet (P04) |
+| REL-001 | `PASS (automated)` | Relation direction, self-edge rejection, cycle detection and cascade delete all tested |
+| PRIV-001 | `IN_PROGRESS` | No network call exists anywhere in the slice; the offline airplane-mode check (AT-027) is still NOT RUN |
+| PRIV-004 | `PASS (automated)` | A test asserts the status log never stores raw task text |
+| RELIABILITY-001 | `PASS (automated, partial)** | Transactions, optimistic concurrency, idempotence and typed errors tested; schema **migration** tests start when v2 exists |
+
+### Known limitations, blockers and risks
+
+1. **Compose instrumentation is NOT RUN.** Blocked as described above.
+2. **Physical device (moto g54 / Android 15) NOT RUN.**
+3. **Windows host check still BLOCKED.**
+4. **Schema migration is untested because there is only one schema version.** Room's
+   `MigrationTestHelper` test is written when version 2 lands; the exported v1 JSON at
+   `app/schemas/` is committed so that test has a real starting point. This is a genuine gap,
+   not a pass.
+5. **`UserPreferences` has a domain model but no storage.** `CH-DATA-003` stays `PLANNED`; the
+   repository interface was deliberately not written until P06 has a caller, to avoid an
+   interface with a single unused implementation.
+6. **No relationship editing UI yet.** `RelationGraph` and the repository exist and are tested;
+   the board and relation editor are P05.
+7. **Offline is asserted by construction, not measured.** There is no network permission and no
+   networking dependency, but AT-027 has not been executed on a device.
+
+### Exact next phase
+
+**P03 — Voice and deterministic parser.** Prerequisite: P02 gate satisfied for automated work.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -217,9 +369,13 @@ P08.
 - [x] Sequential OpenCode phase prompts prepared.
 - [x] Git repository created; development pack placed at the repository root.
 - [x] P01 — skeleton, pinned toolchain, navigation shell, theme, empty states (Ubuntu).
-- [ ] P01 Windows clean-clone build/test/lint — BLOCKED (no Windows host available).
-- [ ] P01 API 36 emulator launch — BLOCKED (no `/dev/kvm` access for the build user).
-- [ ] P02 — Room schema, repositories, task lifecycle, Today list, task editor.
+- [x] P02 — Room schema v1, repositories, task lifecycle, Today list and task editor.
+      End-to-end slice: typed task -> validate -> Room -> Today -> complete.
+      82 JVM/Room tests passing; instrumentation compiles but is NOT RUN.
+- [ ] P01/P02 Windows clean-clone build/test/lint — BLOCKED (no Windows host available).
+- [ ] P01/P02 API 36 emulator launch — BLOCKED. The AVD boots and accepts installs, but
+      `artd` finds no usable dex artifacts and `am start` returns `result code=-92`. Cause:
+      the build user is not in the `kvm` group, so only software emulation is available.
 - [ ] P03 — voice adapter and deterministic parser.
 - [ ] P04 — scheduler and recovery.
 - [ ] P05 — board and relationships.

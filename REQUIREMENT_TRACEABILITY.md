@@ -5,11 +5,11 @@ All entries start `PLANNED` unless marked otherwise; the planning document itsel
 | ID | Requirement; class/priority | Source | Owner / phase | Observable acceptance evidence |
 |---|---|---|---|---|
 | PRJ-001 | Native Android planner; confirmed Must | PRD §§1,18; owner | P01–P08 | `IN_PROGRESS` — debug APK builds; no device/emulator run yet |
-| UX-001 | low-friction first task; confirmed Must | PRD §§3,8,15 | UI/P02 | `PLANNED` (P02) |
-| TASK-001 | typed/voice capture, structured draft and correction; confirmed Must | PRD §§7,9; owner | P02/P03 | `IN_PROGRESS` — typed editor in P02; parser in P03 |
-| TASK-002 | stable identity/status lifecycle; confirmed Must | PRD §§9,19–20 | domain/data/P02 | `IN_PROGRESS` — TaskId routed in P01; model/state machine in P02 |
-| TASK-003 | manual fixed commitments; confirmed Must | owner | P02/P04 | event CRUD and fixed-block schedule tests |
-| REL-001 | typed relation semantics/integrity; confirmed Must | PRD §6 | P02/P05 | relation direction, cycles, delete integrity tests |
+| UX-001 | low-friction first task; confirmed Must | PRD §§3,8,15 | UI/P02 | `PASS (automated)` — typed task created with no account and no onboarding block. The "~1 minute" hypothesis is still unmeasured |
+| TASK-001 | typed/voice capture, structured draft and correction; confirmed Must | PRD §§7,9; owner | P02/P03 | `IN_PROGRESS` — typed path complete and tested; parser, drafts and correction in P03 |
+| TASK-002 | stable identity/status lifecycle; confirmed Must | PRD §§9,19–20 | domain/data/P02 | `PASS (automated)` — 65 unit + 17 Room tests cover identity, transitions, idempotence and persistence. Device-level identity NOT RUN |
+| TASK-003 | manual fixed commitments; confirmed Must | owner | P02/P04 | `IN_PLACE (P02 only)` — CRUD and overlap query tested; scheduling around them is P04 |
+| REL-001 | typed relation semantics/integrity; confirmed Must | PRD §6 | P02/P05 | `PASS (automated)` — direction, self-edge, cycles and cascade delete tested. Board UI is P05 |
 | REL-002 | hard dependency distinct from supportive relationship; confirmed Must | PRD §6.4 | P04/P05 | SUPPORTS doesn't impose order; DEPENDS_ON does |
 | SCHED-001 | deterministic scheduler independent of AI/UI; confirmed Must | PRD §§7,10,19; owner | P04 | pure unit/invariant tests; no Android/Room/parser imports |
 | SCHED-002 | fixed commitments never moved; confirmed Must | PRD §§3,10–11 | P04 | adversarial overlap/recovery scenarios with zero violations |
@@ -23,16 +23,16 @@ All entries start `PLANNED` unless marked otherwise; the planning document itsel
 | NOTIFY-001 | quiet hours, batching, configurable cap, repeat suppression; confirmed Must | PRD §§8,12; owner | P06 | deterministic simulated day/week; cap 2 remains hypothesis |
 | VOICE-001 | tap-to-speak; no always-listening/raw audio retention; confirmed Must | PRD §7; owner | P03/P07 | permission/source audit, cancellation/lifecycle tests and data audit |
 | VOICE-002 | no silent off-device recognition; confirmed Must | owner | P03 | unsupported on-device path leads to typing or disclosed explicit choice |
-| PRIV-001 | local-first, no account/cloud sync; confirmed Must | owner | P02/P07 | `IN_PROGRESS` — backup/transfer disabled (ADR-023); airplane-mode test in P02 |
+| PRIV-001 | local-first, no account/cloud sync; confirmed Must | owner | P02/P07 | `IN_PROGRESS` — no network permission or networking dependency exists in the slice; airplane-mode test (AT-027) NOT RUN |
 | PRIV-002 | no embedded provider secret; confirmed Must | PRD NFR-SEC-001; owner | P01/P07 | `PASS (P01 scope)` — no remote AI exists; source/manifest reviewed. Re-audit in P07 |
 | PRIV-003 | data export/delete and lifecycle consistency; confirmed Must | PRD §§9,17; owner | P07 | export schema and deletion residual checks |
-| PRIV-004 | data minimization, permission disclosure, redacted logs; confirmed Must | PRD §17 | P03/P07 | source/log review, permission denied/revoked tests |
+| PRIV-004 | data minimization, permission disclosure, redacted logs; confirmed Must | PRD §17 | P03/P07 | `PASS (P02 scope)` — a test asserts the status log stores only machine reason codes, never task text |
 | PLAT-001 | test moto g54 Android15; confirmed Must | owner | P03/P06/P07 | actual model/API/build settings and results captured |
 | PLAT-002 | Ubuntu/Windows parity, one repo/pinned toolchain; confirmed Must | PRD §18; owner | P01/P08 | `BLOCKED` — Ubuntu PASS (`scripts/verify.sh`); no Windows host available |
-| UI-001 | Today/Schedule/Board/History/Settings; shared task records; confirmed Must | PRD §§5,15 | P01/P02/P04/P05/P07 | `IN_PROGRESS` — all five destinations exist (P01); device run BLOCKED |
+| UI-001 | Today/Schedule/Board/History/Settings; shared task records; confirmed Must | PRD §§5,15 | P01/P02/P04/P05/P07 | `IN_PROGRESS` — five destinations exist and Today reads the real repository; device run BLOCKED |
 | UI-002 | paper/pins/red thread and priority swatches; confirmed Must | PRD §6; owner | P01/P05 | `IN_PROGRESS` — paper/pin/palette tokens implemented; board is P05 |
 | ACC-001 | scalable text, semantics, reduced motion, board list; confirmed Must | PRD §§6.5,16 | P01/P05/P07 | `IN_PROGRESS` — lint accessibility checks set to error; device review blocked |
-| RELIABILITY-001 | offline core, transactional mutations, safe errors/migrations; confirmed Must | PRD §§16,20 | all | offline, fault-injection, migration and reopen tests |
+| RELIABILITY-001 | offline core, transactional mutations, safe errors/migrations; confirmed Must | PRD §§16,20 | all | `PARTIAL` — transactions, optimistic concurrency, idempotence and typed errors tested. Schema migration untested (only v1 exists); offline NOT RUN |
 | RESEARCH-001 | evaluation metrics and baseline; confirmed Must | PRD §§22–24; owner | P08 | reproducible calculations, scenarios, sample/denominators/limitations |
 | RESEARCH-002 | ethics/consent check before participant study; confirmed Must | owner | P08 | written requirements/approval status; no study while unknown |
 | URE-OPEN-001 | deadline/report/demo/rubric; Open Must resolve for submission | owner says unknown | P08 | confirm through official supervisor/department source |

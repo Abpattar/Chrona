@@ -9,12 +9,12 @@ This repository is the implementation of the approved product in
 [`MASTER_REQUIREMENTS.md`](MASTER_REQUIREMENTS.md), following the canonical contracts in
 [`SHARED_CONTRACT.md`](SHARED_CONTRACT.md).
 
-## Current status — Phase 02 in progress
+## Current status — P01 and P02 complete, P03 next
 
 | Phase | Scope | Status |
 |---|---|---|
-| P01 | Repository foundation, pinned toolchain, navigation shell | **DONE** (see [Gate results](#p01-gate-results)) |
-| P02 | Local data + first end-to-end task slice | **IN PROGRESS** |
+| P01 | Repository foundation, pinned toolchain, navigation shell | **DONE** — builds, tests and lints clean on Ubuntu |
+| P02 | Local data + first end-to-end task slice | **DONE** — typed task → validate → Room → Today → complete |
 | P03 | Voice input and deterministic parser | Not started |
 | P04 | Scheduling and recovery engine | Not started |
 | P05 | Board and relationships | Not started |
@@ -22,13 +22,26 @@ This repository is the implementation of the approved product in
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
 
-**What works today:** the app builds, launches into Today, and all five top-level
-destinations (Today, Schedule, Board, History, Settings) open with meaningful empty states.
-Task storage and the create/edit/complete slice land in P02 and are **not** present yet.
+**What works today (verified by automated tests):**
+
+- The app builds, lints clean, and launches into Today.
+- All five top-level destinations — Today, Schedule, Board, History, Settings — open with
+  empty states that explain themselves.
+- **A real end-to-end slice:** type a task → it is validated in the domain layer → persisted in
+  Room/SQLite → shown on Today → started, completed, postponed, skipped or archived → every
+  change written to an audit trail. Everything works offline; there is no account, no backend
+  and no network permission.
+- Manual fixed commitments can be stored and are queried by overlap.
+- Task relationships enforce direction, reject self-links and detect cycles.
+- Typed task creation validates inline and refuses to save an empty or malformed task.
+
+**Not working yet:** voice input, the schedule generator, schedule recovery, the visual board,
+reminders and notifications, and the Privacy Centre. They belong to P03–P07.
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.
-[`CHANGELOG.md`](CHANGELOG.md) records every change.
+[`CHANGELOG.md`](CHANGELOG.md) records every change. In particular, the Compose instrumentation
+suite compiles but **has not been run** — see [Known limitations](#known-limitations-and-blocked-checks).
 
 ## Privacy and scope boundaries
 
@@ -110,9 +123,9 @@ Always use the committed wrapper. Never rely on a globally installed Gradle.
 │       ├── ChronaApplication.kt  Entry point
 │       ├── MainActivity.kt       Single-activity Compose host
 │       ├── navigation/           Route registry + navigation shell
-│       ├── domain/               Pure Kotlin: models, task rules, relations (P02+)
-│       ├── data/                 Room database, DAOs, repositories (P02+)
-│       ├── usecase/              Orchestration layer (P02+)
+│       ├── domain/               Pure Kotlin: models, task rules, relations
+│       ├── data/                 Room database, DAOs, mappers, repositories
+│       ├── usecase/              Orchestration layer
 │       ├── input/                Parser and voice adapters (P03+)
 │       ├── platform/             Notifications, overlay, permissions, work (P06+)
 │       ├── privacy/              Data inventory, export, delete (P07+)
@@ -141,12 +154,21 @@ the domain core imports no Android, Room or network code.
 
 ## Known limitations and blocked checks
 
-- **Windows host not yet verified.** The cross-OS gate needs a clean clone build on the
-  Windows machine; it is marked BLOCKED, not passed.
-- **Emulator launch BLOCKED on this host.** `/dev/kvm` is not readable by the build user, so
-  the API 36 emulator cannot use hardware acceleration. Recorded in `PROGRESS.md`.
+- **Windows host not verified.** The cross-OS gate needs a clean clone build on the Windows
+  machine. `scripts/verify.ps1` is written but has never been executed. Marked BLOCKED, not
+  passed.
+- **Compose instrumentation has NOT been run.** An API 36 AVD was created and does boot on this
+  host, and both APKs install — but the build user is not in the `kvm` group, so only software
+  emulation is available; `artd` reports "no usable artifacts" and `am start` is rejected with
+  `result code=-92`. The instrumentation suites compile and will run unchanged once a
+  `kvm`-capable host or the moto g54 is available.
 - **Physical device (moto g54, Android 15) untested** — required before P03/P06/P07 claims.
+- **Schema migration untested**, because there is only one schema version yet. Room schema v1
+  is exported to `app/schemas/` so the migration test has a real starting point at version 2.
+- **Offline is true by construction, not measured.** No networking permission and no networking
+  dependency exist, but the airplane-mode acceptance test has not been executed on a device.
 - Release build is unminified until a shrink/obfuscation audit exists.
+- No licence file has been chosen yet.
 
 ## License
 

@@ -17,7 +17,7 @@
 | OPEN-011 | actual overlay/background capability on moto g54 | P06 device testing | optional best-effort + notification/in-app fallback |
 | OPEN-012 | retention period for task/revision/reminder history | owner/product decision if not specified | minimize retention; clear data/delete path |
 | OPEN-013 | Windows host is not available in the current environment, so the Windows half of the P01 cross-OS gate (AT-033) cannot be run | owner supplies a Windows machine before P08 | gate stays BLOCKED; never report it as passed |
-| OPEN-014 | build user is not in the `kvm` group, so no accelerated emulator can run | owner adds the user to `kvm`, or supplies a device/Studio-managed emulator | instrumentation tests compile and are reported NOT RUN |
+| OPEN-014 | build user is not in the `kvm` group, so only software emulation is possible. Verified in P02: a `-no-accel` API 36 AVD boots and installs APKs, but `artd` finds no usable dex artifacts and `am start` returns `result code=-92` | owner adds the user to `kvm`, or supplies a device/Studio-managed emulator | instrumentation tests compile and are reported NOT RUN |
 | OPEN-015 | application licence has not been chosen | owner before any public distribution | no licence file; repository is not published as licensed work |
 | OPEN-016 | "Chrona" trademark/domain availability unchecked; no approved reverse-DNS application ID | owner | `com.chrona.app` used as a documented provisional identity (ADR-025) |
 
@@ -57,3 +57,6 @@
   honest "cross-OS parity" claim.
 - **Emulator / physical-device instrumentation** — not run (OPEN-014). Blocking for any claim
   about runtime behaviour, permissions, notifications, overlay or speech recognition.
+- **Room schema migration** — untested, because only schema v1 exists. Room schema v1 is
+  exported to `app/schemas/` and committed so the `MigrationTestHelper` test has a real
+  starting point when v2 lands. Blocking for RELIABILITY-001 at P07.

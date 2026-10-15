@@ -97,7 +97,7 @@ java -version
 | Check | Status | Blocker | Needed action |
 |---|---|---|---|
 | Windows clean-clone `clean assembleDebug testDebugUnitTest lintDebug` | **BLOCKED** | No Windows machine is available in this environment. `scripts/verify.ps1` is written and reviewed but has never been executed | Run it on the Windows PC from a fresh clone and paste the result into `PROGRESS.md` (satisfies AT-033) |
-| API 36 emulator launch and instrumentation run | **BLOCKED** | `/dev/kvm` is `root:kvm` mode 0660 and the build user is not in the `kvm` group, so `cat /dev/kvm` fails. Hardware-accelerated emulation is unavailable and software emulation of an x86_64 API 36 image is not viable | Add the build user to the `kvm` group, or run `connectedDebugAndroidTest` on the moto g54 or a Studio-managed emulator |
+| API 36 emulator launch and instrumentation run | **BLOCKED** | `/dev/kvm` is `root:kvm` mode 0660 and the build user is not in the `kvm` group, so `cat /dev/kvm` fails. A software-emulated (`-no-accel`) API 36 AVD does boot and accepts APK installs, but `artd` reports "no usable artifacts" for the dex and `am start` is rejected with `result code=-92`, so no test can execute. `connectedDebugAndroidTest` also fails device detection with `ShellCommandUnresponsiveException` | Add the build user to the `kvm` group, or run `connectedDebugAndroidTest` on the moto g54 or a Studio-managed emulator |
 | moto g54 / Android 15 physical device | NOT RUN | No device attached | Required from P03 onward (PLAT-001, AT-034) |
 
 ## Troubleshooting
