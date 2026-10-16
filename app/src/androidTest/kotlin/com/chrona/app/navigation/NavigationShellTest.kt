@@ -40,7 +40,7 @@ class NavigationShellTest {
 
         composeRule.onNodeWithTag("nav_board").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("The board is empty").assertIsDisplayed()
+        composeRule.onNodeWithText("Nothing to pin yet").assertIsDisplayed()
 
         composeRule.onNodeWithTag("nav_history").performClick()
         composeRule.waitForIdle()

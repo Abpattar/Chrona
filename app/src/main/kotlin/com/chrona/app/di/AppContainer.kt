@@ -30,6 +30,10 @@ import com.chrona.app.usecase.IdGenerator
 import com.chrona.app.usecase.ListTasksUseCase
 import com.chrona.app.usecase.TaskLifecycleUseCases
 import com.chrona.app.usecase.TimeSource
+import com.chrona.app.usecase.AddRelationshipUseCase
+import com.chrona.app.usecase.ConfirmRelationshipUseCase
+import com.chrona.app.usecase.DeleteRelationshipUseCase
+import com.chrona.app.usecase.UpdateRelationshipUseCase
 import java.util.UUID
 
 /**
@@ -59,6 +63,12 @@ class AppContainer(
     val lifecycle = TaskLifecycleUseCases(taskRepository, timeSource)
     val events = EventUseCases(eventRepository, idGenerator, timeSource)
 
+    /** Relationship editing for the board (P05). All validate before writing. */
+    val addRelationship = AddRelationshipUseCase(relationshipRepository, timeSource, idGenerator)
+    val updateRelationship = UpdateRelationshipUseCase(relationshipRepository)
+    val deleteRelationship = DeleteRelationshipUseCase(relationshipRepository)
+    val confirmRelationship = ConfirmRelationshipUseCase(relationshipRepository, timeSource)
+
     /** One deterministic planner for both first planning and recovery (CH-SCHED-001). */
     val scheduleEngine: ScheduleEngine = DeterministicScheduleEngine()
     val proposeRecovery: ProposeRecoveryUseCase = DeterministicRecoveryPlanner(scheduleEngine)
@@ -87,8 +97,15 @@ class AppContainer(
 
     val createTaskFromIntent = CreateTaskFromIntentUseCase(createTask)
 
-    /** Placeholder for P05: builds the dependency graph from stored relationships. */
-    fun relationGraph(): RelationGraph = RelationGraph()
+    /**
+     * Builds the hard-dependency graph from stored relationships (P05).
+     *
+     * The board, editor and scheduler all read the direction from [RelationGraph], so a link
+     * means the same thing everywhere.
+     */
+    fun relationGraph(
+        relationships: List<com.chrona.app.domain.model.TaskRelationship>,
+    ): RelationGraph = RelationGraph(relationships)
 
     private companion object {
         fun buildDatabase(context: Context): ChronaDatabase =

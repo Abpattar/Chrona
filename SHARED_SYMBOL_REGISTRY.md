@@ -10,7 +10,9 @@ when actual code/test evidence supports it. See `PROGRESS.md` for command-level 
 | CH-DOM-002 | `EventId` | same | P02 | TESTED | fixed-commitment round trip and overlap query in `RoomTaskRepositoryTest` |
 | CH-DOM-003 | `Priority` | LOW, IMPORTANT, CRITICAL | P02 | IMPLEMENTED | persisted and rendered with a text label (`priorityStyleOf`); board mapping is P05 |
 | CH-DOM-004 | `TaskStatus` | seven canonical states | P02 | TESTED | `TaskStatusMachineTest` (11 cases) covers every transition and rejection |
-| CH-DOM-005 | `RelationType` | five typed relation values | P02/P05 | TESTED | `RelationGraphTest` (15 cases); board rendering is P05 |
+| CH-DOM-005 | `RelationType` | five typed relation values | P02/P05 | TESTED | `RelationGraphTest` (15 cases); typed board rendering + wording in `RelationPresentationTest` (4) |
+| CH-REL-001 | `AddRelationshipUseCase` / `ConfirmRelationshipUseCase` | `usecase/RelationshipUseCases.kt`; validate against `RelationGraph` (self-edge, duplicate triple, hard cycle; dormant suggestion) | P05 | TESTED | `RelationshipUseCasesTest` (10) + `RoomRelationshipRepositoryTest` (8, real SQLite) |
+| CH-UI-002 | `BoardLayoutCalculator` / `BoardViewModel` | `ui/board/`; pure deterministic layout + board/list state over the shared task rows | P05 | TESTED | `BoardLayoutTest` (6, incl. 100/200 fixture) + `BoardViewModelTest` (12); harness `BoardSliceTest` NOT RUN (no device) |
 | CH-NAV-001 | `ChronaDestination` | canonical route registry, `navigation/` | P01 | TESTED | navigation shell; `ChronaDestinationTest` PASS, `NavigationShellTest` NOT RUN (no device) |
 | CH-UI-000 | `ChronaTheme` / `PinnedNoteCard` / `EmptyState` / `priorityStyleOf` | `ui/design/`, paper-and-pin design tokens | P01 | IMPLEMENTED | all screens; `lintDebug` PASS; every priority also carries a text label |
 | CH-PARSE-001 | `TaskUnderstandingProvider` | `SHARED_CONTRACT.md`, `domain/parse` | P03 | TESTED | text/voice capture; `DeterministicTaskIntentParserTest` (38 cases) + `TaskIntentDraftValidatorTest`; provider-neutral contract |

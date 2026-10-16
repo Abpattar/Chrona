@@ -35,6 +35,8 @@ Fields: `id`, `sourceTaskId`, `targetTaskId`, `type`, `label?`, `explanation?`, 
 **Canonical dependency direction:** source task `DEPENDS_ON` target task means source is the dependent task and target is its prerequisite. This same direction must be used in graph, editor, validation and scheduler. Reject/flag cycles in hard `DEPENDS_ON` edges. A suggested hard dependency is inactive until owner/user confirms it.
 `PART_OF_PROJECT` may initially use relation edges plus an optional project/category label; avoid creating a general project subsystem unless required.
 
+*(P05: `(sourceTaskId, targetTaskId, type)` is unique at the database level. Room `@Upsert` silently swallows that unique-index violation, so `AddRelationshipUseCase` rejects an exact duplicate triple explicitly with a validation failure before writing; the index stays as the last-line guard.)*
+
 ## ScheduleAssignment
 *(P04: implemented as table `schedule_placements`, Room v2.)*
 Fields: `id`, `taskId`, `startAt`, `endAt`, `zoneId`, `sessionIndex`, `revisionId`, `source` (ENGINE/USER_EDIT), `createdAt`. Allows splitting. Intervals are normalized as absolute instants for overlap checks. Assignment is not task identity.

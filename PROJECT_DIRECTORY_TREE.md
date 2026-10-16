@@ -75,7 +75,7 @@ chrona/
 │       │       │   ├── migration/                    (planned) explicit migrations live in ChronaDatabase
 │       │       │   ├── repository/                  [P02; P04 adds RoomScheduleRevisionRepository]
 │       │       │   └── export/                      (planned P07)
-│       │       ├── usecase/                         (planned P02)
+│       │       ├── usecase/                         [P02; P05 relationship use cases]
 │       │       ├── input/
 │       │       │   ├── parser/                      (planned P03)
 │       │       │   └── voice/                       (planned P03)
@@ -90,7 +90,7 @@ chrona/
 │       │           ├── design/                      [P01] theme, paper tokens, components
 │       │           ├── today/                       [P01 shell; list in P02]
 │       │           ├── schedule/                    [P01 shell; preview/apply/undo in P04]
-│       │           ├── board/                       [P01 shell; canvas in P05]
+│       │           ├── board/                       [P01 shell; canvas + list + link editing in P05]
 │       │           ├── history/                     [P01 shell; content in P04/P07]
 │       │           ├── taskeditor/                  [P02] typed task editor
 │       │           ├── questcard/                   (planned P06)
@@ -103,15 +103,16 @@ chrona/
 │       │       ├── parse/                               [P03] parser/tests
 │       │       ├── scheduling/                          [P04] engine/scenario tests
 │       │       ├── recovery/                            [P04] use-case tests
-│       │   ├── data/                                    [P04] Room repo + migration tests
+│       │   ├── data/                                    [P04] Room repo + migration tests; [P05] relationship repo tests
 │       │   ├── navigation/                          [P01]
 │       │       ├── platform/                             [P03] speech adapter tests
-│       │       ├── ui/                                   [P03] voice VM tests; [P04] schedule VM tests
-│       │       ├── usecase/                               [P03] intent-create tests
+│       │       ├── ui/                                   [P03] voice VM tests; [P04] schedule VM tests; [P05] board layout/VM tests
+│       │       ├── usecase/                               [P03] intent-create tests; [P05] relationship use-case tests
 │       │       └── reminder/                            (planned P06)
 │       └── androidTest/kotlin/com/chrona/app/
 │           ├── ui/                                  [P01] navigation smoke
 │           ├── data/                                (planned P02) Room integration
+│           ├── BoardSliceTest.kt                    [P05] board/list/link slice (compile-only; NOT RUN)
 │           └── platform/                            (planned P06)
 ├── scripts/
 │   ├── verify.sh                                    [P01]

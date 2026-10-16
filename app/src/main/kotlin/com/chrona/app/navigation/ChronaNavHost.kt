@@ -19,7 +19,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.chrona.app.di.AppContainer
-import com.chrona.app.ui.board.BoardScreen
+import com.chrona.app.ui.board.BoardRoute
 import com.chrona.app.ui.history.HistoryScreen
 import com.chrona.app.ui.schedule.ScheduleRoute
 import com.chrona.app.ui.settings.SettingsScreen
@@ -58,7 +58,7 @@ fun ChronaNavHost(
                 TodayRoute(container)
             }
             composable(ChronaDestination.SCHEDULE.route) { ScheduleRoute(container) }
-            composable(ChronaDestination.BOARD.route) { BoardScreen() }
+            composable(ChronaDestination.BOARD.route) { BoardRoute(container) }
             composable(ChronaDestination.HISTORY.route) { HistoryScreen() }
             composable(ChronaDestination.SETTINGS.route) { SettingsScreen() }
         }

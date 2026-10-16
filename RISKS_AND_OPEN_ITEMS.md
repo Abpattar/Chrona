@@ -37,7 +37,8 @@
 | Voice sends information off-device unexpectedly | privacy mismatch | on-device path only by default; capability check, no silent fallback, explicit disclosure |
 | Overlay unsupported/unreliable | cards absent or delayed | optional overlay, notifications/in-app fallback, real device checks |
 | Reminder fatigue | notifications disabled | quiet mode, cap hypothesis, batching, quiet hours, repeat suppression |
-| Board relationship clutter | unreadable view | filters/project focus, pan/zoom, list alternative |
+| Board relationship clutter | unreadable view | filters/project focus, pan/zoom, list alternative (`BoardFilter`, board↔list over the same records); note canvas zoom bounded 0.5–2.5 |
+| P05 board pan is unbounded | user pans the canvas away from the notes with no reset-to-fit | minor; noted in PROGRESS P05 limitations, candidate refinement in P06/P07 |
 | Incomplete local delete | data/privacy issue | inventory all tables/preferences/jobs/notifications/exports; residual-state tests |
 | Unknown URE research permissions | ethics/compliance problem | clarify institutional requirements before recruitment |
 | Unsupported novelty/IP claim | weak research integrity | current literature/competitor work, measured results and limits |
@@ -59,7 +60,9 @@
 - **Emulator / physical-device instrumentation** — not run (OPEN-014). Blocking for any claim
   about runtime behaviour, permissions, notifications, overlay or speech recognition. In P03
   this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured; voice is
-  kept optional and reported as unknown.
+  kept optional and reported as unknown. In P05 the Compose board slice tests
+  (`BoardSliceTest`, updated `NavigationShellTest`) compile but are NOT RUN, so the board's
+  talkback order, live contrast and large-font reflow are asserted by construction only.
 - **Room schema migration** — *resolved in P04*. Schema v2 adds `schedule_revisions` and
   `schedule_placements`; `MIGRATION_1_2` is committed and exercised end-to-end by
   `MigrationTest1To2Test` against a real SQLite v1 database. Both `1.json` and `2.json` are

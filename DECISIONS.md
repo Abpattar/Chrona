@@ -34,6 +34,10 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-027 | APPROVED | `ScheduleProposal.proposalId` is derived deterministically from its basis and content via `UUID.nameUUIDFromBytes`; never `randomUUID()` | identical inputs must yield the identical proposal (testable determinism, ADR-003); a random id would make tests flaky and break "same snapshot → same plan" | P04 |
 | ADR-028 | APPROVED | Undo is deliberately one-step and conservative: only the newest revision can be undone, and only if no task was edited after it | multi-step undo needs full history replay/merge semantics far beyond scope; refusing on later edits prevents silently discarding newer user changes (REC-003 safety) | P04 |
 | ADR-029 | APPROVED | Room schema v2 adds `schedule_revisions`/`schedule_placements` with `MIGRATION_1_2` beside the database; no `fallbackToDestructiveMigration` | preserves the explicit-migration policy (ADR-007) required by RELIABILITY-001; a destructive fallback would silently erase user data | P04 |
+| ADR-030 | APPROVED | The board reuses `RelationGraph` as the single source of direction and cycle rules; it is projected on demand via `AppContainer.relationGraph(relationships)` rather than re-derived in the UI | one rule for board, editor, scheduler and validation means direction/cycle semantics can never drift (ADR-003); no second graph implementation | P05 |
+| ADR-031 | APPROVED | `AddRelationshipUseCase` explicitly rejects a duplicate `(source, target, type)` triple with `Failure.Validation` | Room `@Upsert` silently swallows the unique-index violation and reports success while storing nothing, which would hand the UI an id that was never persisted; an explicit check makes the outcome truthful and testable. The index remains the last-line database guard | P05 |
+| ADR-032 | APPROVED | A `SUGGESTED` hard dependency is stored with `confirmedAt = null` and never constrains order until the user confirms it | REL-002 forbids a silent consequential dependency; dormant storage lets a suggestion be shown without changing the plan, and `ConfirmRelationshipUseCase` re-validates before activating | P05 |
+| ADR-033 | APPROVED | Board layout is a pure deterministic function (`BoardLayoutCalculator`) over tasks+relationships; no randomness, wall clock or animation state | stable, reproducible note coordinates (P05 "stable coordinates") and JVM-testable layout, including the 100/200 performance fixture | P05 |
 
 ### ADR-018a — Coordinated toolchain change record
 
@@ -89,6 +93,23 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 - **Verification:** `./scripts/verify.sh` passes on Ubuntu — 191 unit/Robolectric tests, 0
   failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. Device run
   remains NOT RUN (OPEN-014).
+
+### P05 change record — board and relationships
+
+- **Date:** 17 October 2026. **Phase:** P05.
+- **Structure:** relationship editing lives in `usecase/RelationshipUseCases.kt`; all board
+  presentation and state lives in `ui/board/{RelationPresentation,BoardLayout,BoardViewModel,BoardScreen,BoardRoute}.kt`.
+  No new storage was added — `RoomRelationshipRepository`, `TaskRelationshipDao`,
+  `TaskRelationshipEntity` and the `(source, target, type)` unique index already existed from P02
+  and were reused unchanged.
+- **Contract additions:** `RelationType.displayLabel()`, `describeRelation(...)`,
+  `TaskRelationship.constrainsOrder()`, `BoardNote`/`BoardThread`/`BoardLayout`,
+  `BoardLayoutCalculator`, `BoardViewMode`, `BoardFilter`, `BoardUiState`, `BoardViewModel`.
+- **Decisions:** ADR-030 (single `RelationGraph`, projected on demand), ADR-031 (explicit
+  duplicate-triple rejection), ADR-032 (dormant suggestions), ADR-033 (pure deterministic layout).
+- **Verification:** `./scripts/verify.sh` passes on Ubuntu — 231 unit/Robolectric tests, 0
+  failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. Instrumented
+  Compose board tests compile but are NOT RUN (OPEN-014).
 
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.

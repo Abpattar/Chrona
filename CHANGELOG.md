@@ -3,6 +3,56 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-17 — P05 Board and relationships
+
+### Added
+- `usecase/RelationshipUseCases.kt` — `AddRelationshipUseCase` (rejects a self-edge, a duplicate
+  `(source, target, type)` triple and any hard-dependency cycle; a `SUGGESTED` dependency is
+  stored with `confirmedAt = null`), `UpdateRelationshipUseCase` (re-validates the projected
+  graph), `DeleteRelationshipUseCase`, `ConfirmRelationshipUseCase` (re-checks the graph as it
+  now stands before activating a suggestion).
+- `ui/board/RelationPresentation.kt` — `RelationType.displayLabel()`,
+  `describeRelation(source, type, target)` and `TaskRelationship.constrainsOrder()`; every
+  relation type gets a distinct word label and sentence, so meaning never rests on colour alone.
+- `ui/board/BoardLayout.kt` — `BoardNote`, `BoardThread`, `BoardLayout`, and
+  `BoardLayoutCalculator.layout(tasks, relationships)`: a pure, deterministic 3-column grid with
+  stable per-id tilt and visible-only threads, O(n + m).
+- `ui/board/BoardViewModel.kt` — `BoardViewMode`, `BoardFilter` (status/priority/project/search/
+  due-by), `BoardUiState` (view metadata kept separate from domain facts) and `BoardViewModel`
+  plus its `Factory`.
+- `ui/board/{BoardScreen,BoardRoute}.kt` — a paper board of pinned notes joined by typed red
+  threads (bounded 0.5–2.5 zoom, no always-running animation), an accessible list alternative
+  over the same identities, a filter bar, a view-mode toggle, and a selection panel for adding,
+  changing, confirming and removing links.
+- Tests: `RelationshipUseCasesTest` (10), `RelationPresentationTest` (4), `BoardLayoutTest` (6),
+  `BoardViewModelTest` (12), `RoomRelationshipRepositoryTest` (8), and the compile-only
+  instrumented `BoardSliceTest`.
+
+### Changed
+- `di/AppContainer.kt` — wires the four relationship use cases and replaces the empty
+  `relationGraph()` placeholder with `relationGraph(relationships)`, a real `RelationGraph`.
+- `navigation/ChronaNavHost.kt` — the BOARD destination opens `BoardRoute(container)`.
+- `app/src/androidTest/.../NavigationShellTest.kt` — the board empty-state assertion now expects
+  "Nothing to pin yet" (the real board), not the old placeholder "The board is empty".
+
+### Fixed during P05
+- **Room `@Upsert` silently swallows a `(source, target, type)` unique-index violation**,
+  returning success while storing nothing. `AddRelationshipUseCase` now rejects a duplicate
+  triple explicitly with `Failure.Validation("That link already exists.")`.
+- **A test-only id-generator mistake** masked cycle detection (a fresh generator per call gave
+  every edge the same id, and `validateNewEdge` filters by id); fixed by sharing one generator.
+- **A mis-stated cycle scenario** in an update test (the redirected edge was the one closing the
+  loop); rewritten to redirect `A→B` to `C→B` against a remaining `B→C`.
+
+### Verification (P05)
+Exact commands and per-test results are in `PROGRESS.md` → "P05". Summary:
+
+| Layer | Cases | Result |
+|---|---|---|
+| JVM/Robolectric unit tests | 231 (40 new) | PASS, 0 failures |
+| `scripts/verify.sh` (clean + assemble + unit tests + lint) | — | PASS |
+| Instrumented Compose tests | compile-only (NOT RUN — no runtime) | — |
+
 ## 2026-10-17 — P04 Deterministic scheduling and recovery
 
 ### Added

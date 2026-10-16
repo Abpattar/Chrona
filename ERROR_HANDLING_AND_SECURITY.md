@@ -18,6 +18,13 @@ Main risks: misparsed date causing bad plan; schedule infeasibility hidden; depe
     of use, and adds no `INTERNET` permission. The transcript goes straight to the local parser;
     nothing is buffered or written, and the recogniser is destroyed on release.
 - Treat any parse/model output as untrusted: validate title/duration/dates/relationships/status and hard-dependency confirmation. Parser never applies schedule.
+  - **P05 implementation:** relationship writes go through `AddRelationshipUseCase`/
+    `UpdateRelationshipUseCase`/`ConfirmRelationshipUseCase`, which validate self-edges,
+    duplicate `(source, target, type)` triples and hard-dependency cycles against `RelationGraph`
+    before any write. A suggested `DEPENDS_ON` is stored with `confirmedAt = null` and does not
+    constrain order until confirmed. Because Room `@Upsert` silently swallows the unique-index
+    violation, the duplicate check is explicit so a write never reports success without storing
+    (see "Failure behavior").
 - Use Room DAO binding/parameterized queries, domain validation, integrity constraints and explicit schema migration.
 - Apply scheduling revision + assignment changes in a transaction and compare expected revision. Notification actions must be idempotent and use unambiguous action identities.
   - **P04 implementation:** `RoomScheduleRevisionRepository.current/apply/undo` run inside

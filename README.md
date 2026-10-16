@@ -9,7 +9,7 @@ This repository is the implementation of the approved product in
 [`MASTER_REQUIREMENTS.md`](MASTER_REQUIREMENTS.md), following the canonical contracts in
 [`SHARED_CONTRACT.md`](SHARED_CONTRACT.md).
 
-## Current status — P01–P04 complete, P05 next
+## Current status — P01–P05 complete, P06 next
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -17,7 +17,7 @@ This repository is the implementation of the approved product in
 | P02 | Local data + first end-to-end task slice | **DONE** — typed task → validate → Room → Today → complete |
 | P03 | Voice input and deterministic parser | **DONE (automated)** — tap-to-speak, on-device-only recogniser, parser, review/correction; device availability NOT RUN |
 | P04 | Scheduling and recovery engine | **DONE (automated)** — deterministic day preview, apply/undo, schema v2 + migration; device run NOT RUN |
-| P05 | Board and relationships | Not started |
+| P05 | Board and relationships | **DONE (automated)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run NOT RUN |
 | P06 | Quest Cards and notifications | Not started |
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
@@ -45,9 +45,15 @@ This repository is the implementation of the approved product in
   deadlines are honoured; a missing duration assumes 30 minutes and is called out as an
   assumption. You can **Apply** the plan (written atomically as a revision) and **Undo** it; a
   preview alone never writes anything. The engine is pure domain code — no AI, no network.
+- **A paper board of your tasks:** the Board tab lays your tasks out as pinned notes joined by
+  thin red threads. You can filter by status, priority, project, text search or a due date, and
+  switch to a plain **list** showing the same records. Selecting a note lets you add, change,
+  confirm or remove a typed relationship. A confirmed `DEPENDS_ON` constrains order and is drawn
+  boldly; a suggested dependency stays dormant until you confirm it; a cycle, self-link or
+  duplicate link is refused with a plain reason. Nothing is drawn between tasks that are hidden
+  by a filter.
 
-**Not working yet:** the visual board and relationship editing, reminders and notifications, and
-the Privacy Centre. They belong to P05–P07.
+**Not working yet:** Quest Cards and reminders, and the Privacy Centre. They belong to P06–P07.
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.

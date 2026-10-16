@@ -9,11 +9,11 @@
 | `ChronaApplication.kt`, `MainActivity.kt`, `navigation/` | P01 | entry point, lifecycle, route names and composition root | all UI/use cases | app launch and navigation smoke tests |
 | `ui/design/` | P01, later extended | typography, theme, card/button semantics, priority tokens | all screens | accessibility semantics and UI review |
 | `domain/model/` | P02 | Task/Event/IDs/status/priority/windows/schedule blocks/preferences | all packages, repositories | pure unit tests, validation, status transitions |
-| `domain/task/`, `usecase/` | P02 | task transitions/create/edit/complete/postpone/skip/archive; command boundary | UI, repository interfaces | lifecycle/duplicate action/idempotency tests |
+| `domain/task/`, `usecase/` | P02/P05 | task transitions; command boundary; P05 relationship use cases (`AddRelationshipUseCase`, `UpdateRelationshipUseCase`, `DeleteRelationshipUseCase`, `ConfirmRelationshipUseCase`) validating against `RelationGraph` | UI, repository interfaces | lifecycle/idempotency tests; `RelationshipUseCasesTest` (10) |
 | `domain/relation/` | P02/P05 | relation enum/model/direction/cycle validation | scheduler, board, editor | direction, cycle and delete-integrity tests |
 | `data/local/` | P02; extended P04 | Room DB/entities/DAO/converters; v2 adds `schedule_revisions`/`schedule_placements` | repository implementations | in-memory Room tests; `RoomScheduleRevisionRepositoryTest` |
 | `data/migration/` (currently `ChronaDatabase.MIGRATION_1_2`) | P02 and schema updates | versioned explicit migrations | DB startup | `MigrationTest1To2Test` (real SQLite, real migration); no destructive fallback |
-| `data/repository/` | P02 | domain-facing repository implementations | use cases | persistence, transaction, version check tests |
+| `data/repository/` | P02/P04/P05 | domain-facing repository implementations (`RoomRelationshipRepository` reused unchanged in P05) | use cases | persistence, transaction, version check tests; `RoomRelationshipRepositoryTest` (8) |
 | `data/export/` | P07 | versioned export DTO/serializer, delete consistency helpers | Privacy Centre | export shape and deletion residual tests |
 | `domain/scheduling/` | P04 | `ScheduleInput`/`ScheduleProposal`/`ScheduleRevision`, slot placement, buffers, dependencies, split rules | planning/recovery | `ScheduleEngineTest` (21: deterministic/scenario) |
 | `domain/recovery/` | P04 | triggers, `DeterministicRecoveryPlanner` (same engine), apply/undo use cases, `ScheduleRevisionRepository` contract | schedule/recovery/history UI | `RecoveryUseCasesTest` (7: lateness/overrun/stale/undo) |
@@ -27,7 +27,7 @@
 | `ui/today/`, `ui/schedule/` | P02/P04 | current next action, day preview (planned/moved/unplaced + apply/undo) | use cases | `ScheduleViewModelTest` (preview writes nothing); device rendering NOT RUN |
 | `ui/taskeditor/`, `ui/recovery/` | P02/P04 | interpretation correction, editing, proposal/diff/apply/reject/undo | parser/recovery use cases | confirmation and constraint tests |
 | `ui/voice/` | P03 | tap-to-speak capture sheet + `VoiceCaptureViewModel`, review/correction, clarification | parser, speech adapter, create use case | `VoiceCaptureViewModelTest` (JVM fake) |
-| `ui/board/` | P05 | paper notes, pins, strings, zoom/pan/filter/project focus/list alternative | same task/relation repos | link semantics, accessibility, 100-task/200-edge performance |
+| `ui/board/` | P05 | `RelationPresentation`, `BoardLayout`/`BoardLayoutCalculator` (pure), `BoardViewModel`, `BoardScreen`/`BoardRoute`: paper notes, pins, typed red threads, zoom/pan/filter/project focus/list alternative, link editing | same task/relation repos, relationship use cases | `BoardLayoutTest` (6, incl. 100/200 fixture), `BoardViewModelTest` (12), `RelationPresentationTest` (4); `BoardSliceTest` NOT RUN |
 | `ui/questcard/` | P06 | compact task panel and Start/Done/Later/Dismiss actions | platform cards/use cases | dismissed card does not complete task; action idempotency |
 | `ui/history/` | P04/P07 | schedule revision/action history and safe undo access | revision repository | ordering, retention and guard tests |
 | `ui/settings/`, `ui/privacy/`, `privacy/` | P07 | preferences, permissions/data inventory/export/delete | settings/data/platform | privacy UX, deletion, permission revocation |

@@ -1,7 +1,8 @@
 # Chrona — Progress and Resume Record
 
 **Status:** P01 complete. P02 complete. P03 complete for automated checks; device/voice
-availability NOT RUN. P04 complete for automated checks; device checks NOT RUN. P05 is next.
+availability NOT RUN. P04 complete for automated checks; device checks NOT RUN. P05 complete for
+automated checks; device/compose checks NOT RUN. P06 is next.
 **Last updated:** 17 October 2026
 
 ## Status vocabulary
@@ -609,6 +610,124 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
 
 ---
 
+## P05 — Board and Relationships
+
+**Phase gate: PASSED for the automated checks that could run on this host; device/compose
+sub-checks remain NOT RUN/BLOCKED.** The BOARD destination moved from a placeholder to a real
+paper board over the shared task rows: deterministic note layout, typed relationship threads,
+filter/search, a board↔list alternative over the same records, and link editing that validates
+against the single `RelationGraph`. 40 new JVM/Room tests (231 total). Instrumented Compose
+tests compile but are NOT RUN (no usable runtime).
+
+### What was built
+
+| Layer | Files | Responsibility |
+|---|---|---|
+| Relationship use cases | `usecase/RelationshipUseCases.kt` | `AddRelationshipUseCase` (self-edge, duplicate-triple and hard-cycle rejection; a `SUGGESTED` dependency is stored dormant), `UpdateRelationshipUseCase` (re-validates), `DeleteRelationshipUseCase`, `ConfirmRelationshipUseCase` (re-validates the graph as it now stands before activating) |
+| Board presentation | `ui/board/RelationPresentation.kt` | `RelationType.displayLabel()`, `describeRelation(source, type, target)`, `TaskRelationship.constrainsOrder()` — pure, so meaning never depends on colour alone |
+| Deterministic layout | `ui/board/BoardLayout.kt` | `BoardNote`, `BoardThread`, `BoardLayout`, `BoardLayoutCalculator.layout(tasks, relationships)` — pure grid, stable coordinates and per-id tilt, O(n + m) |
+| Board state | `ui/board/BoardViewModel.kt` | `BoardViewMode` (BOARD/LIST), `BoardFilter` (status/priority/project/search/due-by), `BoardUiState` (view metadata separate from domain facts), `BoardViewModel` + `Factory` |
+| Board UI | `ui/board/{BoardScreen,BoardRoute}.kt` | Pinned-note canvas (bounded 0.5–2.5 zoom, no always-running animation) with thin red threads, an accessible list alternative showing the same identities, filter bar, view-mode toggle, and a selection panel for linking |
+| Composition | `di/AppContainer.kt`, `navigation/ChronaNavHost.kt` | Wires the four relationship use cases and `relationGraph(relationships)`; BOARD opens `BoardRoute(container)` |
+
+`RoomRelationshipRepository`, `TaskRelationshipDao`, `TaskRelationshipEntity` and the
+`(source, target, type)` unique index already existed from P02 and were reused unchanged;
+`AppContainer.relationGraph()` changed from an empty placeholder to a real projection.
+
+### Behavior actually implemented
+
+Notes are placed on a fixed 3-column grid ordered by project then id, with a small deterministic
+tilt derived from the id — no randomness, no wall clock, so the same input always yields the same
+slots. Only relationships whose two ends are both visible are drawn, so a filtered-out task never
+leaves a phantom thread. A confirmed `DEPENDS_ON` constrains order and is drawn boldly; a suggested
+dependency is dormant and drawn faintly, and every relation states its meaning in words
+(`waits for`, `supports`, …) as well as an icon. Linking a task validates against `RelationGraph`
+(single source of truth): a self-edge, a duplicate triple or a hard cycle is refused with a plain
+reason; confirming a suggestion re-checks the graph before activating it. Changing a task's date
+never drops its links (covered by a Room test).
+
+### Commands actually executed
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `./gradlew --no-daemon :app:compileDebugKotlin` | PASS |
+| 2 | `./gradlew :app:testDebugUnitTest --tests "…usecase.RelationshipUseCasesTest" "…data.RoomRelationshipRepositoryTest" "…ui.board.*"` | PASS |
+| 3 | `./gradlew --no-daemon :app:assembleDebugAndroidTest` | PASS — Compose tests compile |
+| 4 | `./scripts/verify.sh` | **PASS** — `clean assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest`; `OK: Chrona verification passed`; lint 0 errors |
+| 5 | `adb devices` | empty — device/compose checks NOT RUN |
+
+### Tests added and executed
+
+| Suite | Layer | Cases | Result |
+|---|---|---|---|
+| `RelationshipUseCasesTest` | JVM unit (fake relationship repo) | 10 | **PASS** |
+| `RelationPresentationTest` | JVM unit | 4 | **PASS** |
+| `BoardLayoutTest` | JVM unit (incl. 100-task/200-link fixture) | 6 | **PASS** |
+| `BoardViewModelTest` | JVM unit (`UnconfinedTestDispatcher`) | 12 | **PASS** |
+| `RoomRelationshipRepositoryTest` | Room integration (Robolectric + real SQLite) | 8 | **PASS** |
+| **P05 subtotal** | | **40** | **PASS** |
+| P01–P04 suites (unchanged) | JVM/Room | 191 | **PASS** |
+| **Total JVM/Room** | | **231** | **PASS** (0 failures) |
+
+The use-case suite proves a user dependency is stored active, a self-edge/cycle/duplicate is
+refused, a suggestion is stored dormant, and confirming re-validates. Layout tests prove
+determinism, grid order, visible-only threads, bounded tilt, and the perf fixture. The Room suite
+proves every field round-trips, `listFor` scopes to touching tasks, `delete` touches one row,
+`replaceFor` swaps a source atomically, the `(source, target, type)` index blocks a duplicate row,
+and a task's links survive a date change. Instrumented Compose coverage (`BoardSliceTest`) drives
+the real editor → Board → link flow and the list alternative, but is compile-only here.
+
+### Defects the tests caught, and the fixes
+
+1. **Shared id generator masked cycle detection in the first test draft.** Each `addUseCase`
+   call built a fresh `SequentialIdGenerator`, so every edge got the id `id-1`; `validateNewEdge`
+   filters existing edges by matching id, which erased the real edges and let cycles through.
+   Fixed by sharing one generator per test (JUnit4 makes a fresh instance per method).
+2. **A redirected edge does not create the cycle the comment claimed.** The first "update into a
+   cycle" test redirected an edge that was itself the one closing the loop, so the projected graph
+   was a chain. Rewrote it to redirect `A→B` to `C→B` against a remaining `B→C`.
+3. **Room `@Upsert` silently swallows a unique-index violation.** Adding the same
+   `(source, target, type)` with a different id returned success while storing nothing, so a link
+   add would report "added" with an id that was never persisted. Added an explicit duplicate check
+   in `AddRelationshipUseCase` returning `Failure.Validation("That link already exists.")`; the
+   Room test now asserts the index keeps the row count at one.
+4. **Board empty-state wording changed** from the placeholder "The board is empty" to
+   "Nothing to pin yet"; updated `NavigationShellTest` to match.
+
+### Requirements addressed in P05
+
+| ID | Status | Evidence |
+|---|---|---|
+| REL-001 | `PASS (automated)` | `RelationGraph` is the one direction/cycle rule; use-case tests prove cycle rejection on add/update/confirm |
+| REL-002 | `PASS (automated)` | A `SUGGESTED` dependency is stored with `confirmedAt = null` and never constrains order until confirmed; `RelationPresentationTest` |
+| UI-001 | `PASS (automated)` | Board and list render the same shared rows; `BoardViewModelTest` list/board identity |
+| UI-002 | `PASS (automated)` | `displayLabel`/`describeRelation` give every type a distinct word label and sentence; not colour alone |
+| AT-010 | `PASS (automated)` | `BoardLayoutTest` 100-task/200-link fixture; visible-only threads |
+| AT-011 | `PASS (automated)` | Hard-cycle rejection reused from `RelationGraph` (iterative DFS) |
+| AT-012 | `PASS (automated, compile-only UI)` | `BoardSliceTest` add/select/list flow; device run NOT RUN |
+
+### Known limitations, blockers and risks
+
+1. **Instrumented Compose checks are NOT RUN** (no usable runtime; OPEN-014). `BoardSliceTest`
+   and the updated `NavigationShellTest` compile only. Talkback focus order, live contrast and
+   large-font reflow are therefore asserted by construction, not measured.
+2. **Pan is unbounded.** Zoom is clamped to 0.5–2.5, but the canvas can be panned away from the
+   notes; there is no reset-to-fit. Minor usability gap, recorded rather than fixed.
+3. **`BoardScreen.kt` is a large single file (~820 lines).** It combines the canvas, the list
+   alternative, the filter bar and the selection panel. Kept together this phase for one
+   cohesive surface; a split is a candidate tidy-up if the file grows in P06/P07.
+4. **Suggested links are display-only.** Suggestions are modelled and rendered dormant, but no
+   producer creates them yet (the phase says they must not be auto-introduced); only user links
+   are created here.
+5. **Windows host and device sub-checks still BLOCKED** (OPEN-013/OPEN-014).
+
+### Exact next phase
+
+**P06 — Quest Cards and reminders.** Prerequisite: P05 gate satisfied for automated work; the
+device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -631,7 +750,10 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
 - [x] P04 — deterministic scheduler and recovery: preview-before-apply Schedule surface,
       transactional apply/undo over a new `schedule_revisions` table, v1→v2 migration.
       39 new JVM/Room tests (191 total). Device checks NOT RUN.
-- [ ] P05 — board and relationships.
+- [x] P05 — board and relationships: pinned-note canvas with deterministic layout, typed red
+      threads, filter/search, a list alternative over the same records, and link editing that
+      validates against `RelationGraph`. 40 new JVM/Room tests (231 total). Compose tests compile
+      but NOT RUN.
 - [ ] P06 — Quest Cards and reminders.
 - [ ] P07 — privacy, resilience, accessibility.
 - [ ] P08 — URE evaluation and final release.

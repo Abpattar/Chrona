@@ -1,7 +1,7 @@
 # Chrona Development Pack — Start Here
 
 **Pack version:** 1.1 · **Prepared:** 15 October 2026 · **Status:** Implementation has started.
-P01 (foundation) is complete on Ubuntu; P02 complete; P03 complete; P04 complete (all automated checks). Device/voice availability NOT RUN.
+P01 (foundation) is complete on Ubuntu; P02 complete; P03 complete; P04 complete; P05 complete (all automated checks). Device/voice availability NOT RUN.
 
 ## Purpose
 This is the architecture and sequential OpenCode execution pack for Chrona, based on the two supplied PDFs and the product decisions confirmed by the owner on 15 October 2026. It targets one OpenCode coding agent, one repository, and sequential phases. The pack is now co-located with the application source it specifies: `app/` holds the real Android code, and this directory of documents is the contract that code must satisfy.
@@ -32,7 +32,7 @@ This is the architecture and sequential OpenCode execution pack for Chrona, base
 The proposal below was checked against published artifacts and one coordinate failed. Chrona builds on `compileSdk 36` / AGP 8.13.2 and therefore pins **Navigation Compose 2.9.8** and **Lifecycle 2.10.0**: Navigation 2.10.x and Lifecycle 2.11.0 require `compileSdk 37` and AGP 9.x, which would drag the project onto the preview platform line this project deliberately avoids. Full evidence is in `DECISIONS.md` (ADR-018a) and `PROGRESS.md`. The rest of the matrix — JDK 17, AGP 8.13.2, Gradle 8.13, Kotlin 2.2.21, KSP 2.2.21-2.0.5, Compose BOM 2026.06.00, Room 2.8.5, DataStore 1.2.1, WorkManager 2.12.0, Activity Compose 1.13.0, `minSdk 26`, `compileSdk 36`, `targetSdk 36` — built clean on Ubuntu 24.04.5. The Windows clean-clone check and the API 36 emulator launch are still **BLOCKED**; see `PROGRESS.md`. Re-check Play target policy before release.
 
 ## Status and limitations
-- Application source exists under `app/`. P01 delivers a navigation shell, theme and empty states. P02 delivers a real end-to-end typed task slice with Room. P03 delivers tap-to-speak (on-device-only), a deterministic parser, review/correction and the typed fallback. P04 delivers the deterministic scheduling/recovery engine, a preview/apply/undo Schedule surface, and the Room v1→v2 migration.
+- Application source exists under `app/`. P01 delivers a navigation shell, theme and empty states. P02 delivers a real end-to-end typed task slice with Room. P03 delivers tap-to-speak (on-device-only), a deterministic parser, review/correction and the typed fallback. P04 delivers the deterministic scheduling/recovery engine, a preview/apply/undo Schedule surface, and the Room v1→v2 migration. P05 delivers the pinned-note Board over the shared task rows, typed red threads, filters, a list alternative and relationship editing validated against `RelationGraph`.
 - `scripts/verify.sh` passes on Ubuntu: clean build, unit tests and lint. `scripts/verify.ps1`
   has never been executed because no Windows host was available.
 - Instrumentation tests compile but have not been run: `/dev/kvm` is not accessible to the
