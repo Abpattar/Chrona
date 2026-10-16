@@ -36,9 +36,11 @@ Fields: `id`, `sourceTaskId`, `targetTaskId`, `type`, `label?`, `explanation?`, 
 `PART_OF_PROJECT` may initially use relation edges plus an optional project/category label; avoid creating a general project subsystem unless required.
 
 ## ScheduleAssignment
+*(P04: implemented as table `schedule_placements`, Room v2.)*
 Fields: `id`, `taskId`, `startAt`, `endAt`, `zoneId`, `sessionIndex`, `revisionId`, `source` (ENGINE/USER_EDIT), `createdAt`. Allows splitting. Intervals are normalized as absolute instants for overlap checks. Assignment is not task identity.
 
 ## ScheduleRevision
+*(P04: implemented as table `schedule_revisions`, Room v2; placements cascade on delete.)*
 Fields: `id`, `createdAt`, `trigger`, `summary`, `policyVersion`, `baseRevisionId?`, `appliedAt?`, `undoneAt?`, `state` (PROPOSED/APPLIED/UNDONE/SUPERSEDED), versioned before/after assignment snapshot or normalized change rows, and reasons. Keep only enough history to explain and safely undo; avoid unbounded activity surveillance.
 Applying revision and assignments must be one Room transaction.
 

@@ -3,6 +3,66 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-17 — P04 Deterministic scheduling and recovery
+
+### Added
+- `domain/scheduling/Scheduling.kt` — the scheduling contract: `ScheduleInput`,
+  `FixedCommitment`, `SchedulePlacement`, `UnplacedReason`, `UnplacedTask`,
+  `ScheduleConflict`, `ScheduleChange`, `ScheduleAssumption`, `ScheduleBasis`,
+  `ScheduleProposal`, `ScheduleRevision` and the `ScheduleEngine` interface.
+- `domain/scheduling/EngineHelpers.kt` — pure, individually testable rules: eligibility,
+  `priority.rank()` and the total `schedulingComparator`, `busyRanges`, `freeIntervals` (with
+  buffers), `consume`, `preferredStartOn` and dependency-safe `dependencyOrder`.
+- `domain/scheduling/DeterministicScheduleEngine.kt` — the explainable heuristic: fixed
+  commitments and FIXED tasks never move; hard dependencies order before dependents; hard
+  cycles are rejected; deadlines that cannot be met are reported; priority → deadline → id give
+  a deterministic order and a deterministic `proposalId`; split/min-session, buffers and soft
+  preferred windows; overload is stated as a capacity limit, never a personal failure.
+- `domain/recovery/Recovery.kt` — `RecoveryTrigger`, `RecoveryRequest`, `ApplyRecoveryResult`,
+  `UndoResult`, the three use-case interfaces, `DeterministicRecoveryPlanner` (reuses the same
+  engine — no second algorithm), `DefaultApplyRecoveryUseCase`, `DefaultUndoScheduleRevisionUseCase`.
+- `domain/recovery/ScheduleRevisionRepository.kt` — the storage contract (in the domain, so use
+  cases never depend on Room) plus `ScheduleRevisionReason` codes.
+- `data/local/` — `schedule_revisions` and `schedule_placements` entities (FK cascade),
+  `ScheduleRevisionDao`, `ChronaDatabase` v2 with an explicit `MIGRATION_1_2`, and mappers.
+- `data/repository/RoomRepositories.kt` — `RoomScheduleRevisionRepository`
+  (`current`/`apply`/`undo`), each a single transaction that rechecks the expected revision and
+  task versions; accepting a plan moves INBOX/POSTPONED work to PLANNED with a history row.
+- `ui/schedule/{ScheduleViewModel,ScheduleRoute}.kt` and a rewritten `ScheduleScreen.kt` —
+  preview-before-apply with planned/moved/unplaced lists and reasons, an overload banner, and
+  Apply/Undo. Nothing is written until the user applies.
+- Tests: `ScheduleEngineTest` (21), `RecoveryUseCasesTest` (7), `ScheduleViewModelTest` (4),
+  `RoomScheduleRevisionRepositoryTest` (6), `MigrationTest1To2Test` (1).
+
+### Changed
+- `data/local/ChronaDatabase.kt` — schema version 1 → 2; `MIGRATION_1_2` adds only the two new
+  tables, so existing task data is preserved.
+- `di/AppContainer.kt` — wires the engine, the three use cases and the revision repository, and
+  registers `MIGRATION_1_2`.
+- `data/repository/RepositoryContracts.kt` — adds `SCHEDULE_APPLIED` / `SCHEDULE_UNDONE` reason
+  codes.
+- `data/repository/RoomRepositories.kt` — extracts the shared `TaskDao.applyStatusChange`
+  extension so apply/undo write status history exactly like a manual lifecycle action.
+- `navigation/ChronaNavHost.kt` — the Schedule destination now opens `ScheduleRoute(container)`.
+
+### Fixed during P04
+- **`MigrationTestHelper` cannot read exported schemas in JVM/Robolectric tests** (schemas are
+  not merged into unit-test assets). `MigrationTest1To2Test` runs `MIGRATION_1_2` against a real
+  `FrameworkSQLiteOpenHelper` database created from the frozen v1 DDL instead.
+- Trailing-lambda mis-binding in the `RoomScheduleRevisionRepository` construction.
+
+### Verification (P04)
+Exact commands and per-test results are in `PROGRESS.md` → "P04". Summary:
+
+| Layer | Cases | Result |
+|---|---|---|
+| JVM/Robolectric unit tests | 191 (39 new) | PASS, 0 failures |
+| `scripts/verify.sh` (clean + assemble + unit tests + lint) | — | PASS |
+| Android lint | — | PASS, 0 errors |
+| v1→v2 Room migration | 1 | PASS |
+| Compose instrumentation | — | compiles; NOT RUN (no usable runtime) |
+| On-device Schedule/recovery (AT-009..AT-019) | — | NOT RUN — covered at JVM/Room layer |
+
 ## 2026-10-16 — P03 Voice and structured task intent
 
 ### Added

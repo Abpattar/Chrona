@@ -9,14 +9,14 @@ This repository is the implementation of the approved product in
 [`MASTER_REQUIREMENTS.md`](MASTER_REQUIREMENTS.md), following the canonical contracts in
 [`SHARED_CONTRACT.md`](SHARED_CONTRACT.md).
 
-## Current status — P01, P02 and P03 complete, P04 next
+## Current status — P01–P04 complete, P05 next
 
 | Phase | Scope | Status |
 |---|---|---|
 | P01 | Repository foundation, pinned toolchain, navigation shell | **DONE** — builds, tests and lints clean on Ubuntu |
 | P02 | Local data + first end-to-end task slice | **DONE** — typed task → validate → Room → Today → complete |
 | P03 | Voice input and deterministic parser | **DONE (automated)** — tap-to-speak, on-device-only recogniser, parser, review/correction; device availability NOT RUN |
-| P04 | Scheduling and recovery engine | Not started |
+| P04 | Scheduling and recovery engine | **DONE (automated)** — deterministic day preview, apply/undo, schema v2 + migration; device run NOT RUN |
 | P05 | Board and relationships | Not started |
 | P06 | Quest Cards and notifications | Not started |
 | P07 | Privacy, resilience, accessibility | Not started |
@@ -39,9 +39,15 @@ This repository is the implementation of the approved product in
   focused clarification when the parser is unsure, then save. The recogniser is the on-device
   one; if the device has none, or the microphone permission is denied, Chrona offers typing
   instead of switching to a possibly remote recogniser. No raw audio is stored.
+- **A deterministic day plan:** the Schedule tab builds a preview from your tasks and fixed
+  commitments — what is planned, what moved, and what could not be placed (with a reason).
+  Fixed commitments and FIXED tasks are never moved; buffers, dependencies, earliest windows and
+  deadlines are honoured; a missing duration assumes 30 minutes and is called out as an
+  assumption. You can **Apply** the plan (written atomically as a revision) and **Undo** it; a
+  preview alone never writes anything. The engine is pure domain code — no AI, no network.
 
-**Not working yet:** the schedule generator, schedule recovery, the visual board, reminders and
-notifications, and the Privacy Centre. They belong to P04–P07.
+**Not working yet:** the visual board and relationship editing, reminders and notifications, and
+the Privacy Centre. They belong to P05–P07.
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.
@@ -128,12 +134,12 @@ Always use the committed wrapper. Never rely on a globally installed Gradle.
 │       ├── ChronaApplication.kt  Entry point
 │       ├── MainActivity.kt       Single-activity Compose host
 │       ├── navigation/           Route registry + navigation shell
-│       ├── domain/               Pure Kotlin: models, task rules, relations, parser
-│       ├── data/                 Room database, DAOs, mappers, repositories
-│       ├── usecase/              Orchestration layer (incl. task-intent create)
+│       ├── domain/               Pure Kotlin: models, task rules, relations, parser, scheduling, recovery
+│       ├── data/                 Room database (v2), DAOs, mappers, repositories, migrations
+│       ├── usecase/              Orchestration layer (incl. task-intent create, apply/undo recovery)
 │       ├── platform/             Speech, and later notifications/overlay/work
 │       ├── privacy/              Data inventory, export, delete (P07+)
-│       └── ui/                   Compose design system and screens (incl. ui/voice)
+│       └── ui/                   Compose design system and screens (incl. ui/voice, ui/schedule)
 ├── gradle/libs.versions.toml     The single source of dependency versions
 ├── scripts/verify.sh|.ps1        Equivalent verification entry points per OS
 ├── opencode/                     Master execution prompt + phase prompts P01–P08
@@ -166,11 +172,12 @@ the domain core imports no Android, Room or network code.
   emulation is available; `artd` reports "no usable artifacts" and `am start` is rejected with
   `result code=-92`. The instrumentation suites compile and will run unchanged once a
   `kvm`-capable host or the moto g54 is available.
-- **Physical device (moto g54, Android 15) untested** — required before P03/P06/P07 claims.
+- **Physical device (moto g54, Android 15) untested** — required before P03/P04/P06/P07 claims.
   In particular, on-device speech availability, the permission flow and observed network
-  behaviour are NOT RUN (OPEN-007); voice stays optional and typing is always complete.
-- **Schema migration untested**, because there is only one schema version yet. Room schema v1
-  is exported to `app/schemas/` so the migration test has a real starting point at version 2.
+  behaviour are NOT RUN (OPEN-007); voice stays optional and typing is always complete. The P04
+  schedule preview/apply/undo has only been exercised at the JVM/Room layer.
+- **Schema migration** — v1→v2 is now tested (`MigrationTest1To2Test`) against a real SQLite v1
+  database; both `1.json` and `2.json` are exported. Future versions must extend this test.
 - **Offline is true by construction, not measured.** No networking permission and no networking
   dependency exist, but the airplane-mode acceptance test has not been executed on a device.
 - Release build is unminified until a shrink/obfuscation audit exists.

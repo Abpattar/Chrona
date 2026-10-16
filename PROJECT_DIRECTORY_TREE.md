@@ -66,14 +66,14 @@ chrona/
 │       │       │   ├── model/                       (planned P02)
 │       │       │   ├── task/                        (planned P02)
 │       │       │   ├── relation/                    (planned P02)
-│       │       │   ├── scheduling/                  (planned P04)
-│       │       │   ├── recovery/                    (planned P04)
+│       │       │   ├── scheduling/                  (P04) deterministic engine + contract
+│       │       │   ├── recovery/                    (P04) planner, use cases, revision contract
 │       │       │   ├── reminder/                    (planned P06)
 │       │       │   └── parse/                       (P03) deterministic parser + contract
 │       │       ├── data/
-│       │       │   ├── local/                       (planned P02)
-│       │       │   ├── migration/                   (planned P02)
-│       │       │   ├── repository/                  (planned P02)
+│       │       │   ├── local/                       [P02] Room v1; [P04] v2 + migration + schedule tables
+│       │       │   ├── migration/                    (planned) explicit migrations live in ChronaDatabase
+│       │       │   ├── repository/                  [P02; P04 adds RoomScheduleRevisionRepository]
 │       │       │   └── export/                      (planned P07)
 │       │       ├── usecase/                         (planned P02)
 │       │       ├── input/
@@ -89,21 +89,24 @@ chrona/
 │       │       └── ui/
 │       │           ├── design/                      [P01] theme, paper tokens, components
 │       │           ├── today/                       [P01 shell; list in P02]
-│       │           ├── schedule/                    [P01 shell; timeline in P02/P04]
+│       │           ├── schedule/                    [P01 shell; preview/apply/undo in P04]
 │       │           ├── board/                       [P01 shell; canvas in P05]
 │       │           ├── history/                     [P01 shell; content in P04/P07]
 │       │           ├── taskeditor/                  [P02] typed task editor
 │       │           ├── questcard/                   (planned P06)
-│       │           ├── recovery/                    (planned P04)
+│       │           ├── recovery/                     (reserved; recovery UI lives in ui/schedule for P04)
 │       │           ├── settings/                    [P01 shell; preferences P06/P07]
 │       │           ├── voice/                       [P03] tap-to-speak capture sheet + VM
 │       │           └── privacy/                      (planned P07)
 │       ├── test/kotlin/com/chrona/app/
 │       │   ├── domain/                               (planned P02)
 │       │       ├── parse/                               [P03] parser/tests
+│       │       ├── scheduling/                          [P04] engine/scenario tests
+│       │       ├── recovery/                            [P04] use-case tests
+│       │   ├── data/                                    [P04] Room repo + migration tests
 │       │   ├── navigation/                          [P01]
 │       │       ├── platform/                             [P03] speech adapter tests
-│       │       ├── ui/                                   [P03] voice VM tests
+│       │       ├── ui/                                   [P03] voice VM tests; [P04] schedule VM tests
 │       │       ├── usecase/                               [P03] intent-create tests
 │       │       └── reminder/                            (planned P06)
 │       └── androidTest/kotlin/com/chrona/app/

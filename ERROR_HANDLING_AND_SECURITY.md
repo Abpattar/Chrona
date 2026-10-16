@@ -20,6 +20,11 @@ Main risks: misparsed date causing bad plan; schedule infeasibility hidden; depe
 - Treat any parse/model output as untrusted: validate title/duration/dates/relationships/status and hard-dependency confirmation. Parser never applies schedule.
 - Use Room DAO binding/parameterized queries, domain validation, integrity constraints and explicit schema migration.
 - Apply scheduling revision + assignment changes in a transaction and compare expected revision. Notification actions must be idempotent and use unambiguous action identities.
+  - **P04 implementation:** `RoomScheduleRevisionRepository.current/apply/undo` run inside
+    `@Transaction` methods; `apply` compares the expected basis revision and the per-task
+    `version`s and returns a typed `ApplyRecoveryResult` without writing on mismatch. `undo`
+    refuses when a newer revision exists or a task was edited after the plan. Reason codes
+    `SCHEDULE_APPLIED`/`SCHEDULE_UNDONE` are recorded instead of free text.
 - Logs should contain stable reason codes and minimal diagnostic metadata, never raw task description, audio transcript, secret or full serialized user record.
 - Deletion includes app-owned records/preferences/history/exports as appropriate, scheduled WorkManager work and app-managed reminder state. Explain that Chrona cannot delete content processed independently by a speech provider.
 - Permission requests happen near point of use with rationale; deny/revoke states are normal paths. Overlay never blocks core task planning.
@@ -37,7 +42,7 @@ Notifications can be denied/muted/delayed. WorkManager is deferrable, not exact-
 | Parser misreads task | bad schedule | assumptions, correction, typed validation | parser fixtures and correction path |
 | Overloaded day hidden | trust loss | unplaced tasks and conflict explanation | overloaded-day acceptance cases |
 | Stale schedule overwrites edits | data loss | revision compare + transaction | stale-version/fault-injection tests |
-| Migration loses user data | high | explicit migrations; no destructive fallback | migration tests for every schema version |
+| Migration loses user data | high | explicit migrations; no destructive fallback | `MigrationTest1To2Test` (v1→v2, real SQLite); extend for every new version |
 | Voice transferred remotely unintentionally | high | on-device path only by default; no silent system fallback | availability/source audit + real device |
 | Reminder fatigue | medium | caps/quiet hours/batching/suppression | seven-day deterministic reminder fixture |
 | Overlay fails on OEM | medium | optional overlay and normal fallback | moto g54 Android15 device checks |

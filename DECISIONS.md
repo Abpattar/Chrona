@@ -31,6 +31,9 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-024 | APPROVED | Release builds are unminified for now | no shrink/obfuscation audit has been done; an unverified R8 config risks stripping Room/Compose classes in a demonstrator build. Revisit before any release | P01 |
 | ADR-025 | APPROVED | Application identity `com.chrona.app` / "Chrona" | no approved reverse-DNS ID exists. "Chrona" is provisional; trademark and domain availability are unchecked. Renaming the product is an owner decision | P01 |
 | ADR-026 | APPROVED | Parser moved to `domain/parse`; speech boundary to `platform/speech`; capture UI to `ui/voice`. `TaskIntentDraft` adds `fixedRange` and drops `clarification` (carried by `NeedsClarification` with a base draft) | Keeps domain pure (no Android imports). The change lets a fixed time interval be represented without guessing and separates an unanswered clarification from a complete draft. Matches the implemented P03 code and tests | P03 |
+| ADR-027 | APPROVED | `ScheduleProposal.proposalId` is derived deterministically from its basis and content via `UUID.nameUUIDFromBytes`; never `randomUUID()` | identical inputs must yield the identical proposal (testable determinism, ADR-003); a random id would make tests flaky and break "same snapshot → same plan" | P04 |
+| ADR-028 | APPROVED | Undo is deliberately one-step and conservative: only the newest revision can be undone, and only if no task was edited after it | multi-step undo needs full history replay/merge semantics far beyond scope; refusing on later edits prevents silently discarding newer user changes (REC-003 safety) | P04 |
+| ADR-029 | APPROVED | Room schema v2 adds `schedule_revisions`/`schedule_placements` with `MIGRATION_1_2` beside the database; no `fallbackToDestructiveMigration` | preserves the explicit-migration policy (ADR-007) required by RELIABILITY-001; a destructive fallback would silently erase user data | P04 |
 
 ### ADR-018a — Coordinated toolchain change record
 
@@ -66,6 +69,26 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 - **Structural change:** `domain/parse` (pure Kotlin) rather than `input/parser`; `platform/speech` rather than `input/voice`; `ui/voice` for capture UI. Preserves the domain core import boundary (no Android imports).
 - **Contract change:** `TaskIntentDraft.fixedRange: TimeRange?` added; `clarification` removed from the draft and moved to `TaskUnderstandingResult.NeedsClarification(prompt)` with `prompt.base`. No semantics lost.
 - **Verification:** 152 unit/Robolectric tests pass; `scripts/verify.sh` passes; only `RECORD_AUDIO` added, no `INTERNET` permission and no networking dependency. Device on-device availability remains unmeasured (OPEN-007).
+
+### P04 change record — scheduling, recovery and schema v2
+
+- **Date:** 17 October 2026. **Phase:** P04.
+- **Structure:** engine lives in `domain/scheduling` (pure, no Android/Room/parser imports);
+  recovery planner and apply/undo use cases plus the `ScheduleRevisionRepository` contract live
+  in `domain/recovery`; the Room implementation (`RoomScheduleRevisionRepository`) and shared
+  `applyStatusChange` helper live in `data/repository`. Recovery UI is a single
+  `ui/schedule` surface (preview/apply/undo) rather than a separate `ui/recovery` package.
+- **Contract additions:** `ScheduleInput`, `ScheduleProposal` (+`ScheduleBasis`, `ScheduleRevision`,
+  `ScheduleRevisionReason`), `RecoveryTrigger`/`RecoveryRequest`/`ApplyRecoveryResult`/`UndoResult`,
+  `ApplyRecoveryUseCase`, `UndoScheduleRevisionUseCase`; `ReasonCode.SCHEDULE_APPLIED` and
+  `ReasonCode.SCHEDULE_UNDONE`.
+- **Decisions:** ADR-027 (deterministic `proposalId`), ADR-028 (conservative one-step undo),
+  ADR-029 (schema v2 + `MIGRATION_1_2`, no destructive fallback). Missing task duration assumes
+  a documented 30 minutes; zero/negative duration is refused; fixed commitments and `FIXED`
+  tasks are never moved; a dependency cycle unplaces the affected set with `DEPENDENCY_INCOMPLETE`.
+- **Verification:** `./scripts/verify.sh` passes on Ubuntu — 191 unit/Robolectric tests, 0
+  failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. Device run
+  remains NOT RUN (OPEN-014).
 
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.

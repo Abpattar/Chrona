@@ -91,6 +91,8 @@ object ReasonCode {
     const val EVENT_CREATED: String = "EVENT_CREATED"
     const val EVENT_UPDATED: String = "EVENT_UPDATED"
     const val EVENT_DELETED: String = "EVENT_DELETED"
+    const val SCHEDULE_APPLIED: String = "SCHEDULE_APPLIED"
+    const val SCHEDULE_UNDONE: String = "SCHEDULE_UNDONE"
 }
 
 /** Convenience for callers that only care whether a status moved. */

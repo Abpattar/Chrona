@@ -1,32 +1,45 @@
 package com.chrona.app.domain.scheduling
 
-import com.chrona.app.domain.model.Flexibility
-import com.chrona.app.domain.model.Priority
-import com.chrona.app.domain.model.RelationType
+import com.chrona.app.domain.model.RevisionId
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
-import com.chrona.app.domain.model.TaskStatus
+import com.chrona.app.domain.model.TaskRelationship
 import com.chrona.app.domain.model.TimeRange
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
 import java.time.ZonedDateTime
 
+/**
+ * Everything the deterministic scheduler is allowed to see.
+ *
+ * The engine is a pure function of this value: same input, same proposal. Environment-dependent
+ * values (`now`, day boundaries, buffer) are injected rather than read from a clock (CH-SCHED-001).
+ */
 data class ScheduleInput(
     val tasks: List<Task>,
-    val fixedCommitments: List<FixedCommitment>,
+    val fixedCommitments: List<FixedCommitment> = emptyList(),
     val dayStart: ZonedDateTime,
     val dayEnd: ZonedDateTime,
+    val relationships: List<TaskRelationship> = emptyList(),
+    /** Injected reference time; placement never precedes it (late start / late wake-up). */
+    val now: ZonedDateTime? = null,
+    /** Recovery buffer kept around fixed commitments. */
     val buffer: Duration = Duration.ofMinutes(10),
+    /** Placements from the currently applied revision, used to describe what moved. */
+    val previousPlacements: List<SchedulePlacement> = emptyList(),
+    /** The applied revision this input was read at; recorded in the proposal basis. */
+    val basedOnRevisionId: RevisionId? = null,
     val policyVersion: String = "p04-v1",
 )
 
+/** A manually entered fixed commitment the scheduler must work around. Never moved by recovery. */
 data class FixedCommitment(
     val id: String,
     val title: String,
     val range: TimeRange,
 )
 
+/** One scheduled block. A split task has one placement per session. */
 data class SchedulePlacement(
     val taskId: TaskId,
     val start: ZonedDateTime,
@@ -34,6 +47,7 @@ data class SchedulePlacement(
     val sessionIndex: Int = 0,
 )
 
+/** Why a task did not make it onto the plan. Always paired with a plain-language explanation. */
 enum class UnplacedReason {
     NO_AVAILABLE_WINDOW,
     DEADLINE_INFEASIBLE,
@@ -50,12 +64,14 @@ data class UnplacedTask(
     val explanation: String = "",
 )
 
+/** Two things that cannot both keep their time. */
 data class ScheduleConflict(
     val taskId: TaskId,
     val otherId: TaskId,
     val explanation: String = "",
 )
 
+/** A task whose time changed between the current revision and the proposal. */
 data class ScheduleChange(
     val taskId: TaskId,
     val fromStart: ZonedDateTime?,
@@ -63,18 +79,34 @@ data class ScheduleChange(
     val explanation: String = "",
 )
 
-data class ScheduleAssumption(
-    val text: String,
+/** A stated interpretation the user may disagree with. Never silent. */
+data class ScheduleAssumption(val text: String)
+
+/**
+ * What the proposal was computed from: the current revision and the exact task versions read.
+ *
+ * Apply rechecks both, so a proposal cannot overwrite a task edited after the preview (AT-016).
+ */
+data class ScheduleBasis(
+    val revisionId: RevisionId?,
+    val taskVersions: Map<TaskId, Long>,
 )
 
+/**
+ * A previewable, explainable plan. Persistent data is untouched until it is applied.
+ *
+ * [placements] and [unplaced] together always represent every schedulable task, so nothing is
+ * ever silently dropped.
+ */
 data class ScheduleProposal(
     val proposalId: String,
-    val basedOnRevisionId: String?,
+    val basis: ScheduleBasis,
     val placements: List<SchedulePlacement>,
     val unplaced: List<UnplacedTask>,
     val conflicts: List<ScheduleConflict>,
     val changes: List<ScheduleChange>,
     val assumptions: List<ScheduleAssumption>,
+    val overloaded: Boolean,
     val explanation: String,
     val policyVersion: String,
 )
@@ -82,3 +114,12 @@ data class ScheduleProposal(
 interface ScheduleEngine {
     fun propose(input: ScheduleInput): ScheduleProposal
 }
+
+/** An applied plan, kept for undo and for describing movement. */
+data class ScheduleRevision(
+    val id: RevisionId,
+    val basedOnRevisionId: RevisionId?,
+    val reasonCode: String,
+    val appliedAt: Instant,
+    val placements: List<SchedulePlacement>,
+)

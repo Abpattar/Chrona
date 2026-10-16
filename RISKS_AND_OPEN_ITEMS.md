@@ -43,6 +43,7 @@
 | Unsupported novelty/IP claim | weak research integrity | current literature/competitor work, measured results and limits |
 | Unminified release build (ADR-024) | larger APK, no obfuscation | acceptable for a demonstrator; revisit before any real distribution |
 | AndroidX auto-upgrade pressure | accidental move onto an unvalidated platform line | lint "newer version available" is `informational`; version changes require a DECISIONS.md entry |
+| P04 undo is deliberately one-step and refuses if any task changed after the plan | user cannot undo across later edits | conservative by design; re-running recovery produces a fresh proposal. Documented in DECISIONS.md |
 
 ## Release-blocking conditions
 - P01 clean build/test on both OSes is not passed or is falsely reported.
@@ -59,6 +60,9 @@
   about runtime behaviour, permissions, notifications, overlay or speech recognition. In P03
   this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured; voice is
   kept optional and reported as unknown.
-- **Room schema migration** — untested, because only schema v1 exists. Room schema v1 is
-  exported to `app/schemas/` and committed so the `MigrationTestHelper` test has a real
-  starting point when v2 lands. Blocking for RELIABILITY-001 at P07.
+- **Room schema migration** — *resolved in P04*. Schema v2 adds `schedule_revisions` and
+  `schedule_placements`; `MIGRATION_1_2` is committed and exercised end-to-end by
+  `MigrationTest1To2Test` against a real SQLite v1 database. Both `1.json` and `2.json` are
+  exported and committed. (Note: `MigrationTestHelper` cannot read exported schemas from JVM
+  unit tests, so the test builds the v1 database from frozen DDL instead.) No destructive
+  fallback is registered.

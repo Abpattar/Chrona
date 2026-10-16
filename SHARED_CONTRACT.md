@@ -124,45 +124,75 @@ interface ScheduleEngine {
 }
 
 data class ScheduleProposal(
-    val proposalId: String,
-    val basedOnRevisionId: RevisionId?,
+    val proposalId: String,          // deterministic; nameUUIDFromBytes, never randomUUID
+    val basis: ScheduleBasis,        // revisionId it was built from + per-task versions it saw
     val placements: List<SchedulePlacement>,
-    val unplaced: List<UnplacedTask>,
+    val unplaced: List<UnplacedTask>,   // each carries an UnplacedReason + explanation
     val conflicts: List<ScheduleConflict>,
-    val changes: List<ScheduleChange>,
+    val changes: List<ScheduleChange>,  // movement vs previousPlacements, explained
     val assumptions: List<ScheduleAssumption>,
+    val overloaded: Boolean,            // more work than the day can hold; never the user's fault
     val explanation: String,
     val policyVersion: String,
 )
 ```
 
+`ScheduleInput` carries `tasks`, `fixedCommitments`, `dayStart`, `dayEnd`, `relationships`,
+an injected `now`, `buffer`, `previousPlacements`, `basedOnRevisionId` and `policyVersion`.
+It is an immutable snapshot; the engine reads no clock, storage or network.
+
 Rules:
 - Pure deterministic function; no I/O, Android, database, external API or global time read.
-- Identical normalized input + policy version yields identical proposal semantics.
-- No placement overlaps fixed commitments or violates a confirmed hard prerequisite order.
-- Completed/skipped/archived tasks are not silently reactivated.
+- Identical normalized input + policy version yields identical proposal semantics and the same
+  `proposalId`.
+- No placement overlaps fixed commitments or FIXED tasks; those are never moved.
+- No placement violates a confirmed hard prerequisite order; a hard cycle rejects the affected
+  set with an explanation instead of guessing.
+- A deadline that cannot be met is reported (`UnplacedReason.DEADLINE_INFEASIBLE`), never overrun.
+- Completed/skipped/archived tasks are not silently reactivated and are not scheduled.
 - Every eligible active task is placed or appears in `unplaced` with a reason.
-- Soft preferences may be missed with explanation; do not label them as hard conflicts.
+- Soft preferences (preferred windows, buffers, earliest start) may be missed with explanation;
+  do not label them as hard conflicts.
+- Overload is stated as a capacity limit, with alternatives left to the user; the user is never
+  blamed or punished.
 - Engine creates a proposal only, not persisted state.
 
 ## Recovery/revision contract
 
 ```kotlin
-interface BuildScheduleUseCase {
-    suspend operator fun invoke(input: ScheduleInput): ScheduleProposal
-}
 interface ProposeRecoveryUseCase {
     suspend operator fun invoke(request: RecoveryRequest): ScheduleProposal
 }
 interface ApplyRecoveryUseCase {
-    suspend operator fun invoke(proposalId: String, expectedRevision: RevisionId?): ApplyRecoveryResult
+    suspend operator fun invoke(
+        proposal: ScheduleProposal,
+        expectedRevision: RevisionId?,
+        reasonCode: String = ScheduleRevisionReason.APPLIED,
+    ): ApplyRecoveryResult
 }
 interface UndoScheduleRevisionUseCase {
     suspend operator fun invoke(revisionId: RevisionId): UndoResult
 }
+
+interface ScheduleRevisionRepository {
+    suspend fun current(): Outcome<ScheduleRevision?>
+    suspend fun apply(
+        proposal: ScheduleProposal,
+        expectedRevision: RevisionId?,
+        reasonCode: String,
+        appliedAt: Instant,
+    ): Outcome<RevisionId>
+    suspend fun undo(revisionId: RevisionId, appliedAt: Instant): Outcome<Unit>
+}
 ```
 
-`ApplyRecoveryUseCase` rechecks the expected revision inside the transaction. Stale proposals are rejected or recomputed; they may not overwrite later edits. Assignment changes and revision metadata commit atomically. Undo is allowed only when the prior state can be restored without wiping newer constraints; otherwise return `RequiresNewRecovery` plus reasons. Fixed commitments remain unchanged.
+`DeterministicRecoveryPlanner` runs the same engine as first planning; there is deliberately no
+second algorithm. `ApplyRecoveryUseCase` rechecks the expected revision **and** every task
+version inside one transaction. Stale proposals are rejected with a plain-language reason; they
+may not overwrite later edits. Placement changes, revision metadata and any `PLANNED` status
+change commit atomically, with a status-history row. Undo is allowed only for the newest
+revision and only when no task was edited after it was applied; otherwise it is refused with a
+safe next step ("build a new plan"). Fixed commitments remain unchanged.
 
 ## Task and card actions are distinct
 - `startTask(taskId, occurredAt)` moves an eligible task to `IN_PROGRESS`.

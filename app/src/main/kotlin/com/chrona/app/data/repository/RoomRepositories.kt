@@ -5,6 +5,7 @@ import com.chrona.app.data.local.CalendarEventDao
 import com.chrona.app.data.local.ChronaDatabase
 import com.chrona.app.data.local.TaskDao
 import com.chrona.app.data.local.TaskRelationshipDao
+import com.chrona.app.data.local.ScheduleRevisionDao
 import com.chrona.app.data.local.TaskStatusLogDao
 import com.chrona.app.data.local.TaskStatusLogEntity
 import com.chrona.app.data.local.toDomain
@@ -14,6 +15,7 @@ import com.chrona.app.domain.model.EventId
 import com.chrona.app.domain.model.Failure
 import com.chrona.app.domain.model.Outcome
 import com.chrona.app.domain.model.RelationId
+import com.chrona.app.domain.model.RevisionId
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
 import com.chrona.app.domain.model.TaskQuery
@@ -164,52 +166,68 @@ class RoomTaskRepository(
         next: Task,
         reasonCode: String,
         occurredAt: Instant,
-    ): Outcome<Task> {
-        val entity = next.toEntity()
-        val rows = taskDao.updateIfVersionMatches(
-            id = entity.id,
-            expectedVersion = current.version,
-            title = entity.title,
-            details = entity.details,
-            priority = entity.priority,
-            estimatedDurationMinutes = entity.estimatedDurationMinutes,
-            deadlineEpochMillis = entity.deadlineEpochMillis,
-            deadlineZoneId = entity.deadlineZoneId,
-            requestedDateIso = entity.requestedDateIso,
-            earliestStartEpochMillis = entity.earliestStartEpochMillis,
-            earliestStartZoneId = entity.earliestStartZoneId,
-            preferredStart = entity.preferredStart,
-            preferredEnd = entity.preferredEnd,
-            flexibility = entity.flexibility,
-            fixedStartEpochMillis = entity.fixedStartEpochMillis,
-            fixedEndEpochMillis = entity.fixedEndEpochMillis,
-            fixedZoneId = entity.fixedZoneId,
-            splittable = entity.splittable,
-            minimumSessionMinutes = entity.minimumSessionMinutes,
-            status = entity.status,
-            projectLabel = entity.projectLabel,
-            updatedAtEpochMillis = entity.updatedAtEpochMillis,
-            completedAtEpochMillis = entity.completedAtEpochMillis,
-            postponedUntilEpochMillis = entity.postponedUntilEpochMillis,
-            postponedUntilZoneId = entity.postponedUntilZoneId,
-            assumptions = entity.assumptions,
-            version = entity.version,
-        )
-        return if (rows == 0) {
-            Outcome.Failed(Failure.Conflict("This task changed somewhere else. Reopen it and try again."))
-        } else {
-            statusLogDao.insert(
-                TaskStatusLogEntity(
-                    taskId = entity.id,
-                    fromStatus = current.status,
-                    toStatus = entity.status,
-                    reasonCode = reasonCode,
-                    changedAtEpochMillis = occurredAt.toEpochMilli(),
-                ),
-            )
-            Outcome.Success(next.copy(version = current.version + 1))
-        }
+    ): Outcome<Task> = if (taskDao.applyStatusChange(statusLogDao, current, next, reasonCode, occurredAt)) {
+        Outcome.Success(next.copy(version = current.version + 1))
+    } else {
+        Outcome.Failed(Failure.Conflict("This task changed somewhere else. Reopen it and try again."))
     }
+}
+
+/**
+ * Updates a task and appends exactly one history row, in the caller's transaction.
+ *
+ * Shared by [RoomTaskRepository] and [RoomScheduleRevisionRepository] so an apply or an undo
+ * writes status history the same way a manual lifecycle action does. Returns false when the row
+ * moved on, which every caller turns into a typed conflict.
+ */
+internal suspend fun TaskDao.applyStatusChange(
+    statusLogDao: TaskStatusLogDao,
+    current: com.chrona.app.data.local.TaskEntity,
+    next: Task,
+    reasonCode: String,
+    occurredAt: Instant,
+): Boolean {
+    val entity = next.toEntity()
+    val rows = updateIfVersionMatches(
+        id = entity.id,
+        expectedVersion = current.version,
+        title = entity.title,
+        details = entity.details,
+        priority = entity.priority,
+        estimatedDurationMinutes = entity.estimatedDurationMinutes,
+        deadlineEpochMillis = entity.deadlineEpochMillis,
+        deadlineZoneId = entity.deadlineZoneId,
+        requestedDateIso = entity.requestedDateIso,
+        earliestStartEpochMillis = entity.earliestStartEpochMillis,
+        earliestStartZoneId = entity.earliestStartZoneId,
+        preferredStart = entity.preferredStart,
+        preferredEnd = entity.preferredEnd,
+        flexibility = entity.flexibility,
+        fixedStartEpochMillis = entity.fixedStartEpochMillis,
+        fixedEndEpochMillis = entity.fixedEndEpochMillis,
+        fixedZoneId = entity.fixedZoneId,
+        splittable = entity.splittable,
+        minimumSessionMinutes = entity.minimumSessionMinutes,
+        status = entity.status,
+        projectLabel = entity.projectLabel,
+        updatedAtEpochMillis = entity.updatedAtEpochMillis,
+        completedAtEpochMillis = entity.completedAtEpochMillis,
+        postponedUntilEpochMillis = entity.postponedUntilEpochMillis,
+        postponedUntilZoneId = entity.postponedUntilZoneId,
+        assumptions = entity.assumptions,
+        version = entity.version,
+    )
+    if (rows == 0) return false
+    statusLogDao.insert(
+        TaskStatusLogEntity(
+            taskId = entity.id,
+            fromStatus = current.status,
+            toStatus = entity.status,
+            reasonCode = reasonCode,
+            changedAtEpochMillis = occurredAt.toEpochMilli(),
+        ),
+    )
+    return true
 }
 
 /** Room-backed [EventRepository] for manual fixed commitments. */
@@ -290,6 +308,150 @@ class RoomRelationshipRepository(
         database.withTransaction {
             relationshipDao.deleteForSource(source.value)
             links.forEach { relationshipDao.upsert(it.toEntity()) }
+        }
+    }
+}
+
+/**
+ * Room-backed [ScheduleRevisionRepository].
+ *
+ * Apply and undo each run inside one transaction and recheck the expected revision, so a stale
+ * proposal is refused rather than overwriting newer work (AT-016, REC-003).
+ */
+class RoomScheduleRevisionRepository(
+    private val database: ChronaDatabase,
+    private val newId: () -> String,
+    private val revisionDao: ScheduleRevisionDao = database.scheduleRevisionDao(),
+    private val taskDao: TaskDao = database.taskDao(),
+    private val statusLogDao: TaskStatusLogDao = database.taskStatusLogDao(),
+) : com.chrona.app.domain.recovery.ScheduleRevisionRepository {
+
+    override suspend fun current(): Outcome<com.chrona.app.domain.scheduling.ScheduleRevision?> = storage {
+        revisionDao.latest()?.let { header ->
+            header.toDomain(revisionDao.placements(header.id))
+        }
+    }
+
+    override suspend fun apply(
+        proposal: com.chrona.app.domain.scheduling.ScheduleProposal,
+        expectedRevision: RevisionId?,
+        reasonCode: String,
+        appliedAt: Instant,
+    ): Outcome<RevisionId> = storageOutcome {
+        database.withTransaction {
+            val current = revisionDao.latest()?.let { RevisionId(it.id) }
+            when {
+                current != expectedRevision ->
+                    Outcome.Failed(
+                        Failure.Conflict("The plan changed since this preview. Rebuild it to see the latest."),
+                    )
+
+                proposal.basis.revisionId != expectedRevision ->
+                    Outcome.Failed(
+                        Failure.Conflict("This preview is out of date. Rebuild it before applying."),
+                    )
+
+                else -> {
+                    val staleTask = proposal.basis.taskVersions.entries.firstOrNull { (taskId, version) ->
+                        val row = taskDao.findById(taskId.value)
+                        row == null || row.version != version
+                    }
+                    if (staleTask != null) {
+                        Outcome.Failed(
+                            Failure.Conflict("A task changed since this preview. Rebuild the plan before applying."),
+                        )
+                    } else {
+                        applyRevision(proposal, expectedRevision, reasonCode, appliedAt)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun applyRevision(
+        proposal: com.chrona.app.domain.scheduling.ScheduleProposal,
+        expectedRevision: RevisionId?,
+        reasonCode: String,
+        appliedAt: Instant,
+    ): Outcome<RevisionId> {
+        val revisionId = RevisionId(newId())
+        revisionDao.insertRevision(
+            com.chrona.app.data.local.ScheduleRevisionEntity(
+                id = revisionId.value,
+                basedOnRevisionId = expectedRevision?.value,
+                reasonCode = reasonCode,
+                appliedAtEpochMillis = appliedAt.toEpochMilli(),
+            ),
+        )
+        revisionDao.insertPlacements(
+            proposal.placements.map { it.toEntity(revisionId.value) },
+        )
+        // Accepting a schedule moves freshly planned work to PLANNED, with an audit row. Work the
+        // user already started, finished or skipped is never touched (REC-003).
+        val startsPlanned = com.chrona.app.domain.model.TaskStatus.PLANNED
+        proposal.placements.map { it.taskId }.distinct().forEach { taskId ->
+            val row = taskDao.findById(taskId.value) ?: return@forEach
+            val domain = row.toDomain()
+            if (domain.status == com.chrona.app.domain.model.TaskStatus.INBOX ||
+                domain.status == com.chrona.app.domain.model.TaskStatus.POSTPONED
+            ) {
+                taskDao.applyStatusChange(
+                    statusLogDao,
+                    row,
+                    domain.copy(status = startsPlanned, updatedAt = appliedAt),
+                    ReasonCode.SCHEDULE_APPLIED,
+                    appliedAt,
+                )
+            }
+        }
+        return Outcome.Success(revisionId)
+    }
+
+    override suspend fun undo(revisionId: RevisionId, appliedAt: Instant): Outcome<Unit> = storageOutcome {
+        database.withTransaction {
+            val header = revisionDao.findById(revisionId.value)
+                ?: return@withTransaction Outcome.Failed(Failure.NotFound)
+            val latest = revisionDao.latest()
+            when {
+                latest == null || latest.id != revisionId.value ->
+                    Outcome.Failed(Failure.Conflict("Only the most recently applied plan can be undone."))
+
+                // Newer edits, new tasks or moved commitments mean undoing would overwrite them.
+                revisionDao.tasksUpdatedAfter(header.appliedAtEpochMillis) > 0 ->
+                    Outcome.Failed(
+                        Failure.Conflict(
+                            "Something changed after this plan, so undoing would overwrite newer work. " +
+                                "Build a new plan instead.",
+                        ),
+                    )
+
+                else -> {
+                    val undoneTasks = revisionDao.placements(revisionId.value).map { it.taskId }.distinct()
+                    revisionDao.deleteRevision(revisionId.value)
+                    val previousTasks = revisionDao.latest()
+                        ?.let { revisionDao.placements(it.id).map { p -> p.taskId }.toSet() }
+                        ?: emptySet()
+
+                    undoneTasks.forEach { taskId ->
+                        val row = taskDao.findById(taskId) ?: return@forEach
+                        val domain = row.toDomain()
+                        if (domain.status != com.chrona.app.domain.model.TaskStatus.PLANNED) return@forEach
+                        val target = if (taskId in previousTasks) {
+                            com.chrona.app.domain.model.TaskStatus.PLANNED
+                        } else {
+                            com.chrona.app.domain.model.TaskStatus.INBOX
+                        }
+                        taskDao.applyStatusChange(
+                            statusLogDao,
+                            row,
+                            domain.copy(status = target, updatedAt = appliedAt),
+                            ReasonCode.SCHEDULE_UNDONE,
+                            appliedAt,
+                        )
+                    }
+                    Outcome.Success(Unit)
+                }
+            }
         }
     }
 }

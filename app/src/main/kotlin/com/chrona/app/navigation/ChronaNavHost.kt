@@ -21,7 +21,7 @@ import androidx.navigation.compose.rememberNavController
 import com.chrona.app.di.AppContainer
 import com.chrona.app.ui.board.BoardScreen
 import com.chrona.app.ui.history.HistoryScreen
-import com.chrona.app.ui.schedule.ScheduleScreen
+import com.chrona.app.ui.schedule.ScheduleRoute
 import com.chrona.app.ui.settings.SettingsScreen
 import com.chrona.app.ui.today.TodayRoute
 
@@ -57,7 +57,7 @@ fun ChronaNavHost(
             composable(ChronaDestination.TODAY.route) {
                 TodayRoute(container)
             }
-            composable(ChronaDestination.SCHEDULE.route) { ScheduleScreen() }
+            composable(ChronaDestination.SCHEDULE.route) { ScheduleRoute(container) }
             composable(ChronaDestination.BOARD.route) { BoardScreen() }
             composable(ChronaDestination.HISTORY.route) { HistoryScreen() }
             composable(ChronaDestination.SETTINGS.route) { SettingsScreen() }

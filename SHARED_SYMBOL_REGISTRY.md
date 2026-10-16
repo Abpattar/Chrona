@@ -16,12 +16,12 @@ when actual code/test evidence supports it. See `PROGRESS.md` for command-level 
 | CH-PARSE-001 | `TaskUnderstandingProvider` | `SHARED_CONTRACT.md`, `domain/parse` | P03 | TESTED | text/voice capture; `DeterministicTaskIntentParserTest` (38 cases) + `TaskIntentDraftValidatorTest`; provider-neutral contract |
 | CH-PARSE-002 | `TaskIntentDraft` | same | P03 | TESTED | validation/editor; malformed/ambiguous parser fixtures; `CreateTaskFromIntentUseCaseTest` (8 cases) |
 | CH-USE-001 | `CreateTaskUseCase` | `SHARED_CONTRACT.md`, usecase | P02 | TESTED | `CreateTaskUseCaseTest` (7 cases) + Room round trip |
-| CH-SCH-001 | `ScheduleEngine.propose` | pure domain scheduling | P04 | PLANNED | planner/recovery; deterministic invariants |
-| CH-SCH-002 | `ScheduleProposal` | placements/unplaced/conflicts/changes/explanation | P04 | PLANNED | preview/history; no silent drops |
-| CH-REC-001 | `ApplyRecoveryUseCase` | atomic application against expected revision | P04 | PLANNED | recovery UI; stale revision and DB failure tests |
-| CH-REC-002 | `UndoScheduleRevisionUseCase` | guarded undo or requires-new-recovery | P04 | PLANNED | history; concurrent later-change tests |
+| CH-SCH-001 | `ScheduleEngine.propose` | pure domain scheduling | P04 | TESTED | `ScheduleEngineTest` (21 cases); deterministic, no Android/Room/parser imports |
+| CH-SCH-002 | `ScheduleProposal` | basis/placements/unplaced/conflicts/changes/assumptions/overloaded/explanation | P04 | TESTED | preview/history; every active task placed or given a reason; `ScheduleViewModelTest` proves preview writes nothing |
+| CH-REC-001 | `ApplyRecoveryUseCase` | atomic application against expected revision + task versions | P04 | TESTED | `RecoveryUseCasesTest` (7) + `RoomScheduleRevisionRepositoryTest` (6); stale revision and DB-failure paths |
+| CH-REC-002 | `UndoScheduleRevisionUseCase` | guarded undo (newest revision, no later edits) | P04 | TESTED | `RecoveryUseCasesTest` + Room test `undo is refused once a task was edited after the plan` |
 | CH-DATA-001 | `TaskRepository` | repository interface | P02 | TESTED | `RoomTaskRepositoryTest` (17 cases, real SQLite) |
-| CH-DATA-002 | `ScheduleRevisionRepository` | transaction/apply/undo | P04 | PLANNED | recovery; atomicity tests |
+| CH-DATA-002 | `ScheduleRevisionRepository` | transaction `current`/`apply`/`undo` | P04 | TESTED | `RoomScheduleRevisionRepositoryTest` (6, real SQLite) + `MigrationTest1To2Test` |
 | CH-DATA-003 | `PreferencesRepository` | local settings | P06 | PLANNED | domain model exists; no repository yet, by design (see PROGRESS.md P02) |
 | CH-REM-001 | `ReminderPolicy` | pure policy; cap/quiet/batching/repeat logic | P06 | PLANNED | platform presenters; deterministic clock tests |
 | CH-REM-002 | `ReminderDecision` | surface/suppress/batch/reason | P06 | PLANNED | overlay/notification; fallback tests |

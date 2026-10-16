@@ -6,12 +6,21 @@ import com.chrona.app.data.local.ChronaDatabase
 import com.chrona.app.data.repository.EventRepository
 import com.chrona.app.data.repository.RoomEventRepository
 import com.chrona.app.data.repository.RoomRelationshipRepository
+import com.chrona.app.data.repository.RoomScheduleRevisionRepository
 import com.chrona.app.data.repository.RoomTaskRepository
 import com.chrona.app.data.repository.TaskRepository
 import com.chrona.app.domain.parse.DeterministicTaskIntentParser
 import com.chrona.app.domain.parse.ParsePreferences
 import com.chrona.app.domain.parse.TaskUnderstandingProvider
+import com.chrona.app.domain.recovery.ApplyRecoveryUseCase
+import com.chrona.app.domain.recovery.DefaultApplyRecoveryUseCase
+import com.chrona.app.domain.recovery.DefaultUndoScheduleRevisionUseCase
+import com.chrona.app.domain.recovery.DeterministicRecoveryPlanner
+import com.chrona.app.domain.recovery.ProposeRecoveryUseCase
+import com.chrona.app.domain.recovery.UndoScheduleRevisionUseCase
 import com.chrona.app.domain.relation.RelationGraph
+import com.chrona.app.domain.scheduling.DeterministicScheduleEngine
+import com.chrona.app.domain.scheduling.ScheduleEngine
 import com.chrona.app.platform.speech.AndroidSpeechRecognitionAdapter
 import com.chrona.app.platform.speech.SpeechRecognitionAdapter
 import com.chrona.app.usecase.CreateTaskFromIntentUseCase
@@ -42,11 +51,21 @@ class AppContainer(
     val taskRepository: TaskRepository = RoomTaskRepository(database)
     val eventRepository: EventRepository = RoomEventRepository(database)
     val relationshipRepository = RoomRelationshipRepository(database)
+    val scheduleRevisionRepository =
+        RoomScheduleRevisionRepository(database, newId = { idGenerator.newId() })
 
     val createTask = CreateTaskUseCase(taskRepository, idGenerator, timeSource)
     val listTasks = ListTasksUseCase(taskRepository)
     val lifecycle = TaskLifecycleUseCases(taskRepository, timeSource)
     val events = EventUseCases(eventRepository, idGenerator, timeSource)
+
+    /** One deterministic planner for both first planning and recovery (CH-SCHED-001). */
+    val scheduleEngine: ScheduleEngine = DeterministicScheduleEngine()
+    val proposeRecovery: ProposeRecoveryUseCase = DeterministicRecoveryPlanner(scheduleEngine)
+    val applyRecovery: ApplyRecoveryUseCase =
+        DefaultApplyRecoveryUseCase(scheduleRevisionRepository) { timeSource.now() }
+    val undoSchedule: UndoScheduleRevisionUseCase =
+        DefaultUndoScheduleRevisionUseCase(scheduleRevisionRepository) { timeSource.now() }
 
     /**
      * The deterministic parser. There is no provider switch: the interface exists so the parser
@@ -78,6 +97,8 @@ class AppContainer(
                 ChronaDatabase::class.java,
                 ChronaDatabase.FILE_NAME,
             )
+                // Purely additive migration; existing user data is preserved (AT-031).
+                .addMigrations(ChronaDatabase.MIGRATION_1_2)
                 // No fallbackToDestructiveMigration(): losing real task data silently is worse
                 // than failing loudly. Every version bump needs an explicit migration + test.
                 .build()

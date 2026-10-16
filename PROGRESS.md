@@ -1,8 +1,8 @@
 # Chrona — Progress and Resume Record
 
 **Status:** P01 complete. P02 complete. P03 complete for automated checks; device/voice
-availability NOT RUN. P04 is next.
-**Last updated:** 16 October 2026
+availability NOT RUN. P04 complete for automated checks; device checks NOT RUN. P05 is next.
+**Last updated:** 17 October 2026
 
 ## Status vocabulary
 
@@ -500,6 +500,115 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
 
 ---
 
+## P04 — Deterministic Scheduling and Recovery
+
+**Phase gate: PASSED for the automated checks that could run on this host; device and
+cross-OS sub-checks remain NOT RUN/BLOCKED.** A full deterministic planner, a preview-before-
+apply Schedule surface, transactional apply/undo through a new Room revision table, and a
+v1→v2 migration are implemented and covered by 39 new JVM/Room tests (191 total). The
+on-device checks (`REC-*` on a moto g54, OPEN-013/OPEN-014) stay blocked for the same host
+reasons recorded under P01/P02.
+
+> The earlier commit `b3a6dea` ("P04: minimal deterministic scheduler") was an intermediate
+> step in this same phase. It has been superseded in the working tree by the complete engine,
+> recovery use cases, revision storage, migration and UI described here.
+
+### What was built
+
+| Layer | Files | Responsibility |
+|---|---|---|
+| Scheduling domain | `domain/scheduling/{Scheduling,EngineHelpers,DeterministicScheduleEngine}.kt` | `ScheduleInput`, `FixedCommitment`, `SchedulePlacement`, `UnplacedReason`, `UnplacedTask`, `ScheduleConflict`, `ScheduleChange`, `ScheduleAssumption`, `ScheduleBasis`, `ScheduleProposal`, `ScheduleRevision`, `ScheduleEngine`; pure helpers (eligibility, tie-break comparator, free-time, buffers, dependency order); the deterministic heuristic |
+| Recovery domain | `domain/recovery/{Recovery,ScheduleRevisionRepository}.kt` | `RecoveryTrigger`, `RecoveryRequest`, `ApplyRecoveryResult`, `UndoResult`, `ProposeRecoveryUseCase`, `ApplyRecoveryUseCase`, `UndoScheduleRevisionUseCase`; `DeterministicRecoveryPlanner` (same engine, no second algorithm); `DefaultApplyRecoveryUseCase`, `DefaultUndoScheduleRevisionUseCase`; the `ScheduleRevisionRepository` contract that lives in the domain so use cases never depend on Room |
+| Storage v2 | `data/local/{Entities,Daos,ChronaDatabase,EntityMappers}.kt` | `schedule_revisions` + `schedule_placements` (FK cascade), `ScheduleRevisionDao`, `ChronaDatabase` bumped to v2 with explicit `MIGRATION_1_2`, mappers |
+| Repository | `data/repository/RoomRepositories.kt` | `RoomScheduleRevisionRepository` (`current`/`apply`/`undo`), all transactional; the shared `TaskDao.applyStatusChange` extension is reused for status+history writes |
+| Composition | `di/AppContainer.kt`, `data/repository/RepositoryContracts.kt` | Wires the engine, the three use cases, the revision repository and `MIGRATION_1_2`; adds `ReasonCode.SCHEDULE_APPLIED`/`SCHEDULE_UNDONE` |
+| UI | `ui/schedule/{ScheduleScreen,ScheduleViewModel,ScheduleRoute}.kt`, `navigation/ChronaNavHost.kt` | Preview list (planned / moved / unplaced + reasons), an overload banner that never blames the user, Apply and Undo; the route is the only place the composition root is consulted |
+
+### Algorithm actually implemented
+
+Fixed commitments and `FIXED` tasks are hard and are never moved. A confirmed `DEPENDS_ON` edge
+orders its prerequisite first; a hard cycle rejects the affected set and says so. Deadlines that
+cannot be met are reported, never overrun. Among ready tasks, priority → deadline → id decide a
+total order, so the same input always yields the same `proposalId` (a `nameUUIDFromBytes` hash,
+not `randomUUID`). Missing durations assume a documented 30 minutes; zero/negative durations are
+refused; soft preferred windows and buffers are hints that never create a hard conflict;
+splittable tasks fill the free gaps down to their minimum session. Every scheduled and unplaced
+outcome carries a one-sentence reason; nothing is dropped silently.
+
+### Commands actually executed
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `./gradlew --no-daemon :app:compileDebugKotlin` | PASS after the domain/data/UI rewrite and DI wiring |
+| 2 | `./gradlew :app:testDebugUnitTest --tests "…scheduling.*" "…recovery.*"` | PASS |
+| 3 | `./gradlew :app:testDebugUnitTest --tests "…RoomScheduleRevisionRepositoryTest"` | PASS (6) |
+| 4 | `./gradlew :app:testDebugUnitTest --tests "…MigrationTest1To2Test"` | PASS (1) |
+| 5 | `./scripts/verify.sh` | **PASS** — `clean assembleDebug testDebugUnitTest lintDebug` + `assembleDebugAndroidTest`; `OK: Chrona verification passed`; lint 0 errors |
+| 6 | `adb devices` | empty — device checks NOT RUN |
+
+### Tests added and executed
+
+| Suite | Layer | Cases | Result |
+|---|---|---|---|
+| `ScheduleEngineTest` | JVM unit | 21 | **PASS** |
+| `RecoveryUseCasesTest` | JVM unit (fake revision repo) | 7 | **PASS** |
+| `ScheduleViewModelTest` | JVM unit (`UnconfinedTestDispatcher`) | 4 | **PASS** |
+| `RoomScheduleRevisionRepositoryTest` | Room integration (Robolectric + real SQLite) | 6 | **PASS** |
+| `MigrationTest1To2Test` | Room migration (real SQLite + `MIGRATION_1_2`) | 1 | **PASS** |
+| **P04 subtotal** | | **39** | **PASS** |
+| P01–P03 suites (unchanged) | JVM/Room | 152 | **PASS** |
+| **Total JVM/Room** | | **191** | **PASS** (0 failures) |
+
+The engine suite covers fixed-task placement and conflict, priority order, dependency ordering,
+hard-cycle rejection, deadline infeasibility + overload, split sessions, buffers, earliest start,
+soft preferred windows, missing/invalid duration, determinism, movement explanation, closed-task
+exclusion, late wake-up (`now` injection), an incoming task, a task that no longer fits, and a
+DST spring-forward day. The recovery suite covers preview-no-write, apply, stale rejection,
+storage-failure messaging, undo, undo of a missing revision, and a commitment-overrun scenario.
+Storage tests prove the revision and its placements persist, the status history rows are written,
+tasks return to `INBOX` on undo, and undo is refused once a task was edited after the plan.
+
+### Defects the tests caught, and the fixes
+
+1. **`MigrationTestHelper` cannot see exported schemas in JVM/Robolectric tests** (they are not
+   merged into unit-test assets). Rewrote `MigrationTest1To2Test` to run `MIGRATION_1_2` against
+   a real `FrameworkSQLiteOpenHelper` database created from the frozen v1 `tasks` DDL; it now
+   proves both data preservation and the new tables without device assets. The unused
+   `test.assets.srcDirs` wiring was removed.
+2. **Trailing-lambda DI error.** `RoomScheduleRevisionRepository(database) { idGenerator.newId() }`
+   bound the lambda to the last constructor parameter (a DAO), not `newId`. Fixed with the named
+   argument `newId = { … }`.
+
+### Requirements addressed in P04
+
+| ID | Status | Evidence |
+|---|---|---|
+| SCHED-001 | `PASS (automated)` | Deterministic heuristic in `DeterministicScheduleEngine`; 21 engine tests |
+| SCHED-002 | `PASS (automated)` | Fixed commitments/FIXED tasks immovable; buffers; test-covered |
+| SCHED-003 | `PASS (automated)` | Preview surface + explanations; `ScheduleViewModelTest` proves preview writes nothing |
+| REC-001/002/003 | `PASS (automated)` | `DeterministicRecoveryPlanner`, transactional apply/undo, stale rejection; `RecoveryUseCasesTest` + Room test |
+| REL-001 | `PASS (automated)` | Dependency ordering and cycle rejection reused from `RelationGraph`; engine tests |
+| RELIABILITY-001 | `PASS (automated)` | Real v1→v2 migration test; transactions and optimistic concurrency covered |
+| UI-001 | `IN_PROGRESS` | Schedule destination renders preview/apply/undo; device rendering NOT RUN |
+
+### Known limitations, blockers and risks
+
+1. **Device/instrumented Schedule and recovery checks are NOT RUN** (no usable runtime;
+   OPEN-014). Acceptance tests AT-009..AT-019 are satisfied at the JVM/Room layer.
+2. **Windows host check still BLOCKED** (OPEN-013).
+3. **Undo is intentionally conservative.** It is allowed only for the newest revision and only
+   when no task was edited after it was applied; otherwise the user is told to build a new plan.
+   Undo/redo *history* beyond one step is deliberately out of MVP scope.
+4. **The planner is a heuristic, not an optimiser.** It is explainable and deterministic; it does
+   not search for a globally optimal packing. That is the intended CH-SCHED-001 trade-off.
+
+### Exact next phase
+
+**P05 — Board and relationships.** Prerequisite: P04 gate satisfied for automated work; the
+device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -519,7 +628,9 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
       correction and typed fallback. 70 new JVM/Robolectric tests (152 total). Device/on-device
       availability NOT RUN; voice kept optional.
 - [ ] P03/P06/P07 moto g54 (Android 15) checks — NOT RUN (no device attached).
-- [ ] P04 — scheduler and recovery.
+- [x] P04 — deterministic scheduler and recovery: preview-before-apply Schedule surface,
+      transactional apply/undo over a new `schedule_revisions` table, v1→v2 migration.
+      39 new JVM/Room tests (191 total). Device checks NOT RUN.
 - [ ] P05 — board and relationships.
 - [ ] P06 — Quest Cards and reminders.
 - [ ] P07 — privacy, resilience, accessibility.

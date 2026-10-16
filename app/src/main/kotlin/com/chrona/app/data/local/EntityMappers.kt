@@ -8,11 +8,14 @@ import com.chrona.app.domain.model.Priority
 import com.chrona.app.domain.model.RelationCreatedBy
 import com.chrona.app.domain.model.RelationId
 import com.chrona.app.domain.model.RelationType
+import com.chrona.app.domain.model.RevisionId
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
 import com.chrona.app.domain.model.TaskOrigin
 import com.chrona.app.domain.model.TaskRelationship
 import com.chrona.app.domain.model.TimeWindow
+import com.chrona.app.domain.scheduling.SchedulePlacement
+import com.chrona.app.domain.scheduling.ScheduleRevision
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -157,3 +160,35 @@ fun TaskRelationship.toEntity(): TaskRelationshipEntity = TaskRelationshipEntity
 /** Room cannot persist [ZoneId]; fall back to UTC only for absent or unreadable values. */
 private fun zoneOrUtc(zoneId: String?): ZoneId =
     zoneId?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneOffset.UTC
+
+fun SchedulePlacementEntity.toDomain(): SchedulePlacement = SchedulePlacement(
+    taskId = TaskId(taskId),
+    start = ZonedDateTime.ofInstant(Instant.ofEpochMilli(startEpochMillis), zoneOrUtc(startZoneId)),
+    end = ZonedDateTime.ofInstant(Instant.ofEpochMilli(endEpochMillis), zoneOrUtc(endZoneId)),
+    sessionIndex = sessionIndex,
+)
+
+fun SchedulePlacement.toEntity(revisionId: String): SchedulePlacementEntity = SchedulePlacementEntity(
+    revisionId = revisionId,
+    taskId = taskId.value,
+    startEpochMillis = start.toInstant().toEpochMilli(),
+    startZoneId = start.zone.id,
+    endEpochMillis = end.toInstant().toEpochMilli(),
+    endZoneId = end.zone.id,
+    sessionIndex = sessionIndex,
+)
+
+fun ScheduleRevisionEntity.toDomain(placements: List<SchedulePlacementEntity>): ScheduleRevision = ScheduleRevision(
+    id = RevisionId(id),
+    basedOnRevisionId = basedOnRevisionId?.let(::RevisionId),
+    reasonCode = reasonCode,
+    appliedAt = Instant.ofEpochMilli(appliedAtEpochMillis),
+    placements = placements.map { it.toDomain() },
+)
+
+fun ScheduleRevision.toEntity(): ScheduleRevisionEntity = ScheduleRevisionEntity(
+    id = id.value,
+    basedOnRevisionId = basedOnRevisionId?.value,
+    reasonCode = reasonCode,
+    appliedAtEpochMillis = appliedAt.toEpochMilli(),
+)

@@ -159,3 +159,52 @@ data class TaskStatusLogEntity(
 
 /** Separator for the flattened [TaskEntity.assumptions] list. */
 internal const val ASSUMPTION_SEPARATOR: String = "\n"
+
+/**
+ * An applied schedule revision (schema v2, ADR-027).
+ *
+ * Only the latest row is the "current" plan; [basedOnRevisionId] records what it replaced so
+ * undo can restore the previous state. Revisions are history and never mutate silently.
+ */
+@Entity(
+    tableName = "schedule_revisions",
+    indices = [Index("applied_at_epoch_millis")],
+)
+data class ScheduleRevisionEntity(
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "based_on_revision_id") val basedOnRevisionId: String?,
+    @ColumnInfo(name = "reason_code") val reasonCode: String,
+    @ColumnInfo(name = "applied_at_epoch_millis") val appliedAtEpochMillis: Long,
+)
+
+/**
+ * One scheduled block of a revision.
+ *
+ * Cascades with its revision, so undo cannot leave orphaned blocks. Placement rows are a
+ * historical record, so deleting a task does not cascade here.
+ */
+@Entity(
+    tableName = "schedule_placements",
+    foreignKeys = [
+        ForeignKey(
+            entity = ScheduleRevisionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["revision_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("revision_id"),
+        Index("task_id"),
+    ],
+)
+data class SchedulePlacementEntity(
+    @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "rowid_local") val rowId: Long = 0L,
+    @ColumnInfo(name = "revision_id") val revisionId: String,
+    @ColumnInfo(name = "task_id") val taskId: String,
+    @ColumnInfo(name = "start_epoch_millis") val startEpochMillis: Long,
+    @ColumnInfo(name = "start_zone_id") val startZoneId: String,
+    @ColumnInfo(name = "end_epoch_millis") val endEpochMillis: Long,
+    @ColumnInfo(name = "end_zone_id") val endZoneId: String,
+    @ColumnInfo(name = "session_index") val sessionIndex: Int,
+)

@@ -185,7 +185,6 @@ interface TaskRelationshipDao {
 
 @Dao
 interface TaskStatusLogDao {
-
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entry: TaskStatusLogEntity)
 
@@ -197,4 +196,37 @@ interface TaskStatusLogDao {
 
     @Query("SELECT COUNT(*) FROM task_status_log")
     suspend fun count(): Int
+}
+
+@Dao
+interface ScheduleRevisionDao {
+
+    /** The current plan is the most recently applied revision. */
+    @Query("SELECT * FROM schedule_revisions ORDER BY applied_at_epoch_millis DESC, id DESC LIMIT 1")
+    suspend fun latest(): ScheduleRevisionEntity?
+
+    @Query("SELECT * FROM schedule_revisions WHERE id = :id")
+    suspend fun findById(id: String): ScheduleRevisionEntity?
+
+    @Query("SELECT * FROM schedule_placements WHERE revision_id = :revisionId ORDER BY start_epoch_millis ASC, session_index ASC, rowid_local ASC")
+    suspend fun placements(revisionId: String): List<SchedulePlacementEntity>
+
+    @Query("SELECT COUNT(*) FROM schedule_revisions")
+    suspend fun count(): Int
+
+    @Query("SELECT COUNT(*) FROM schedule_placements")
+    suspend fun placementCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRevision(revision: ScheduleRevisionEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPlacements(placements: List<SchedulePlacementEntity>)
+
+    @Query("DELETE FROM schedule_revisions WHERE id = :id")
+    suspend fun deleteRevision(id: String)
+
+    /** Safety check for undo: any task edited strictly after a revision makes it unsafe to undo. */
+    @Query("SELECT COUNT(*) FROM tasks WHERE updated_at_epoch_millis > :epochMillis")
+    suspend fun tasksUpdatedAfter(epochMillis: Long): Int
 }

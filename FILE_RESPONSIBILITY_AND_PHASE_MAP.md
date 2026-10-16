@@ -11,12 +11,12 @@
 | `domain/model/` | P02 | Task/Event/IDs/status/priority/windows/schedule blocks/preferences | all packages, repositories | pure unit tests, validation, status transitions |
 | `domain/task/`, `usecase/` | P02 | task transitions/create/edit/complete/postpone/skip/archive; command boundary | UI, repository interfaces | lifecycle/duplicate action/idempotency tests |
 | `domain/relation/` | P02/P05 | relation enum/model/direction/cycle validation | scheduler, board, editor | direction, cycle and delete-integrity tests |
-| `data/local/` | P02 | Room DB/entities/DAO/converters | repository implementations | in-memory Room tests, keys/indexes/foreign keys |
-| `data/migration/` | P02 and schema updates | versioned explicit migrations | DB startup | migration tests for every supported upgrade; no destructive fallback |
+| `data/local/` | P02; extended P04 | Room DB/entities/DAO/converters; v2 adds `schedule_revisions`/`schedule_placements` | repository implementations | in-memory Room tests; `RoomScheduleRevisionRepositoryTest` |
+| `data/migration/` (currently `ChronaDatabase.MIGRATION_1_2`) | P02 and schema updates | versioned explicit migrations | DB startup | `MigrationTest1To2Test` (real SQLite, real migration); no destructive fallback |
 | `data/repository/` | P02 | domain-facing repository implementations | use cases | persistence, transaction, version check tests |
 | `data/export/` | P07 | versioned export DTO/serializer, delete consistency helpers | Privacy Centre | export shape and deletion residual tests |
-| `domain/scheduling/` | P04 | ScheduleInput/Proposal, slot placement and constraint invariants | planning/recovery | deterministic/property/scenario tests |
-| `domain/recovery/` | P04 | triggers, plan diff/explanations, guarded revision/undo rules | schedule/recovery/history UI | lateness/overrun/undo/stale proposal tests |
+| `domain/scheduling/` | P04 | `ScheduleInput`/`ScheduleProposal`/`ScheduleRevision`, slot placement, buffers, dependencies, split rules | planning/recovery | `ScheduleEngineTest` (21: deterministic/scenario) |
+| `domain/recovery/` | P04 | triggers, `DeterministicRecoveryPlanner` (same engine), apply/undo use cases, `ScheduleRevisionRepository` contract | schedule/recovery/history UI | `RecoveryUseCasesTest` (7: lateness/overrun/stale/undo) |
 | `domain/parse/` | P03 | `TaskUnderstandingProvider`/`TaskIntentDraft`, `ParseGrammar`, `DeterministicTaskIntentParser`, `TaskIntentDraftValidator` | voice UI and create use case | `DeterministicTaskIntentParserTest` (38), `TaskIntentDraftValidatorTest` (2) |
 | `platform/speech/` | P03 | on-device-only `SpeechRecognitionAdapter` (API 31+ guard), lifecycle cleanup; no audio persisted | parser, voice UI | `AndroidSpeechRecognitionAdapterTest` (Robolectric); device availability NOT RUN |
 | `platform/permission/` | P06/P07 | notification and overlay permission state (mic handled at point of use by `platform/speech`) | notification/overlay | grant/deny/revoke tests |
@@ -24,7 +24,7 @@
 | `platform/notification/` | P06 | channel, permission-aware notification content/actions/deep links | reminder policy/use cases | channels/denial/action identity tests |
 | `platform/overlay/` | P06 | optional overlay window and compact task panel; no domain rule decisions | permission + use cases | moto g54 Android 15 granted/denied/revoked checks |
 | `platform/work/` | P04/P06 | unique deferrable work and reminder reconciliation | repository/recovery/reminder | duplicate work, reschedule, process death/Doze test plan |
-| `ui/today/`, `ui/schedule/` | P02/P04 | current next action, day timeline, conflict/recovery entry | use cases | critical journey UI tests |
+| `ui/today/`, `ui/schedule/` | P02/P04 | current next action, day preview (planned/moved/unplaced + apply/undo) | use cases | `ScheduleViewModelTest` (preview writes nothing); device rendering NOT RUN |
 | `ui/taskeditor/`, `ui/recovery/` | P02/P04 | interpretation correction, editing, proposal/diff/apply/reject/undo | parser/recovery use cases | confirmation and constraint tests |
 | `ui/voice/` | P03 | tap-to-speak capture sheet + `VoiceCaptureViewModel`, review/correction, clarification | parser, speech adapter, create use case | `VoiceCaptureViewModelTest` (JVM fake) |
 | `ui/board/` | P05 | paper notes, pins, strings, zoom/pan/filter/project focus/list alternative | same task/relation repos | link semantics, accessibility, 100-task/200-edge performance |
