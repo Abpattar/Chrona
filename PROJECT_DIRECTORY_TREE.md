@@ -68,7 +68,8 @@ chrona/
 │       │       │   ├── relation/                    (planned P02)
 │       │       │   ├── scheduling/                  (planned P04)
 │       │       │   ├── recovery/                    (planned P04)
-│       │       │   └── reminder/                    (planned P06)
+│       │       │   ├── reminder/                    (planned P06)
+│       │       │   └── parse/                       (P03) deterministic parser + contract
 │       │       ├── data/
 │       │       │   ├── local/                       (planned P02)
 │       │       │   ├── migration/                   (planned P02)
@@ -81,7 +82,8 @@ chrona/
 │       │       ├── platform/
 │       │       │   ├── notification/                (planned P06)
 │       │       │   ├── overlay/                     (planned P06)
-│       │       │   ├── permission/                  (planned P03/P06/P07)
+│       │       │   ├── speech/                      (P03) on-device speech adapter
+│       │       │   ├── permission/                  (planned P06/P07)
 │       │       │   └── work/                        (planned P04/P06)
 │       │       ├── privacy/                         (planned P07)
 │       │       └── ui/
@@ -90,16 +92,20 @@ chrona/
 │       │           ├── schedule/                    [P01 shell; timeline in P02/P04]
 │       │           ├── board/                       [P01 shell; canvas in P05]
 │       │           ├── history/                     [P01 shell; content in P04/P07]
-│       │           ├── taskeditor/                  (planned P02)
+│       │           ├── taskeditor/                  [P02] typed task editor
 │       │           ├── questcard/                   (planned P06)
 │       │           ├── recovery/                    (planned P04)
 │       │           ├── settings/                    [P01 shell; preferences P06/P07]
+│       │           ├── voice/                       [P03] tap-to-speak capture sheet + VM
 │       │           └── privacy/                      (planned P07)
 │       ├── test/kotlin/com/chrona/app/
 │       │   ├── domain/                               (planned P02)
-│       │   ├── input/                               (planned P03)
+│       │       ├── parse/                               [P03] parser/tests
 │       │   ├── navigation/                          [P01]
-│       │   └── reminder/                            (planned P06)
+│       │       ├── platform/                             [P03] speech adapter tests
+│       │       ├── ui/                                   [P03] voice VM tests
+│       │       ├── usecase/                               [P03] intent-create tests
+│       │       └── reminder/                            (planned P06)
 │       └── androidTest/kotlin/com/chrona/app/
 │           ├── ui/                                  [P01] navigation smoke
 │           ├── data/                                (planned P02) Room integration

@@ -13,8 +13,8 @@ when actual code/test evidence supports it. See `PROGRESS.md` for command-level 
 | CH-DOM-005 | `RelationType` | five typed relation values | P02/P05 | TESTED | `RelationGraphTest` (15 cases); board rendering is P05 |
 | CH-NAV-001 | `ChronaDestination` | canonical route registry, `navigation/` | P01 | TESTED | navigation shell; `ChronaDestinationTest` PASS, `NavigationShellTest` NOT RUN (no device) |
 | CH-UI-000 | `ChronaTheme` / `PinnedNoteCard` / `EmptyState` / `priorityStyleOf` | `ui/design/`, paper-and-pin design tokens | P01 | IMPLEMENTED | all screens; `lintDebug` PASS; every priority also carries a text label |
-| CH-PARSE-001 | `TaskUnderstandingProvider` | `SHARED_CONTRACT.md`, input/parser | P03 | PLANNED | text/voice capture; provider-neutral contract tests |
-| CH-PARSE-002 | `TaskIntentDraft` | same | P03 | PLANNED | validation/editor; malformed/ambiguous parser tests |
+| CH-PARSE-001 | `TaskUnderstandingProvider` | `SHARED_CONTRACT.md`, `domain/parse` | P03 | TESTED | text/voice capture; `DeterministicTaskIntentParserTest` (38 cases) + `TaskIntentDraftValidatorTest`; provider-neutral contract |
+| CH-PARSE-002 | `TaskIntentDraft` | same | P03 | TESTED | validation/editor; malformed/ambiguous parser fixtures; `CreateTaskFromIntentUseCaseTest` (8 cases) |
 | CH-USE-001 | `CreateTaskUseCase` | `SHARED_CONTRACT.md`, usecase | P02 | TESTED | `CreateTaskUseCaseTest` (7 cases) + Room round trip |
 | CH-SCH-001 | `ScheduleEngine.propose` | pure domain scheduling | P04 | PLANNED | planner/recovery; deterministic invariants |
 | CH-SCH-002 | `ScheduleProposal` | placements/unplaced/conflicts/changes/explanation | P04 | PLANNED | preview/history; no silent drops |
@@ -25,7 +25,7 @@ when actual code/test evidence supports it. See `PROGRESS.md` for command-level 
 | CH-DATA-003 | `PreferencesRepository` | local settings | P06 | PLANNED | domain model exists; no repository yet, by design (see PROGRESS.md P02) |
 | CH-REM-001 | `ReminderPolicy` | pure policy; cap/quiet/batching/repeat logic | P06 | PLANNED | platform presenters; deterministic clock tests |
 | CH-REM-002 | `ReminderDecision` | surface/suppress/batch/reason | P06 | PLANNED | overlay/notification; fallback tests |
-| CH-PLAT-001 | `SpeechRecognitionAdapter` | explicit lifecycle-aware speech boundary | P03 | PLANNED | capture UI/parser; local capability/disclosure tests |
+| CH-PLAT-001 | `SpeechRecognitionAdapter` | explicit lifecycle-aware speech boundary, `platform/speech` | P03 | TESTED | capture UI/parser; `AndroidSpeechRecognitionAdapterTest` (11, Robolectric) + `VoiceCaptureViewModelTest` (11); device availability NOT RUN |
 | CH-PLAT-002 | `OverlayPresenter` | optional best-effort system overlay | P06 | PLANNED | permission system; physical device test |
 | CH-PLAT-003 | `NotificationPresenter` | ordinary Android notification/action surface | P06 | PLANNED | reminder manager; channel/permission/action tests |
 | CH-SEC-001 | `DeleteUserDataUseCase` | clears app-owned local data/work/surfaces | P07 | PLANNED | privacy UI; residual-state tests |

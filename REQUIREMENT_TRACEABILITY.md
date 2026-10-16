@@ -6,7 +6,7 @@ All entries start `PLANNED` unless marked otherwise; the planning document itsel
 |---|---|---|---|---|
 | PRJ-001 | Native Android planner; confirmed Must | PRD §§1,18; owner | P01–P08 | `IN_PROGRESS` — debug APK builds; no device/emulator run yet |
 | UX-001 | low-friction first task; confirmed Must | PRD §§3,8,15 | UI/P02 | `PASS (automated)` — typed task created with no account and no onboarding block. The "~1 minute" hypothesis is still unmeasured |
-| TASK-001 | typed/voice capture, structured draft and correction; confirmed Must | PRD §§7,9; owner | P02/P03 | `IN_PROGRESS` — typed path complete and tested; parser, drafts and correction in P03 |
+| TASK-001 | typed/voice capture, structured draft and correction; confirmed Must | PRD §§7,9; owner | P02/P03 | `PASS (automated)` — typed path (P02) plus the deterministic parser (38 cases), draft validation, review/correction and one focused clarification (P03). Device voice path NOT RUN |
 | TASK-002 | stable identity/status lifecycle; confirmed Must | PRD §§9,19–20 | domain/data/P02 | `PASS (automated)` — 65 unit + 17 Room tests cover identity, transitions, idempotence and persistence. Device-level identity NOT RUN |
 | TASK-003 | manual fixed commitments; confirmed Must | owner | P02/P04 | `IN_PLACE (P02 only)` — CRUD and overlap query tested; scheduling around them is P04 |
 | REL-001 | typed relation semantics/integrity; confirmed Must | PRD §6 | P02/P05 | `PASS (automated)` — direction, self-edge, cycles and cascade delete tested. Board UI is P05 |
@@ -21,13 +21,13 @@ All entries start `PLANNED` unless marked otherwise; the planning document itsel
 | CARD-002 | Start/Done/Later/Dismiss distinct; confirmed Must | PRD §§12,15; owner | P06 | action integration tests |
 | CARD-003 | dismiss never completes/deletes task; confirmed Must | PRD §9.3; owner | P06 | explicit regression test for overlay + notification dismissal |
 | NOTIFY-001 | quiet hours, batching, configurable cap, repeat suppression; confirmed Must | PRD §§8,12; owner | P06 | deterministic simulated day/week; cap 2 remains hypothesis |
-| VOICE-001 | tap-to-speak; no always-listening/raw audio retention; confirmed Must | PRD §7; owner | P03/P07 | permission/source audit, cancellation/lifecycle tests and data audit |
-| VOICE-002 | no silent off-device recognition; confirmed Must | owner | P03 | unsupported on-device path leads to typing or disclosed explicit choice |
+| VOICE-001 | tap-to-speak; no always-listening/raw audio retention; confirmed Must | PRD §7; owner | P03/P07 | `PARTIAL (automated)` — tap is the only entry; cancel/close/lifecycle release the recogniser (`AndroidSpeechRecognitionAdapterTest`, `VoiceCaptureViewModelTest`); no audio persisted. On-device permission flow on a real device NOT RUN |
+| VOICE-002 | no silent off-device recognition; confirmed Must | owner | P03 | `PASS (automated) by construction` — the only recogniser created is the on-device one; no `INTERNET` permission; unavailable/denied → typing. Real-device network behaviour NOT RUN (unknown) |
 | PRIV-001 | local-first, no account/cloud sync; confirmed Must | owner | P02/P07 | `IN_PROGRESS` — no network permission or networking dependency exists in the slice; airplane-mode test (AT-027) NOT RUN |
 | PRIV-002 | no embedded provider secret; confirmed Must | PRD NFR-SEC-001; owner | P01/P07 | `PASS (P01 scope)` — no remote AI exists; source/manifest reviewed. Re-audit in P07 |
 | PRIV-003 | data export/delete and lifecycle consistency; confirmed Must | PRD §§9,17; owner | P07 | export schema and deletion residual checks |
-| PRIV-004 | data minimization, permission disclosure, redacted logs; confirmed Must | PRD §17 | P03/P07 | `PASS (P02 scope)` — a test asserts the status log stores only machine reason codes, never task text |
-| PLAT-001 | test moto g54 Android15; confirmed Must | owner | P03/P06/P07 | actual model/API/build settings and results captured |
+| PRIV-004 | data minimization, permission disclosure, redacted logs; confirmed Must | PRD §17 | P03/P07 | `PASS (automated, P02+P03 scope)` — the status log stores only machine reason codes; P03 requests only `RECORD_AUDIO` at point of use and persists no transcript |
+| PLAT-001 | test moto g54 Android15; confirmed Must | owner | P03/P06/P07 | `NOT RUN` — no device attached in P03; record locale/on-device availability/network/permission flow on the device (OPEN-007) |
 | PLAT-002 | Ubuntu/Windows parity, one repo/pinned toolchain; confirmed Must | PRD §18; owner | P01/P08 | `BLOCKED` — Ubuntu PASS (`scripts/verify.sh`); no Windows host available |
 | UI-001 | Today/Schedule/Board/History/Settings; shared task records; confirmed Must | PRD §§5,15 | P01/P02/P04/P05/P07 | `IN_PROGRESS` — five destinations exist and Today reads the real repository; device run BLOCKED |
 | UI-002 | paper/pins/red thread and priority swatches; confirmed Must | PRD §6; owner | P01/P05 | `IN_PROGRESS` — paper/pin/palette tokens implemented; board is P05 |

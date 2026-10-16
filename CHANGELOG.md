@@ -3,6 +3,61 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-16 — P03 Voice and structured task intent
+
+### Added
+- `domain/parse/TaskUnderstanding.kt` — the parser contract from `SHARED_CONTRACT.md`:
+  `TaskUnderstandingProvider`, `TaskUnderstandingRequest`, `TaskIntentDraft` (with a new
+  `fixedRange`), `RelationDraft` (always `SUGGESTED`), `ParseAssumption`,
+  `ClarificationPrompt`/`ClarificationOption`, `ParseFailureReason` and the `Parsed`/
+  `NeedsClarification`/`Unsupported` result family.
+- `domain/parse/DeterministicTaskIntentParser.kt` and `ParseGrammar.kt` — a bounded,
+  deterministic English grammar for dates, durations, priorities and fixed/flexible clues,
+  with no clock, no Android and no I/O.
+- `domain/parse/TaskIntentDraftValidator.kt` — validates a draft through the canonical
+  `TaskValidator` before it can be persisted.
+- `platform/speech/SpeechRecognitionAdapter.kt` and `AndroidSpeechRecognitionAdapter.kt` — a
+  provider-neutral speech boundary whose only recogniser is the on-device one, guarded to
+  API 31+, destroyed on release, with `EXTRA_PREFER_OFFLINE`. No audio is buffered or stored.
+- `ui/voice/VoiceCaptureViewModel.kt` and `VoiceCaptureSheet.kt` — explicit capture state
+  machine and screen: tap-to-speak, listening/cancel/retry, transcript review and correction,
+  one focused clarification, and the typed fallback always available.
+- `usecase/TaskIntentUseCases.kt` — `CreateTaskFromIntentUseCase` persists a reviewed draft
+  through the existing `CreateTaskUseCase`.
+- Tests: `DeterministicTaskIntentParserTest` (38), `CreateTaskFromIntentUseCaseTest` (8),
+  `TaskIntentDraftValidatorTest` (2), `AndroidSpeechRecognitionAdapterTest` (11, Robolectric
+  against the real speech classes), `VoiceCaptureViewModelTest` (11).
+
+### Changed
+- `AndroidManifest.xml` — adds only `android.permission.RECORD_AUDIO`; there is still no
+  `INTERNET` permission and no networking dependency.
+- `di/AppContainer.kt`, `ui/today/{TodayRoute,TodayScreen,TodayViewModel}.kt` — wire the
+  speech adapter, parser and capture ViewModel, and open the voice sheet or typed editor.
+- `ui/taskeditor/TaskEditorSheet.kt` — accepts prefill from a voice draft; `modifier` is now
+  the first optional parameter to satisfy Compose lint.
+- `SHARED_CONTRACT.md` — `TaskIntentDraft` gains `fixedRange`; clarification moves from a draft
+  field to the `NeedsClarification` result (ADR-026).
+- Data-disclosure docs (`DATA_MODEL_AND_INTERFACES.md`, `ERROR_HANDLING_AND_SECURITY.md`) and
+  the structure/ownership docs updated to the implemented P03 paths and behaviour.
+
+### Fixed during P03
+- **API-31 speech calls were unguarded** on minSdk 26. `AndroidSpeechRecognitionAdapter` now
+  checks `Build.VERSION.SDK_INT >= S` for `createOnDeviceSpeechRecognizer` and
+  `isOnDeviceRecognitionAvailable`, and reports `OnDeviceUnavailable` below API 31 so those
+  devices use typing. This was a real crash on API 26–30, not only a lint error.
+- Compose `ModifierParameter` warning in `TaskEditorSheet`.
+
+### Verification (P03)
+Exact commands and per-test results are in `PROGRESS.md` → "P03". Summary:
+
+| Layer | Cases | Result |
+|---|---|---|
+| JVM/Robolectric unit tests | 152 (70 new) | PASS, 0 failures |
+| `scripts/verify.sh` (clean + assemble + unit tests + lint) | — | PASS |
+| Android lint | — | PASS, 0 errors / 0 warnings |
+| Compose instrumentation | — | compiles; NOT RUN (no usable runtime) |
+| moto g54 on-device voice/availability (VOICE-001/002, OPEN-007) | — | NOT RUN — reported unknown, voice kept optional |
+
 ## 2026-10-15 — P02 Local data and first end-to-end task slice
 
 ### Added

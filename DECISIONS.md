@@ -29,7 +29,8 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-018a | APPROVED — P01 TOOLCHAIN GATE | Pin Navigation Compose **2.9.8** and Lifecycle **2.10.0**, not the originally proposed 2.10.2 / 2.11.0 | Navigation 2.10.x and Lifecycle 2.11.0 declare `minCompileSdk=37` and require AGP 9.1.0+, which forces the API-37 path this project deliberately avoids. 2.9.8 / 2.10.0 are the newest releases that keep compileSdk 36 + AGP 8.13.2. Costs us the newest navigation library; buys a stable, documented API-36 build | P01 |
 | ADR-023 | APPROVED | Cloud backup and device transfer are disabled; a deliberate export path replaces them | `MASTER_ARCHITECTURE.md` §10 requires an intentional backup decision. Keeps private task data on the device by default without claiming encryption. Reversible; needs an owner decision if a user-visible backup feature is ever wanted | P01 |
 | ADR-024 | APPROVED | Release builds are unminified for now | no shrink/obfuscation audit has been done; an unverified R8 config risks stripping Room/Compose classes in a demonstrator build. Revisit before any release | P01 |
-| ADR-025 | PROPOSED | Application identity `com.chrona.app` / "Chrona" | no approved reverse-DNS ID exists. "Chrona" is provisional; trademark and domain availability are unchecked. Renaming the product is an owner decision | P01 |
+| ADR-025 | APPROVED | Application identity `com.chrona.app` / "Chrona" | no approved reverse-DNS ID exists. "Chrona" is provisional; trademark and domain availability are unchecked. Renaming the product is an owner decision | P01 |
+| ADR-026 | APPROVED | Parser moved to `domain/parse`; speech boundary to `platform/speech`; capture UI to `ui/voice`. `TaskIntentDraft` adds `fixedRange` and drops `clarification` (carried by `NeedsClarification` with a base draft) | Keeps domain pure (no Android imports). The change lets a fixed time interval be represented without guessing and separates an unanswered clarification from a complete draft. Matches the implemented P03 code and tests | P03 |
 
 ### ADR-018a — Coordinated toolchain change record
 
@@ -58,6 +59,13 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 - **Compatibility/migration:** no schema, API or contract migration. Compile-target-only change.
 - **Privacy/security/cost:** none.
 - **Verification:** `./scripts/verify.sh` passes with the new pins on Ubuntu.
+
+### ADR-026 — P03 structure and parser-contract adjustment
+
+- **Date:** 16 October 2026. **Phase:** P03.
+- **Structural change:** `domain/parse` (pure Kotlin) rather than `input/parser`; `platform/speech` rather than `input/voice`; `ui/voice` for capture UI. Preserves the domain core import boundary (no Android imports).
+- **Contract change:** `TaskIntentDraft.fixedRange: TimeRange?` added; `clarification` removed from the draft and moved to `TaskUnderstandingResult.NeedsClarification(prompt)` with `prompt.base`. No semantics lost.
+- **Verification:** 152 unit/Robolectric tests pass; `scripts/verify.sh` passes; only `RECORD_AUDIO` added, no `INTERNET` permission and no networking dependency. Device on-device availability remains unmeasured (OPEN-007).
 
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.

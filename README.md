@@ -9,13 +9,13 @@ This repository is the implementation of the approved product in
 [`MASTER_REQUIREMENTS.md`](MASTER_REQUIREMENTS.md), following the canonical contracts in
 [`SHARED_CONTRACT.md`](SHARED_CONTRACT.md).
 
-## Current status — P01 and P02 complete, P03 next
+## Current status — P01, P02 and P03 complete, P04 next
 
 | Phase | Scope | Status |
 |---|---|---|
 | P01 | Repository foundation, pinned toolchain, navigation shell | **DONE** — builds, tests and lints clean on Ubuntu |
 | P02 | Local data + first end-to-end task slice | **DONE** — typed task → validate → Room → Today → complete |
-| P03 | Voice input and deterministic parser | Not started |
+| P03 | Voice input and deterministic parser | **DONE (automated)** — tap-to-speak, on-device-only recogniser, parser, review/correction; device availability NOT RUN |
 | P04 | Scheduling and recovery engine | Not started |
 | P05 | Board and relationships | Not started |
 | P06 | Quest Cards and notifications | Not started |
@@ -34,9 +34,14 @@ This repository is the implementation of the approved product in
 - Manual fixed commitments can be stored and are queried by overlap.
 - Task relationships enforce direction, reject self-links and detect cycles.
 - Typed task creation validates inline and refuses to save an empty or malformed task.
+- **Tap-to-speak, on-device only:** tap the microphone, speak a bounded English phrase (for
+  example "study for GATE for two hours tomorrow"), review and correct the parse, answer one
+  focused clarification when the parser is unsure, then save. The recogniser is the on-device
+  one; if the device has none, or the microphone permission is denied, Chrona offers typing
+  instead of switching to a possibly remote recogniser. No raw audio is stored.
 
-**Not working yet:** voice input, the schedule generator, schedule recovery, the visual board,
-reminders and notifications, and the Privacy Centre. They belong to P03–P07.
+**Not working yet:** the schedule generator, schedule recovery, the visual board, reminders and
+notifications, and the Privacy Centre. They belong to P04–P07.
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.
@@ -123,13 +128,12 @@ Always use the committed wrapper. Never rely on a globally installed Gradle.
 │       ├── ChronaApplication.kt  Entry point
 │       ├── MainActivity.kt       Single-activity Compose host
 │       ├── navigation/           Route registry + navigation shell
-│       ├── domain/               Pure Kotlin: models, task rules, relations
+│       ├── domain/               Pure Kotlin: models, task rules, relations, parser
 │       ├── data/                 Room database, DAOs, mappers, repositories
-│       ├── usecase/              Orchestration layer
-│       ├── input/                Parser and voice adapters (P03+)
-│       ├── platform/             Notifications, overlay, permissions, work (P06+)
+│       ├── usecase/              Orchestration layer (incl. task-intent create)
+│       ├── platform/             Speech, and later notifications/overlay/work
 │       ├── privacy/              Data inventory, export, delete (P07+)
-│       └── ui/                   Compose design system and screens
+│       └── ui/                   Compose design system and screens (incl. ui/voice)
 ├── gradle/libs.versions.toml     The single source of dependency versions
 ├── scripts/verify.sh|.ps1        Equivalent verification entry points per OS
 ├── opencode/                     Master execution prompt + phase prompts P01–P08
@@ -163,6 +167,8 @@ the domain core imports no Android, Room or network code.
   `result code=-92`. The instrumentation suites compile and will run unchanged once a
   `kvm`-capable host or the moto g54 is available.
 - **Physical device (moto g54, Android 15) untested** — required before P03/P06/P07 claims.
+  In particular, on-device speech availability, the permission flow and observed network
+  behaviour are NOT RUN (OPEN-007); voice stays optional and typing is always complete.
 - **Schema migration untested**, because there is only one schema version yet. Room schema v1
   is exported to `app/schemas/` so the migration test has a real starting point at version 2.
 - **Offline is true by construction, not measured.** No networking permission and no networking

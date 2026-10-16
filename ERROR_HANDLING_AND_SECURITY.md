@@ -12,6 +12,11 @@ Main risks: misparsed date causing bad plan; schedule infeasibility hidden; depe
 - Do not claim independent SQLite encryption unless actual encryption is implemented and tested. If needed, evaluate a maintained encrypted SQLite option in a new ADR because it impacts dependencies, migration, backup, performance and device support.
 - No raw audio persisted by Chrona. Explicit, visible tap-to-speak with cancel/retry and lifecycle cleanup. No background mic or always-listening.
 - `createOnDeviceSpeechRecognizer` only after platform availability check. Generic system recognition may send audio off-device, so never use it as an unannounced fallback. Prefer typing if on-device unavailable; off-device choice requires clear, upfront disclosure and explicit user action.
+  - **P03 implementation:** `AndroidSpeechRecognitionAdapter` consults only
+    `SpeechRecognizer.isOnDeviceRecognitionAvailable` and creates only the on-device recogniser,
+    both guarded to API 31+ (below that, typing). It requests only `RECORD_AUDIO`, at the point
+    of use, and adds no `INTERNET` permission. The transcript goes straight to the local parser;
+    nothing is buffered or written, and the recogniser is destroyed on release.
 - Treat any parse/model output as untrusted: validate title/duration/dates/relationships/status and hard-dependency confirmation. Parser never applies schedule.
 - Use Room DAO binding/parameterized queries, domain validation, integrity constraints and explicit schema migration.
 - Apply scheduling revision + assignment changes in a transaction and compare expected revision. Notification actions must be idempotent and use unambiguous action identities.

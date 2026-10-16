@@ -29,6 +29,11 @@ data class TodayUiState(
     /** Plain-language message; never a stack trace or a raw record. */
     val message: String? = null,
     val isEditorOpen: Boolean = false,
+    /**
+     * Text the editor starts with. Voice hands its transcript over here so "change it" opens
+     * the same typed editor rather than a second form.
+     */
+    val editorPrefill: String = "",
 ) {
     /** The next action: in-progress work first, then the first open task. */
     val nextTask: Task?
@@ -85,9 +90,10 @@ class TodayViewModel(
         }
     }
 
-    fun openEditor() = _state.update { it.copy(isEditorOpen = true) }
+    fun openEditor(prefill: String = "") =
+        _state.update { it.copy(isEditorOpen = true, editorPrefill = prefill) }
 
-    fun closeEditor() = _state.update { it.copy(isEditorOpen = false) }
+    fun closeEditor() = _state.update { it.copy(isEditorOpen = false, editorPrefill = "") }
 
     /** Typed creation. Voice arrives in P03 and will land in the same place. */
     fun submitTask(
@@ -111,7 +117,9 @@ class TodayViewModel(
             )
             when (val result = createTask(request)) {
                 is Outcome.Success -> {
-                    _state.update { it.copy(isEditorOpen = false, message = "Saved.") }
+                    _state.update {
+                        it.copy(isEditorOpen = false, editorPrefill = "", message = "Saved.")
+                    }
                     refresh()
                 }
 

@@ -17,15 +17,16 @@
 | `data/export/` | P07 | versioned export DTO/serializer, delete consistency helpers | Privacy Centre | export shape and deletion residual tests |
 | `domain/scheduling/` | P04 | ScheduleInput/Proposal, slot placement and constraint invariants | planning/recovery | deterministic/property/scenario tests |
 | `domain/recovery/` | P04 | triggers, plan diff/explanations, guarded revision/undo rules | schedule/recovery/history UI | lateness/overrun/undo/stale proposal tests |
-| `input/parser/` | P03 | `TaskUnderstandingProvider`, `TaskIntentDraft`, local deterministic parser/validator | text/voice UI and create use case | fixture-based parse and invalid result tests |
-| `input/voice/` | P03, P07 | tap-to-speak session state, speech adapter, cancel/lifecycle cleanup | parser, permissions | mock adapter and actual device tests; disclosure audit |
-| `platform/permission/` | P03/P06/P07 | microphone, notification and overlay permission state | voice/notification/overlay | grant/deny/revoke tests |
+| `domain/parse/` | P03 | `TaskUnderstandingProvider`/`TaskIntentDraft`, `ParseGrammar`, `DeterministicTaskIntentParser`, `TaskIntentDraftValidator` | voice UI and create use case | `DeterministicTaskIntentParserTest` (38), `TaskIntentDraftValidatorTest` (2) |
+| `platform/speech/` | P03 | on-device-only `SpeechRecognitionAdapter` (API 31+ guard), lifecycle cleanup; no audio persisted | parser, voice UI | `AndroidSpeechRecognitionAdapterTest` (Robolectric); device availability NOT RUN |
+| `platform/permission/` | P06/P07 | notification and overlay permission state (mic handled at point of use by `platform/speech`) | notification/overlay | grant/deny/revoke tests |
 | `domain/reminder/` | P06 | `ReminderPolicy`, `ReminderDecision`, cap/batching/quiet hours/repeat suppression | notification/overlay adapters | deterministic schedule/cap/history tests |
 | `platform/notification/` | P06 | channel, permission-aware notification content/actions/deep links | reminder policy/use cases | channels/denial/action identity tests |
 | `platform/overlay/` | P06 | optional overlay window and compact task panel; no domain rule decisions | permission + use cases | moto g54 Android 15 granted/denied/revoked checks |
 | `platform/work/` | P04/P06 | unique deferrable work and reminder reconciliation | repository/recovery/reminder | duplicate work, reschedule, process death/Doze test plan |
 | `ui/today/`, `ui/schedule/` | P02/P04 | current next action, day timeline, conflict/recovery entry | use cases | critical journey UI tests |
 | `ui/taskeditor/`, `ui/recovery/` | P02/P04 | interpretation correction, editing, proposal/diff/apply/reject/undo | parser/recovery use cases | confirmation and constraint tests |
+| `ui/voice/` | P03 | tap-to-speak capture sheet + `VoiceCaptureViewModel`, review/correction, clarification | parser, speech adapter, create use case | `VoiceCaptureViewModelTest` (JVM fake) |
 | `ui/board/` | P05 | paper notes, pins, strings, zoom/pan/filter/project focus/list alternative | same task/relation repos | link semantics, accessibility, 100-task/200-edge performance |
 | `ui/questcard/` | P06 | compact task panel and Start/Done/Later/Dismiss actions | platform cards/use cases | dismissed card does not complete task; action idempotency |
 | `ui/history/` | P04/P07 | schedule revision/action history and safe undo access | revision repository | ordering, retention and guard tests |

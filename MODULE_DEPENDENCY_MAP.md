@@ -17,7 +17,7 @@ flowchart TB
 ```
 
 ## Dependency rules
-1. `domain/model`, `domain/relation`, `domain/scheduling`, `domain/recovery` and `domain/reminder` compile/test without Android framework imports or a network.
+1. `domain/model`, `domain/parse`, `domain/relation`, `domain/scheduling`, `domain/recovery` and `domain/reminder` compile/test without Android framework imports or a network.
 2. UI calls use cases, never Room DAOs directly; board, schedule and Today share the same `TaskId`.
 3. Repositories implement storage interfaces; use cases don't know SQL/Room details.
 4. Parser returns validated-intent candidates only; it does not persist tasks or decide final feasible placement.

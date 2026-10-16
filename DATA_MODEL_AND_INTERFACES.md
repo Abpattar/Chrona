@@ -12,7 +12,9 @@ Room/SQLite is the proposed local store. This is the logical schema; exact Room 
 - `requestedDate`: optional local date for date-only requests; distinct from an instant deadline.
 - `earliestStart`: optional bound with documented hard/soft semantics.
 - `preferredStart` / `preferredEnd`: optional soft local-time window; not equivalent to deadline.
-- `flexibility`: FIXED / FLEXIBLE; a fixed task has explicit start/end and cannot be auto-moved.
+- `flexibility`: FIXED / FLEXIBLE; a fixed task has explicit start/end (`fixedStart`/`fixedEnd`,
+  with `fixedZoneId` in storage) and cannot be auto-moved. The parser expresses the same as
+  `TaskIntentDraft.fixedRange`.
 - `splittable`: boolean; default false.
 - `minimumSessionMinutes`: positive when splitting is allowed.
 - `status`: canonical `TaskStatus`; transitions validated in domain layer.
@@ -58,6 +60,10 @@ Fields: `id`, `taskId`, `scheduledFor`, `surfacedAt?`, `surfaceType`, `outcome` 
 ## Interface boundaries
 - Repositories expose domain-level records/results, not Room entities.
 - Scheduler accepts an immutable snapshot, injected time/timezone and policy version; no hidden reads.
-- Voice states are explicit: Idle, RequestingPermission, Listening, Transcribing, Parsed, NeedsCorrection, Error, Cancelled. Cancel/destroy recognizer on cancellation/lifecycle exit.
+- Voice states are explicit: `Closed`, `Idle`, `RequestingPermission`, `Listening`,
+  `Review` (draft plus at most one clarification prompt), `Unavailable`, `Failed`, `Cancelled`,
+  `Saved` (P03 `VoiceUiState`). Only `Review` can reach storage. Cancel/destroy the recognizer on
+  cancellation/lifecycle exit; the capture adapter is on-device-only and no raw audio or
+  transcript is written to Chrona storage.
 - Overlay/notification surfaces report available/denied/unavailable/failure; core use-case action remains idempotent.
 - Future sync requires its own conflict-resolution and server-authorization protocol; it is not merely “swap repository with network”.

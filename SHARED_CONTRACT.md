@@ -48,31 +48,73 @@ data class TaskUnderstandingRequest(
     val preferences: ParsePreferences,
 )
 
+data class ParsePreferences(
+    val dayStart: LocalTime = LocalTime.of(8, 0),
+    val dayEnd: LocalTime = LocalTime.of(22, 0),
+    val confidenceThreshold: Float = 0.6f,
+)
+
 data class TaskIntentDraft(
     val title: String,
-    val detail: String?,
-    val requestedDate: LocalDate?,
-    val deadline: ZonedDateTime?,
-    val estimatedDuration: Duration?,
-    val preferredWindow: TimeWindow?,
-    val priority: Priority?,
-    val flexibility: Flexibility?,
-    val splittable: Boolean?,
-    val minimumSession: Duration?,
-    val proposedRelations: List<RelationDraft>,
-    val assumptions: List<ParseAssumption>,
-    val confidence: Float,
-    val clarification: ClarificationPrompt?,
+    val detail: String? = null,
+    val requestedDate: LocalDate? = null,
+    val deadline: ZonedDateTime? = null,
+    val estimatedDuration: Duration? = null,
+    val preferredWindow: TimeWindow? = null,
+    val priority: Priority? = null,
+    val flexibility: Flexibility? = null,
+    val splittable: Boolean? = null,
+    val minimumSession: Duration? = null,
+    // Absolute interval for an explicitly fixed block, e.g. "dentist 3 to 4 tomorrow".
+    // Added in P03: FIXED flexibility alone cannot express an instant (ADR-026).
+    val fixedRange: TimeRange? = null,
+    val proposedRelations: List<RelationDraft> = emptyList(),
+    val assumptions: List<ParseAssumption> = emptyList(),
+    // Structural score in 0..1; heuristic, never a calibrated probability.
+    val confidence: Float = 0f,
+)
+
+data class RelationDraft(
+    val type: RelationType,
+    val targetText: String,
+    val label: String? = null,
+    val explanation: String? = null,
+    // Always SUGGESTED: the parser does not read the task list, so resolving a spoken
+    // reference to a TaskId and confirming the edge is the relation editor's job (P05).
+    val createdBy: RelationCreatedBy = RelationCreatedBy.SUGGESTED,
+)
+
+data class ParseAssumption(val field: DraftField, val text: String)
+
+enum class DraftField {
+    TITLE, REQUESTED_DATE, DEADLINE, DURATION, TIME_OF_DAY, PRIORITY, FLEXIBILITY, RELATION
+}
+
+data class ClarificationOption(val label: String, val patch: TaskIntentDraft)
+
+data class ClarificationPrompt(
+    val field: DraftField,
+    val question: String,
+    val options: List<ClarificationOption>,
+    val base: TaskIntentDraft,
 )
 
 sealed interface TaskUnderstandingResult {
     data class Parsed(val draft: TaskIntentDraft) : TaskUnderstandingResult
+    // The (single) prompt carries the unanswered field and the base draft; there is no
+    // `clarification` field on the draft, so a partial draft cannot be mistaken for a
+    // complete one (P03, ADR-026).
     data class NeedsClarification(val prompt: ClarificationPrompt) : TaskUnderstandingResult
     data class Unsupported(val reason: ParseFailureReason) : TaskUnderstandingResult
 }
+
+enum class ParseFailureReason(val message: String) {
+    EMPTY_INPUT, INPUT_TOO_LONG, UNSUPPORTED_LANGUAGE, NOT_A_TASK_REQUEST,
+    UNSUPPORTED_COMMAND, NO_TITLE_REMAINING, MALFORMED_DATE, IMPLAUSIBLE_DURATION
+}
 ```
 
-Parser behavior: interpret the request, not choose final schedule placement; do not persist records; do not silently create a hard dependency from vague language. Confidence is a heuristic indicator, not a calibrated probability. Same text/reference time/timezone/configuration gives same parser result. MVP includes a deterministic parser only; interface existence does not authorize a remote provider.
+Parser behavior: interpret the request, not choose final schedule placement; do not persist records; do not silently create a hard dependency from vague language. Confidence is a heuristic indicator, not a calibrated probability. Same text/reference time/timezone/configuration gives same parser result. MVP includes a deterministic parser only; interface existence does not authorize a remote provider. `ParseFailureReason` is a closed enum so the UI knows when to offer typing rather than guess. `ParseFailureReason` is a closed enum so the UI knows when to offer typing rather than guess.
 
 ## Schedule contract
 

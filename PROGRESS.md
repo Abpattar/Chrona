@@ -1,7 +1,8 @@
 # Chrona — Progress and Resume Record
 
-**Status:** P01 complete. P02 complete. P03 is next.
-**Last updated:** 15 October 2026
+**Status:** P01 complete. P02 complete. P03 complete for automated checks; device/voice
+availability NOT RUN. P04 is next.
+**Last updated:** 16 October 2026
 
 ## Status vocabulary
 
@@ -361,6 +362,144 @@ they are real and will run unchanged once a `kvm`-capable host or the moto g54 i
 
 ---
 
+## P03 — Voice and Structured Task Intent
+
+**Phase gate: PASSED for the automated checks that could run on this host; physical-device and
+on-device-availability checks are NOT RUN.** Tap-to-speak, a provider-neutral deterministic
+parser, a transcript review/correction flow and the typed fallback are implemented and covered
+by 70 new JVM/Robolectric tests. The real-device half of the gate (VOICE-001/002 on a moto g54,
+OPEN-007) could not be run because no device or usable emulator is attached, so voice is kept
+optional and the on-device/off-device behaviour is reported as **unknown**, not passed — exactly
+as `PHASE_03_VOICE_AND_INTENT_PARSER.md` requires.
+
+### What was built
+
+| Layer | Files | Responsibility |
+|---|---|---|
+| Parser contract | `domain/parse/TaskUnderstanding.kt` | `TaskUnderstandingProvider`, `TaskUnderstandingRequest`, `TaskIntentDraft` (+ `fixedRange`), `RelationDraft`, `ParseAssumption`, `ClarificationPrompt`/`ClarificationOption`, `ParseFailureReason`, the `Parsed`/`NeedsClarification`/`Unsupported` result family |
+| Parser | `domain/parse/DeterministicTaskIntentParser.kt` | Bounded-grammar parser: dates/durations/priorities/fixed-vs-flexible clues, negation, questions, unsupported commands; no clock, no Android, no I/O |
+| Grammar | `domain/parse/ParseGrammar.kt` | The single place phrases are tokenised and matched, so the language coverage is documented in one place |
+| Draft validation | `domain/parse/TaskIntentDraftValidator.kt` | Validates a draft through the canonical `TaskValidator` before it can reach storage |
+| Speech boundary | `platform/speech/SpeechRecognitionAdapter.kt` | Provider-neutral capture contract: `availability()`, `listen(): Flow<SpeechEvent>`, `SpeechAvailability`, `SpeechError` + guidance |
+| Android adapter | `platform/speech/AndroidSpeechRecognitionAdapter.kt` | On-device recogniser only (`createOnDeviceSpeechRecognizer`), guarded to API 31+, destroyed on release; requests `EXTRA_PREFER_OFFLINE`; no audio retained |
+| Capture state machine | `ui/voice/VoiceCaptureViewModel.kt` | `VoiceUiState` (Closed/Idle/RequestingPermission/Listening/Review/Unavailable/Failed/Cancelled/Saved); tap is the only entry; cancel/close releases the recogniser |
+| Capture UI | `ui/voice/VoiceCaptureSheet.kt` | Visible listening/cancel/retry/review/correction and one focused clarification, with typing always available |
+| Create use case | `usecase/TaskIntentUseCases.kt` | `CreateTaskFromIntentUseCase`: draft → `NewTask` → `CreateTaskUseCase`; persists only after review |
+| Wiring | `di/AppContainer.kt` (modified), `ui/today/{TodayRoute,TodayScreen,TodayViewModel}.kt` (modified), `ui/taskeditor/TaskEditorSheet.kt` (modified) | Composes the adapter/parser/VM and opens the sheet or the typed editor from Today |
+| Permission | `app/src/main/AndroidManifest.xml` (modified) | Adds only `android.permission.RECORD_AUDIO`; no `INTERNET`, no networking dependency |
+
+### Commands actually executed
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `./gradlew --no-daemon :app:testDebugUnitTest` (P03 suites) | FAIL first (new-adapter-test hang; wrong cancel assertion; fake `listen()` did not increment its session counter) then **PASS** |
+| 2 | `./scripts/verify.sh` | **FAIL** — `lintDebug` reported 3 `NewApi` errors (`createOnDeviceSpeechRecognizer`, `isOnDeviceRecognitionAvailable` called without an API-31 guard on minSdk 26) |
+| 3 | `./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest` (after the API-31 guard) | **PASS** — lint 0 errors; unit tests 152/152 |
+| 4 | `./scripts/verify.sh` | **PASS** — `clean assembleDebug testDebugUnitTest lintDebug` + `assembleDebugAndroidTest`; `OK: Chrona verification passed` |
+| 5 | `adb devices` | empty — no emulator or physical device; device checks NOT RUN |
+
+Verification script output summary:
+
+```
+==> java -version
+==> ./gradlew --version
+==> clean assembleDebug testDebugUnitTest lintDebug
+BUILD SUCCESSFUL in 58s
+==> SKIPPED connectedDebugAndroidTest (pass --with-instrumentation to run it)
+==> assembleDebugAndroidTest (compiles the instrumentation suite without a device)
+BUILD SUCCESSFUL in 20s
+OK: Chrona verification passed
+```
+
+### Tests added and executed
+
+| Suite | Layer | Cases | Result |
+|---|---|---|---|
+| `DeterministicTaskIntentParserTest` | JVM unit | 38 | **PASS** |
+| `CreateTaskFromIntentUseCaseTest` | JVM unit | 8 | **PASS** |
+| `TaskIntentDraftValidatorTest` | JVM unit | 2 | **PASS** |
+| `AndroidSpeechRecognitionAdapterTest` | Robolectric (real speech classes, SDK 33) | 11 | **PASS** |
+| `VoiceCaptureViewModelTest` | JVM unit (fake adapter + fake parser) | 11 | **PASS** |
+| **P03 subtotal** | | **70** | **PASS** |
+| P01+P02 suites (unchanged) | JVM/Room | 82 | **PASS** |
+| **Total JVM/Room** | | **152** | **PASS** (0 failures, 0 errors, 0 skipped) |
+
+Parser fixtures cover malformed and ambiguous relative dates, negation, Unicode, empty speech,
+unsupported language/locale, unsupported "change an existing task" commands, questions, and
+confidence-driven clarification. Adapter tests cover unavailable on-device recognition,
+permission required/denied, cancel cleanup, timeout/error mapping, repeat use after release.
+The ViewModel tests cover the permission and unavailable paths, review-before-persist,
+clarification answering, the retryable/non-retryable split (`INSUFFICIENT_PERMISSIONS` is not
+retryable; `SPEECH_TIMEOUT` is), cancel releasing the session, and refusing an unparsable
+duration.
+
+### Defects the tests caught, and the fixes
+
+1. **`ShadowSpeechRecognizer` never fires `onReadyForSpeech` on its own.** The first adapter
+   test hung forever waiting for `Ready`. The helper now triggers `Ready` explicitly and, where
+   the session does not close on its own (interim words), drives a partial then a final result
+   rather than waiting for the flow to end. Test-only fix.
+2. **The cancel test asserted the wrong thing.** `collectFirstEvent` uses `take(1)`, which
+   *destroys* the session by design, so the original "a second session can still start"
+   assertion was checking a released recogniser. Rewritten to assert against a genuinely live
+   second session.
+3. **The ViewModel's fake adapter did not count sessions.** `listen()` never incremented
+   `sessionCount`, so the release-on-cancel assertion could not pass. Fixed in the test fake.
+4. **Lint `NewApi`: API-31 speech calls were unguarded** (minSdk 26). This was a real
+   correctness bug, not just a lint style issue: on API 26–30 the process would have thrown.
+   `AndroidSpeechRecognitionAdapter` now checks `Build.VERSION.SDK_INT >= S` before both
+   `createOnDeviceSpeechRecognizer` and `isOnDeviceRecognitionAvailable`, and reports
+   `OnDeviceUnavailable` below API 31 so those devices type instead (ADR-006). The factory's
+   unreachable below-31 branch throws, and `listen()` already catches it as a platform failure.
+5. **Compose `ModifierParameter` lint warning** on `TaskEditorSheet` — `modifier` was not the
+   first optional parameter. Reordered; the only caller uses named arguments.
+
+### Contract changes recorded in this phase
+
+- **`TaskIntentDraft.fixedRange: TimeRange?` added.** `SHARED_CONTRACT.md` allowed a `FIXED`
+  flexibility flag but no instant, so a fixed commitment such as "dentist 3 to 4 tomorrow"
+  could not be represented even though the grammar must read one. `SHARED_CONTRACT.md` is
+  updated in this change (see ADR-026).
+- **Clarification is carried by the result, not the draft.** The contract draft had a
+  `clarification: ClarificationPrompt?` field; the implementation removes it and carries the
+  prompt (with its unanswered `base` draft) on `NeedsClarification`, so a partial draft can
+  never be mistaken for a complete one. `SHARED_CONTRACT.md` is updated to match.
+- **Package placement.** The parser lives in `domain/parse` (pure Kotlin) and the speech
+  boundary in `platform/speech`, not the planned `input/parser` and `input/voice`; the capture
+  UI lives in `ui/voice`. This keeps the domain core free of Android imports
+  (`MODULE_DEPENDENCY_MAP.md` rule 1). Recorded as ADR-026.
+
+### Requirements addressed in P03
+
+| ID | Status | Evidence |
+|---|---|---|
+| TASK-001 | `PASS (automated) for capture/draft/correction` | Typed path from P02 plus the deterministic parser (38 cases), draft validation, review/correction and clarification; device voice path NOT RUN |
+| VOICE-001 | `PARTIAL (automated)` | Tap is the only entry; cancel/close/lifecycle release the recogniser (adapter and VM tests); no raw audio is buffered or persisted. On-device permission flow on a real device NOT RUN |
+| VOICE-002 | `PASS (automated) by construction` | The only recogniser created is the on-device one; there is no `createSpeechRecognizer` branch and no `INTERNET` permission. Real-device network behaviour NOT RUN → reported unknown |
+| PRIV-004 | `PASS (automated, P03 scope)` | Only `RECORD_AUDIO` is requested, at point of use; logs carry reason codes; no transcript is persisted |
+| PLAT-001 | `NOT RUN` | No device attached; moto g54 locale/on-device availability unmeasured (OPEN-007) |
+
+### Known limitations, blockers and risks
+
+1. **On-device availability is unmeasured (OPEN-007).** No device or usable emulator is
+   available, so `PHASE_03`'s "record device locale, on-device availability, observed network
+   behaviour/permission flows" is NOT RUN. Voice is kept optional; typing is always complete.
+   The parser is bounded English; `UNSUPPORTED_LANGUAGE` routes those users to typing.
+2. **The emulator/device instrumentation suites still compile but are NOT RUN** (see P01/P02,
+   OPEN-014). AT-004/AT-005 are device-dependent.
+3. **Windows host check still BLOCKED** (OPEN-013).
+4. **The parser's confidence is a heuristic indicator, not a calibrated probability.** It gates
+   a focused clarification, and is not shown as a percentage.
+5. **No relation resolution yet.** The parser can suggest a relation, but `RelationDraft`
+   carries spoken text, not a `TaskId`; resolving and confirming edges is P05.
+
+### Exact next phase
+
+**P04 — Scheduling and recovery.** Prerequisite: P03 gate satisfied for automated work; the
+device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -376,7 +515,10 @@ they are real and will run unchanged once a `kvm`-capable host or the moto g54 i
 - [ ] P01/P02 API 36 emulator launch — BLOCKED. The AVD boots and accepts installs, but
       `artd` finds no usable dex artifacts and `am start` returns `result code=-92`. Cause:
       the build user is not in the `kvm` group, so only software emulation is available.
-- [ ] P03 — voice adapter and deterministic parser.
+- [x] P03 — tap-to-speak with an on-device-only recogniser, deterministic parser, review/
+      correction and typed fallback. 70 new JVM/Robolectric tests (152 total). Device/on-device
+      availability NOT RUN; voice kept optional.
+- [ ] P03/P06/P07 moto g54 (Android 15) checks — NOT RUN (no device attached).
 - [ ] P04 — scheduler and recovery.
 - [ ] P05 — board and relationships.
 - [ ] P06 — Quest Cards and reminders.

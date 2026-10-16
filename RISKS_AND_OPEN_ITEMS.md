@@ -10,7 +10,7 @@
 | OPEN-004 | required research method | supervisor before P08 | deterministic technical evaluation |
 | OPEN-005 | approval/ethics/consent requirements for participants | institution before recruitment | no participant study while unknown |
 | OPEN-006 | actual paper-board visual reference image | owner | written §6 in PDF only; image not separately included in current files |
-| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | no language/offline support assumed |
+| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | **still OPEN — NOT RUN in P03** (no device attached). No language/offline support is assumed; voice is optional and typing always works. Code is guarded to API 31+ and uses the on-device recogniser only |
 | OPEN-008 | exact integrated toolchain matrix and stable patches | P01 agent | pins remain proposed until clean builds pass |
 | OPEN-009 | target SDK required by store on release date | re-check immediately before publishing | no store-compliance claim until checked |
 | OPEN-010 | independent DB encryption/backup requirements | P07 privacy review | app sandbox + intentional backup policy; no independent encryption claim |
@@ -56,7 +56,9 @@
 - **Windows clean-clone build/test/lint** — not run (OPEN-013). Blocking for P08 and for any
   honest "cross-OS parity" claim.
 - **Emulator / physical-device instrumentation** — not run (OPEN-014). Blocking for any claim
-  about runtime behaviour, permissions, notifications, overlay or speech recognition.
+  about runtime behaviour, permissions, notifications, overlay or speech recognition. In P03
+  this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured; voice is
+  kept optional and reported as unknown.
 - **Room schema migration** — untested, because only schema v1 exists. Room schema v1 is
   exported to `app/schemas/` and committed so the `MigrationTestHelper` test has a real
   starting point when v2 lands. Blocking for RELIABILITY-001 at P07.

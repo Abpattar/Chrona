@@ -8,7 +8,13 @@ import com.chrona.app.data.repository.RoomEventRepository
 import com.chrona.app.data.repository.RoomRelationshipRepository
 import com.chrona.app.data.repository.RoomTaskRepository
 import com.chrona.app.data.repository.TaskRepository
+import com.chrona.app.domain.parse.DeterministicTaskIntentParser
+import com.chrona.app.domain.parse.ParsePreferences
+import com.chrona.app.domain.parse.TaskUnderstandingProvider
 import com.chrona.app.domain.relation.RelationGraph
+import com.chrona.app.platform.speech.AndroidSpeechRecognitionAdapter
+import com.chrona.app.platform.speech.SpeechRecognitionAdapter
+import com.chrona.app.usecase.CreateTaskFromIntentUseCase
 import com.chrona.app.usecase.CreateTaskUseCase
 import com.chrona.app.usecase.EventUseCases
 import com.chrona.app.usecase.IdGenerator
@@ -41,6 +47,26 @@ class AppContainer(
     val listTasks = ListTasksUseCase(taskRepository)
     val lifecycle = TaskLifecycleUseCases(taskRepository, timeSource)
     val events = EventUseCases(eventRepository, idGenerator, timeSource)
+
+    /**
+     * The deterministic parser. There is no provider switch: the interface exists so the parser
+     * is a test seam and a replaceable boundary, not an invitation to add a remote provider
+     * (SHARED_CONTRACT.md, "MVP includes a deterministic parser only").
+     */
+    val taskUnderstanding: TaskUnderstandingProvider = DeterministicTaskIntentParser()
+
+    /**
+     * Parser configuration taken from the user's day hours.
+     *
+     * `UserPreferences` has no storage yet (CH-DATA-003), so the defaults are used until the
+     * settings screen persists real values in P06/P07.
+     */
+    val parsePreferences: ParsePreferences = ParsePreferences()
+
+    /** On-device capture only; there is no second recogniser to fall back to. */
+    val speechRecognition: SpeechRecognitionAdapter = AndroidSpeechRecognitionAdapter(context)
+
+    val createTaskFromIntent = CreateTaskFromIntentUseCase(createTask)
 
     /** Placeholder for P05: builds the dependency graph from stored relationships. */
     fun relationGraph(): RelationGraph = RelationGraph()

@@ -49,9 +49,12 @@ fun TaskEditorSheet(
         deadlineDate: LocalDate?,
     ) -> Unit,
     onDismiss: () -> Unit,
+    onSpeak: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Text the editor opens with, used when a voice draft is handed over for correction. */
+    initialTitle: String = "",
 ) {
-    var title by rememberSaveable { mutableStateOf("") }
+    var title by rememberSaveable { mutableStateOf(initialTitle) }
     var details by rememberSaveable { mutableStateOf("") }
     var durationText by rememberSaveable { mutableStateOf("") }
     var deadlineText by rememberSaveable { mutableStateOf("") }
@@ -70,6 +73,15 @@ fun TaskEditorSheet(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("New task", style = MaterialTheme.typography.headlineSmall)
+
+        // Voice is offered here and nowhere else in the Today surface: one explicit tap, no
+        // background listening, and typing stays available at every point.
+        TextButton(
+            onClick = onSpeak,
+            modifier = Modifier.semantics { testTag = "editor_speak" },
+        ) {
+            Text("Speak instead")
+        }
 
         OutlinedTextField(
             value = title,

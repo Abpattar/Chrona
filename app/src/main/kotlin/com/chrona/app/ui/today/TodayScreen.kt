@@ -56,6 +56,7 @@ fun TodayScreen(
     onPostpone: (TaskId) -> Unit,
     onEditorOpen: () -> Unit,
     onEditorClose: () -> Unit,
+    onSpeak: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -70,7 +71,12 @@ fun TodayScreen(
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
         if (state.isEditorOpen) {
-            TaskEditorSheet(onSubmit = onCreate, onDismiss = onEditorClose)
+            TaskEditorSheet(
+                onSubmit = onCreate,
+                onDismiss = onEditorClose,
+                onSpeak = onSpeak,
+                initialTitle = state.editorPrefill,
+            )
             return@Column
         }
 
@@ -262,6 +268,7 @@ private fun TodayScreenPreview() {
             onPostpone = {},
             onEditorOpen = {},
             onEditorClose = {},
+            onSpeak = {},
         )
     }
 }
