@@ -9,7 +9,6 @@ Legend: **[P01]** created and building · *(planned)* created by the phase that 
 ```text
 chrona/
 ├── README.md
-├── README_FIRST.md
 ├── MASTER_REQUIREMENTS.md
 ├── MASTER_ARCHITECTURE.md
 ├── PROJECT_DIRECTORY_TREE.md
@@ -34,8 +33,6 @@ chrona/
 ├── PROGRESS.md
 ├── CHANGELOG.md
 ├── pack-metadata.json
-├── ARCHIVE_INVENTORY.md
-├── FILE_PACK_MANIFEST.md
 ├── .editorconfig                                    [P01]
 ├── .gitattributes                                   [P01]
 ├── .gitignore                                       [P01]
@@ -126,12 +123,6 @@ chrona/
 │   ├── config.toml                                  [post-P06] Edge Function config (verify_jwt = true)
 │   ├── .env.local.example                           [post-P06] secret template (real keys git-ignored)
 │   └── functions/understand-task/                   [post-P06] gateway.ts, providers.ts, index.ts, gateway.test.ts
-├── opencode/
-│   ├── OPENCODE_MASTER_EXECUTION_PROMPT.md
-│   └── phase-prompts/
-├── implementation-guides/
-│   ├── EXECUTION_CHECKLIST.md
-│   └── FINAL_VERIFICATION_TEMPLATE.md
 └── source-references/
     ├── Chrona_Project_Requirements_Document.pdf
     └── Universal_Software_Development_Master_Prompt_V2.pdf

@@ -195,7 +195,6 @@ real drafts from such a local function with a live Gemini key. A **hosted** Supa
 ├── gradle/libs.versions.toml     The single source of dependency versions
 ├── scripts/verify.sh|.ps1        Equivalent verification entry points per OS
 ├── supabase/functions/understand-task/  Optional Edge Function (Deno) for cloud task understanding
-├── opencode/                     Master execution prompt + phase prompts P01–P08
 └── *.md                          Canonical planning, contract and evidence documents
 ```
 
@@ -213,7 +212,6 @@ the domain core imports no Android, Room or network code.
 | [`SHARED_SYMBOL_REGISTRY.md`](SHARED_SYMBOL_REGISTRY.md) | Canonical symbol index and status |
 | [`REQUIREMENT_TRACEABILITY.md`](REQUIREMENT_TRACEABILITY.md) | Requirement → test evidence map |
 | [`GLOBAL_ACCEPTANCE_TESTS.md`](GLOBAL_ACCEPTANCE_TESTS.md) | Acceptance scenarios AT-001…AT-036 |
-| [`opencode/OPENCODE_MASTER_EXECUTION_PROMPT.md`](opencode/OPENCODE_MASTER_EXECUTION_PROMPT.md) | Agent execution rules and phase gate template |
 
 ## Known limitations and blocked checks
 
