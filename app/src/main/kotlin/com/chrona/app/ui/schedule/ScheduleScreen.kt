@@ -223,6 +223,7 @@ private fun reasonText(item: UnplacedTask): String = when (item.reason) {
     UnplacedReason.MIN_SESSION_UNAVAILABLE -> "only gaps shorter than its minimum session were free"
     UnplacedReason.INVALID_DURATION -> "its duration is not usable"
     UnplacedReason.USER_CHOICE_REQUIRED -> "it needs a decision from you"
+    UnplacedReason.OUTSIDE_HORIZON -> item.explanation.ifBlank { "it is planned for another day" }
 }
 
 @Preview(showBackground = true)

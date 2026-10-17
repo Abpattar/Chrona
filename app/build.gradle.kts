@@ -5,6 +5,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Cloud task-understanding config, read as Gradle project properties. Absent => feature off.
+// Prefer ~/.gradle/gradle.properties or -P over the repository's gradle.properties for secrets.
+val cloudEnabled: Boolean =
+    (project.findProperty("chrona.cloudEnabled") as String?)?.toBooleanStrictOrNull() ?: false
+val cloudFunctionUrl: String = (project.findProperty("chrona.cloudFunctionUrl") as String?) ?: ""
+val cloudAnonKey: String = (project.findProperty("chrona.cloudAnonKey") as String?) ?: ""
+
 android {
     namespace = "com.chrona.app"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -17,6 +24,13 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Optional cloud task-understanding. Off unless the owner provides values (for example
+        // via ~/.gradle/gradle.properties or -P). Empty defaults keep the deterministic parser
+        // the only path in a normal build, and keep secrets out of the repository.
+        buildConfigField("boolean", "CLOUD_ENABLED", cloudEnabled.toString())
+        buildConfigField("String", "CLOUD_FUNCTION_URL", "\"$cloudFunctionUrl\"")
+        buildConfigField("String", "CLOUD_ANON_KEY", "\"$cloudAnonKey\"")
     }
 
     buildTypes {
@@ -49,6 +63,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     sourceSets {

@@ -29,7 +29,7 @@ data class ScheduleInput(
     val previousPlacements: List<SchedulePlacement> = emptyList(),
     /** The applied revision this input was read at; recorded in the proposal basis. */
     val basedOnRevisionId: RevisionId? = null,
-    val policyVersion: String = "p04-v1",
+    val policyVersion: String = "p04-v2",
 )
 
 /** A manually entered fixed commitment the scheduler must work around. Never moved by recovery. */
@@ -56,6 +56,15 @@ enum class UnplacedReason {
     MIN_SESSION_UNAVAILABLE,
     INVALID_DURATION,
     USER_CHOICE_REQUIRED,
+
+    /**
+     * The task is requested for a different local day, so it is not today's problem.
+     *
+     * Distinct from [NO_AVAILABLE_WINDOW] and [DEADLINE_INFEASIBLE] on purpose: a task for
+     * tomorrow is not a capacity failure and must never make the day look overloaded. It is
+     * still listed so nothing is silently dropped.
+     */
+    OUTSIDE_HORIZON,
 }
 
 data class UnplacedTask(

@@ -30,3 +30,9 @@ chrona-export*.json
 # Verification artefacts that may contain user content
 screenshots/
 artifacts/
+
+# Local secrets for the Supabase Edge Function (provider API keys). Commit the .example only.
+supabase/.env.local
+supabase/functions/**/.env
+supabase/.branches/
+supabase/.temp/

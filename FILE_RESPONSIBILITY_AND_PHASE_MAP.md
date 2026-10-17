@@ -24,6 +24,8 @@
 | `platform/notification/` | P06 | channel, permission-aware notification content/actions/deep links | reminder policy/use cases | channels/denial/action identity tests |
 | `platform/overlay/` | P06 | optional overlay window and compact task panel; no domain rule decisions | permission + use cases | moto g54 Android 15 granted/denied/revoked checks |
 | `platform/work/` | P04/P06 | unique deferrable work and reminder reconciliation | repository/recovery/reminder | duplicate work, reschedule, process death/Doze test plan |
+| `platform/cloud/` | post-P06 | optional Edge Function client: `CloudConfig`, `HttpTransport`, `TaskIntentWire` (untrusted-response decoder), `CloudTaskUnderstandingProvider` (fallback to deterministic parser) | parser seam, DI | `TaskIntentWireTest` (11, incl. 100 fixtures), `CloudTaskUnderstandingProviderTest` (9); live provider exercised via the app client against the local function 2026-10-17; hosted deploy NOT RUN (OPEN-018) |
+| `supabase/functions/understand-task/` | post-P06 | Deno Edge Function: `gateway.ts` (failover/validation), `providers.ts` (Groq/Gemini/OpenRouter adapters), `index.ts` (entry) | app cloud client | `gateway.test.ts` (24, `node --test`); live provider run against a local Deno instance with a real Gemini key 2026-10-17; hosted deploy NOT RUN |
 | `ui/today/`, `ui/schedule/` | P02/P04 | current next action, day preview (planned/moved/unplaced + apply/undo) | use cases | `ScheduleViewModelTest` (preview writes nothing); device rendering NOT RUN |
 | `ui/taskeditor/`, `ui/recovery/` | P02/P04 | interpretation correction, editing, proposal/diff/apply/reject/undo | parser/recovery use cases | confirmation and constraint tests |
 | `ui/voice/` | P03 | tap-to-speak capture sheet + `VoiceCaptureViewModel`, review/correction, clarification | parser, speech adapter, create use case | `VoiceCaptureViewModelTest` (JVM fake) |
@@ -31,6 +33,7 @@
 | `ui/questcard/` | P06 | compact task panel and Start/Done/Later/Dismiss actions | platform cards/use cases | dismissed card does not complete task; action idempotency |
 | `ui/history/` | P04/P07 | schedule revision/action history and safe undo access | revision repository | ordering, retention and guard tests |
 | `ui/settings/`, `ui/privacy/`, `privacy/` | P07 | preferences, permissions/data inventory/export/delete | settings/data/platform | privacy UX, deletion, permission revocation |
+| `app/src/debug/` | post-P06 | debug-only build inputs: `AndroidManifest.xml` + `res/xml/network_security_config.xml` that permit cleartext only for the local Edge Function host (localhost/127.0.0.1/10.0.2.2) | debug builds only; release keeps no-cleartext default | merged into `assembleDebug`; live client probe ran against the local function (see `PROGRESS.md`) |
 | `app/src/test/**` | every phase | pure unit and contract tests | production logic | deterministic fixtures, no live network/speech service |
 | `app/src/androidTest/**` | P02 onward | Room/UI/platform integration tests | emulator and physical device | record actual device/API and results |
 | `scripts/verify.sh`, `scripts/verify.ps1` | P01, updated each phase | same wrapper tasks, fail-fast scripts | developers/CI | run on each host; preserve exit code |

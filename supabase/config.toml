@@ -1,0 +1,9 @@
+# Supabase project configuration for Chrona's task-understanding gateway.
+#
+# The function is the only component that holds provider API keys. The Android app authenticates
+# with the project's anon key (a valid JWT), so `verify_jwt` stays on: an unauthenticated caller
+# must not be able to spend the owner's provider tokens.
+project_id = "chrona"
+
+[functions.understand-task]
+verify_jwt = true

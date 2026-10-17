@@ -27,18 +27,52 @@ fun Priority.rank(): Int = when (this) {
 }
 
 /**
- * Total, stable ordering: priority, then deadline (absent last), then id.
+ * Total, deadline-aware ordering: earliest deadline first, then priority, then id.
+ *
+ * Earliest-deadline-first is Jackson's rule: for independent work with no release times it
+ * minimises the maximum lateness, so a feasible set of deadlines is not missed merely because
+ * a high-priority task took the only slot a sooner deadline needed. Priority remains the
+ * tie-break among tasks whose deadlines tie, and every task without a deadline sorts last.
  *
  * Total because two runs over the same tasks must produce the same order; id breaks every
  * remaining tie (CH-SCHED-004).
  */
 fun schedulingComparator(): Comparator<Task> =
-    compareBy<Task> { it.priority.rank() }
-        .thenBy { it.deadline ?: FAR_FUTURE }
+    compareBy<Task> { it.deadline ?: FAR_FUTURE }
+        .thenBy { it.priority.rank() }
         .thenBy { it.id.value }
 
 /** Deterministic far-future sentinel for "no deadline"; never a real horizon. */
 val FAR_FUTURE: ZonedDateTime = ZonedDateTime.of(2100, 1, 1, 0, 0, 0, 0, java.time.ZoneOffset.UTC)
+
+/**
+ * Where a task's requested date sits relative to the single local day being planned.
+ *
+ * The horizon is one local day, `[dayStart, dayEnd)`. A date-only request outside it is not a
+ * capacity failure; it is simply not today's work.
+ */
+enum class HorizonMembership {
+    /** Today, or no date request at all. Eligible for today's plan. */
+    BELONGS,
+
+    /** Requested for an earlier day and still open: carried forward into today, with an assumption. */
+    BEFORE,
+
+    /** Requested for a later day: left for that day, reported as [UnplacedReason.OUTSIDE_HORIZON]. */
+    AFTER,
+}
+
+/** The local date the engine plans. Single source of truth for the horizon's date. */
+fun ScheduleInput.horizonDate(): LocalDate = dayStart.toLocalDate()
+
+fun Task.horizonMembership(horizon: LocalDate): HorizonMembership {
+    val requested = requestedDate ?: return HorizonMembership.BELONGS
+    return when {
+        requested.isBefore(horizon) -> HorizonMembership.BEFORE
+        requested.isAfter(horizon) -> HorizonMembership.AFTER
+        else -> HorizonMembership.BELONGS
+    }
+}
 
 fun taskInterval(start: ZonedDateTime, end: ZonedDateTime): TimeRange = TimeRange(start, end)
 
@@ -94,9 +128,10 @@ fun Task.preferredStartOn(day: LocalDate, zone: java.time.ZoneId): ZonedDateTime
  * Dependency-safe processing order for [tasks].
  *
  * A task is ready only once every prerequisite has left the pool. Among ready tasks the
- * [schedulingComparator] decides, so priority still wins among independent work while a hard
- * dependency always comes first (REL-002). Any remaining tasks (a cycle) are appended in
- * comparator order so nothing is dropped.
+ * [schedulingComparator] decides (earliest deadline, then priority, then id), so a hard
+ * dependency always comes first (REL-002) and, among the independent work, the nearest
+ * deadline is protected. Any remaining tasks (a cycle) are appended in comparator order so
+ * nothing is dropped.
  */
 fun dependencyOrder(tasks: List<Task>, graph: RelationGraph): List<Task> {
     val ids = tasks.map { it.id }.toSet()

@@ -114,7 +114,7 @@ enum class ParseFailureReason(val message: String) {
 }
 ```
 
-Parser behavior: interpret the request, not choose final schedule placement; do not persist records; do not silently create a hard dependency from vague language. Confidence is a heuristic indicator, not a calibrated probability. Same text/reference time/timezone/configuration gives same parser result. MVP includes a deterministic parser only; interface existence does not authorize a remote provider. `ParseFailureReason` is a closed enum so the UI knows when to offer typing rather than guess. `ParseFailureReason` is a closed enum so the UI knows when to offer typing rather than guess.
+Parser behavior: interpret the request, not choose final schedule placement; do not persist records; do not silently create a hard dependency from vague language. Confidence is a heuristic indicator, not a calibrated probability. Same text/reference time/timezone/configuration gives same parser result. The deterministic parser is the authority and the default; an optional cloud provider (ADR-037) may be wired behind this seam, but only as an enrichment — it runs off the scheduling critical path and any failure falls back to the deterministic parser. `ParseFailureReason` is a closed enum so the UI knows when to offer typing rather than guess.
 
 ## Schedule contract
 

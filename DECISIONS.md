@@ -40,6 +40,8 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-033 | APPROVED | Board layout is a pure deterministic function (`BoardLayoutCalculator`) over tasks+relationships; no randomness, wall clock or animation state | stable, reproducible note coordinates (P05 "stable coordinates") and JVM-testable layout, including the 100/200 performance fixture | P05 |
 | ADR-034 | APPROVED | Reminder style is a user choice with distinct, testable semantics: `QUIET` suppresses `LOW` entirely (`QUIET_MODE`) and batches related tasks; `BALANCED` batches related tasks and subjects `LOW` to the daily cap; `MORE_GUIDANCE` never batches | NOTIFY-001 and ADR-010 require the user to control the intensity of reminders. Making each style a pure, unit-tested rule (rather than platform behaviour) keeps the promise deterministic and evaluable | P06 |
 | ADR-035 | APPROVED | Surface selection order is overlay (enabled + permission granted) → notification → in-app, and a presenter returning `null` is a fallback rather than an error; the non-urgent daily cap counts dispatched **cards** (not tasks) and a `priority` column on `reminder_presentation_history` preserves the count across later task edits/deletions | ADR-009 makes the overlay optional and best-effort, so delivery must always fall back cleanly. Counting cards matches what the user actually experienced (a batch is one interruption) and keeps urgent cards uncapped. The added `priority` column is a documented DATA_MODEL deviation: it prevents a later edit/delete from rewriting a past day's cap; `MIGRATION_2_3` is additive with no destructive fallback | P06 |
+| ADR-036 | APPROVED (owner-requested correctness fix) | Scheduling is horizon-explicit and deadline-aware: a task's date-only request decides whether it belongs to today (`[dayStart, dayEnd)`), is carried forward (`BEFORE`, with an assumption), or is left for its own day (`AFTER` → `UnplacedReason.OUTSIDE_HORIZON`); among ready tasks the nearest deadline is scheduled first, then priority, then id (earliest-deadline-first / Jackson's rule, policy `p04-v2`) | fixes two P04 correctness defects — date-only requests were ignored by the engine, and a priority-first order could reject a *feasible* deadline combination. EDF is optimal for independent work without release times and stays explainable in one sentence (CH-SCHED-001). A future-day task is deliberately not an overload. The heuristic can still be suboptimal under fixed commitments/differing release times; documented, not hidden | Correctness (post-P06) |
+| ADR-037 | APPROVED (owner-requested) | Cloud task understanding is an optional, **off-by-default** enrichment: the app calls Chrona's own Supabase Edge Function (provider failover Groq → Gemini → OpenRouter), and the deterministic parser remains the authority — any failure (offline, timeout, non-2xx, malformed or rule-breaking draft) falls back silently. The app holds only the Supabase **anon** key; provider keys live solely in function secrets. Only text, reference time and zone are sent; no raw model text is stored | data-leaving-device/provider/cost changes require owner approval (this section), which was given ("full Stage 2"). A pure-local MVP cannot read messy free-form input as well; routing through Chrona's own function keeps keys out of the APK and lets provider choice change without an app release. Trade-off: a hosted model sees one phrase, so the feature stays opt-in and never in the scheduling critical path | Cloud interpreter (post-P06) |
 
 ### ADR-018a — Coordinated toolchain change record
 
@@ -132,6 +134,92 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
   failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. v2→v3 migration
   tested (`MigrationTest2To3Test`). Notification/overlay/worker runtime checks are NOT RUN
   (OPEN-011/OPEN-014).
+
+### Scheduling correctness change record — requested dates and deadline feasibility (ADR-036)
+
+- **Date:** 17 October 2026. **Phase:** correctness revision of the P04 scheduling policy
+  (owner-requested; recorded as ADR-036). **Policy version:** `ScheduleInput.policyVersion`
+  default `p04-v1` → `p04-v2`.
+- **Defect 1 — requested dates ignored:** `Task.requestedDate` was stored (for example
+  `usecase/TaskUseCases.kt` line 81) but the engine never read it; `eligibleForScheduling()` was
+  just `status.isActive`. A task requested for a later day could be planned into today and an
+  overdue task was silently moved to today with no explanation. Fixed by classifying each active
+  task with `Task.horizonMembership(horizon)` over the single local day `[dayStart, dayEnd)`:
+  `AFTER` → `UnplacedReason.OUTSIDE_HORIZON`, `BEFORE` → carried forward with a stated
+  assumption, `BELONGS` → planned.
+- **Defect 2 — avoidable deadline miss:** `schedulingComparator()` ordered by priority *before*
+  deadline, so a `CRITICAL` task could occupy the only slot a sooner deadline needed and an
+  actually feasible combination was reported `DEADLINE_INFEASIBLE`. Fixed by ordering
+  earliest-deadline-first, then priority, then id — Jackson's rule (EDF), optimal for independent
+  work without release times. Only the order tasks are offered to the placer changed; the
+  unchanged placement check still enforces every deadline.
+- **Horizon made explicit:** added `ScheduleInput.horizonDate()` (= `dayStart.toLocalDate()`) as
+  the single source of truth. The preview (`ui/schedule/ScheduleViewModel`) and recovery
+  (`DeterministicRecoveryPlanner`) already pass the same `ScheduleInput`, so preview, apply and
+  recovery share one horizon and cannot drift.
+- **New outcome + UI:** `UnplacedReason.OUTSIDE_HORIZON` (with a label in
+  `ui/schedule/ScheduleScreen.reasonText`). It is deliberately excluded from `overloaded`:
+  a task for tomorrow is not a capacity failure. Adding the enum value makes the UI `when`
+  exhaustive-checked at compile time.
+- **Trade-offs:** EDF maximises deadline protection but can place a lower-priority task ahead of a
+  higher-priority one when its deadline is nearer; this is intended because a deadline is hard
+  and priority is soft (CH-SCHED-005). The heuristic remains suboptimal in pathological cases with
+  fixed commitments and differing release times — it is a declared heuristic, never presented as a
+  proven optimum.
+- **Alternatives considered:** (1) *Change only the comparator.* Rejected — it would still ignore
+  requested dates and the horizon. (2) *Bounded feasibility search / repair.* Rejected as
+  disproportionate: EDF already resolves the reported class of avoidable miss on a personal
+  planner's day, and a search would add complexity without a new user-visible guarantee.
+  (3) *Report future tasks as `NO_AVAILABLE_WINDOW`.* Rejected — it would wrongly make the day
+  look overloaded.
+- **Affected requirements:** CH-SCHED-001 (pure, explainable), CH-SCHED-003 (deadline never
+  silently overrun), CH-SCHED-004 (deterministic order), human-facing "nothing silently dropped".
+- **Verification:** `./scripts/verify.sh` passes on Ubuntu — 288 unit/Robolectric tests, 0
+  failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. New
+  `ScheduleEngineHorizonTest` (7) reproduces both defects and asserts the placed/unplaced
+  invariant; new `ScheduleEngineBenchmarkTest` (2) prints engine and recovery latency for
+  10/50/100/200-task days (200 tasks ≈ 12 ms engine, ≈ 27 ms recovery after JIT warm-up) and
+  asserts no task is dropped, with no fragile timing threshold. Device checks remain NOT RUN
+  (OPEN-014).
+
+### Optional cloud task understanding — change record (ADR-037)
+
+- **Date:** 17 October 2026. **Phase:** post-P06 enrichment (owner-requested; recorded as
+  ADR-037). **Approval:** owner selected the full implementation with mocked tests, satisfying the
+  "data leaving device / provider / cost / hosting" approval gate below.
+- **Boundary:** the domain layer is unchanged and still has no network import. The cloud path
+  lives in `platform/cloud` behind the existing `TaskUnderstandingProvider` seam (CH-PARSE-001),
+  so the scheduling engine, recovery and persistence never depend on it.
+- **Authority stays local:** `CloudTaskUnderstandingProvider` returns a remote draft only when it
+  is schema-valid (`TaskIntentWire`) *and* passes `TaskIntentDraftValidator`; otherwise it calls
+  the `DeterministicTaskIntentParser`. A remote `Unsupported` is treated the same way, because the
+  deterministic parser, not the model, decides whether something is a task.
+- **Key handling:** the app sends only the Supabase anon key (a public JWT) as `authorization` and
+  `apikey`. Provider keys (`GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`) exist only as
+  Edge Function secrets; they are never in Kotlin, Gradle, resources, the APK or a log. The
+  function requires `verify_jwt = true`.
+- **Failover order / cost:** Groq → Gemini → OpenRouter, using whichever provider keys are
+  configured; per-provider retry with bounded backoff and `Retry-After` honouring; a request that
+  exhausts providers returns 502/503 and the app falls back. Models are overridable per provider.
+- **Data minimisation:** only the phrase (≤500 chars, enforced both sides), the reference time and
+  the zone leave the device; the structured result stores no raw model output (contract rule
+  already enforced for the deterministic parser).
+- **Alternatives considered:** (1) *Call providers from the app with keys in BuildConfig.*
+  Rejected — an APK key cannot be protected and would leak on any extraction. (2) *A new HTTP
+  library (OkHttp/Ktor).* Rejected — `HttpURLConnection` already exists and the need is a single
+  POST; no dependency added. (3) *Make cloud the primary parser.* Rejected — it would put a
+  network call and a third party in the capture path and contradict the local-first requirement.
+- **Affected requirements:** CH-PARSE-001 (provider-neutral seam, now with a second
+  implementation), PRIV-001 (local-first: preserved because the path is off by default), and the
+  owner-facing "no account/backend" claim (README updated to describe the single opt-in network
+  path).
+- **Verification:** `gateway.test.ts` 24 pass (`node --test`); `TaskIntentWireTest` +
+  `CloudTaskUnderstandingProviderTest` 20 pass; full `./scripts/verify.sh` PASS (309 unit tests).
+  On 2026-10-17 the provider was exercised **live against a local Deno Edge Function** with a real
+  Gemini key using the app's own client: 2 of 3 phrases produced real drafts (the third fell back on
+  a transient provider error, and the provider also returned transient `429`/timeouts). A **hosted
+  Supabase deploy is still NOT RUN** (no Supabase CLI/project/credentials) — see OPEN-018. The
+  hosted path must not be represented as live-working until a real deploy is exercised.
 
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.

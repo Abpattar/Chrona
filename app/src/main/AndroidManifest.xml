@@ -5,17 +5,23 @@
         Chrona is local-first. P01 declared no runtime permissions at all.
 
         P03 adds exactly one, at the point of use: the microphone for explicit
-        tap-to-speak capture. There is still no android.permission.INTERNET, so no
-        component — including any speech recogniser — can open a socket. Notifications (P06)
-        and overlay (P06) are added by the phase that owns them.
+        tap-to-speak capture. Notifications (P06) and overlay (P06) are added by the phase that
+        owns them.
+
+        Cloud task-understanding is the first and only feature that may open a socket. INTERNET is
+        declared here but the path is off unless the build is explicitly configured
+        (BuildConfig.CLOUD_ENABLED plus a function URL). The device never calls an AI provider
+        directly: it calls Chrona's own Supabase Edge Function, and if that call fails or times out
+        the deterministic parser takes over. No text leaves the device unless the owner turns the
+        feature on.
     -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
         P06 reminders. POST_NOTIFICATIONS is requested at the point of use on API 33+;
         SYSTEM_ALERT_WINDOW is the special access for the *optional* floating Quest Card, requested
-        only after the user turns the overlay on. Chrona still declares no INTERNET permission, so
-        not even a reminder can open a socket.
+        only after the user turns the overlay on.
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

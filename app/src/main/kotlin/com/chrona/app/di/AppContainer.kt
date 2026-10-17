@@ -2,6 +2,7 @@ package com.chrona.app.di
 
 import android.content.Context
 import androidx.room.Room
+import com.chrona.app.BuildConfig
 import com.chrona.app.data.local.ChronaDatabase
 import com.chrona.app.data.preferences.DataStorePreferencesRepository
 import com.chrona.app.data.preferences.settingsDataStore
@@ -32,6 +33,9 @@ import com.chrona.app.domain.scheduling.DeterministicScheduleEngine
 import com.chrona.app.domain.scheduling.ScheduleEngine
 import com.chrona.app.platform.notification.NotificationPresenter
 import com.chrona.app.platform.overlay.OverlayPresenter
+import com.chrona.app.platform.cloud.CloudConfig
+import com.chrona.app.platform.cloud.CloudTaskUnderstandingProvider
+import com.chrona.app.platform.cloud.UrlConnectionHttpTransport
 import com.chrona.app.platform.speech.AndroidSpeechRecognitionAdapter
 import com.chrona.app.platform.speech.SpeechRecognitionAdapter
 import com.chrona.app.usecase.ApplyReminderActionUseCase
@@ -147,11 +151,29 @@ class AppContainer(
     )
 
     /**
-     * The deterministic parser. There is no provider switch: the interface exists so the parser
-     * is a test seam and a replaceable boundary, not an invitation to add a remote provider
-     * (SHARED_CONTRACT.md, "MVP includes a deterministic parser only").
+     * Task understanding: the deterministic parser by default, wrapped by the optional cloud
+     * provider only when a build supplies a function URL.
+     *
+     * Cloud is an enrichment, not a dependency: it may improve an interpretation, but any
+     * failure falls back to the deterministic parser, so the capture flow is never blocked. The
+     * device calls Chrona's own Edge Function (which owns the provider keys) and never an AI
+     * provider directly; no task text leaves the device unless the owner configures it.
      */
-    val taskUnderstanding: TaskUnderstandingProvider = DeterministicTaskIntentParser()
+    val taskUnderstanding: TaskUnderstandingProvider = buildTaskUnderstanding()
+
+    private fun buildTaskUnderstanding(): TaskUnderstandingProvider {
+        val local = DeterministicTaskIntentParser()
+        val config = CloudConfig(
+            enabled = BuildConfig.CLOUD_ENABLED,
+            functionUrl = BuildConfig.CLOUD_FUNCTION_URL,
+            anonKey = BuildConfig.CLOUD_ANON_KEY,
+        )
+        return if (config.isUsable) {
+            CloudTaskUnderstandingProvider(UrlConnectionHttpTransport(), config, local)
+        } else {
+            local
+        }
+    }
 
     /**
      * Parser configuration taken from the user's day hours.

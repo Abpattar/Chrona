@@ -85,6 +85,7 @@ chrona/
 │       │       │   ├── overlay/                     [P06] OverlayPresenter (best-effort, opt-in)
 │       │       │   ├── speech/                      (P03) on-device speech adapter
 │       │       │   ├── permission/                  [P06] ReminderPermissions; (P07 continues)
+│       │       │   ├── cloud/                       [post-P06] optional Edge Function client (CloudConfig, HttpTransport, TaskIntentWire, CloudTaskUnderstandingProvider)
 │       │       │   └── work/                        [P06] ReminderReconciliationWorker
 │       │       ├── privacy/                         (planned P07)
 │       │       └── ui/
@@ -99,6 +100,9 @@ chrona/
 │       │           ├── settings/                    [P01 shell; preferences P06/P07]
 │       │           ├── voice/                       [P03] tap-to-speak capture sheet + VM
 │       │           └── privacy/                      (planned P07)
+│       ├── debug/
+│       │   ├── AndroidManifest.xml                  [post-P06] debug-only: opts into the network config below
+│       │   └── res/xml/network_security_config.xml  [post-P06] cleartext permitted only for localhost/127.0.0.1/10.0.2.2
 │       ├── test/kotlin/com/chrona/app/
 │       │   ├── domain/                               (planned P02)
 │       │       ├── parse/                               [P03] parser/tests
@@ -107,7 +111,7 @@ chrona/
 │       │       └── reminder/                            [P06] policy + selector tests
 │       │   ├── data/                                    [P04] Room repo + migration tests; [P05] relationship repo tests; [P06] reminder history repo + v2→v3 migration
 │       │   ├── navigation/                          [P01]
-│       │       ├── platform/                             [P03] speech adapter tests
+│       │       ├── platform/                             [P03] speech adapter tests; [post-P06] cloud client tests
 │       │       ├── ui/                                   [P03] voice VM tests; [P04] schedule VM tests; [P05] board layout/VM tests
 │       │       ├── usecase/                               [P03] intent-create tests; [P05] relationship use-case tests; [P06] reminder use-case tests
 │       └── androidTest/kotlin/com/chrona/app/
@@ -118,6 +122,10 @@ chrona/
 ├── scripts/
 │   ├── verify.sh                                    [P01]
 │   └── verify.ps1                                   [P01]
+├── supabase/
+│   ├── config.toml                                  [post-P06] Edge Function config (verify_jwt = true)
+│   ├── .env.local.example                           [post-P06] secret template (real keys git-ignored)
+│   └── functions/understand-task/                   [post-P06] gateway.ts, providers.ts, index.ts, gateway.test.ts
 ├── opencode/
 │   ├── OPENCODE_MASTER_EXECUTION_PROMPT.md
 │   └── phase-prompts/

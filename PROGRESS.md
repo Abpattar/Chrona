@@ -3,7 +3,9 @@
 **Status:** P01 complete. P02 complete. P03 complete for automated checks; device/voice
 availability NOT RUN. P04 complete for automated checks; device checks NOT RUN. P05 complete for
 automated checks; device/compose checks NOT RUN. P06 complete for automated checks; device and
-notification/overlay runtime checks NOT RUN. P07 is next.
+notification/overlay runtime checks NOT RUN. P07 is next. A post-P06 scheduling-correctness
+revision (ADR-036: requested-date horizon handling + deadline-aware ordering, policy `p04-v2`)
+is implemented and verified for automated checks.
 **Last updated:** 17 October 2026
 
 ## Status vocabulary
@@ -859,6 +861,85 @@ before P08.
 
 ---
 
+## Post-P06 — Optional cloud task understanding (ADR-037)
+
+### What was built
+
+- A Supabase Edge Function (`supabase/functions/understand-task/`) that reads a phrase with a
+  hosted model and returns a structured task draft, failing over Groq → Gemini → OpenRouter.
+  Split into a runtime-agnostic `gateway.ts`, provider adapters in `providers.ts`, and a Deno
+  `Deno.serve` entry in `index.ts`. `verify_jwt = true`; only `text`, `referenceTime` and `zoneId`
+  are accepted; `MAX_TEXT_LENGTH=500`.
+- An app client in `platform/cloud/` behind the existing `TaskUnderstandingProvider` seam:
+  `CloudConfig`, `HttpTransport` (+ `UrlConnectionHttpTransport`, no new dependency),
+  `TaskIntentWire` (strict untrusted-response decoder), and `CloudTaskUnderstandingProvider`
+  (uses a remote draft only when schema- and rules-valid; otherwise falls back to the
+  deterministic parser). `di/AppContainer.kt` wires it only when `BuildConfig.CLOUD_ENABLED` and a
+  function URL are set.
+- `AndroidManifest.xml` gains `android.permission.INTERNET` — the app's first socket-capable
+  permission — documented as unused unless the cloud path is configured.
+
+### Commands actually executed
+
+- `node --test supabase/functions/understand-task/gateway.test.ts` → **24 tests pass**.
+- `JAVA_HOME=/home/neo/local/jdk/jdk-17.0.20.1+1 ./gradlew :app:testDebugUnitTest --tests "com.chrona.app.platform.cloud.*"` → **20 tests pass**.
+- `JAVA_HOME=/home/neo/local/jdk/jdk-17.0.20.1+1 ./scripts/verify.sh` → PASS.
+
+### Tests added and executed
+
+- `gateway.test.ts` (24): failover, retry/backoff, `Retry-After`, malformed/schema-invalid output,
+  all-providers-fail, no-provider, OpenAI/Gemini adapters, 429/401, abort-as-timeout.
+- `TaskIntentWireTest` (Robolectric, 11): full and minimal mapping, every rejection path (missing
+  title, bad date, inverted/one-ended fixed range, unusable duration, unknown priority, no
+  envelope, non-JSON), request encoding, and **100 generated fixtures**.
+- `CloudTaskUnderstandingProviderTest` (Robolectric, 9): disabled/blank-URL never call out; valid
+  response → `Parsed`; anon key + body encoding; non-2xx, unparseable and invalid drafts and a
+  transport throw → fallback; `CancellationException` rethrown.
+
+### Known limitations, blockers and risks
+
+1. **Hosted Supabase deploy NOT RUN** — no Supabase CLI, project or credentials in this
+   environment. A **local** live run was done instead (see "Local live verification" below). Core
+   logic is additionally covered by mocks; the hosted integration remains unverified (OPEN-018).
+2. **Provider keys were pasted in plaintext during development** and must be rotated; they are
+   never committed (git-ignored `supabase/.env.local`).
+3. The Gemini key format seen (`AQ.…`) is non-standard (`AIza…` expected) — validate credentials
+   at deploy time; a bad credential is not a transient failure.
+4. The feature is **off by default**; a release that wants it must supply a function URL and the
+   anon key at build time.
+
+### Local live verification (2026-10-17)
+
+- Installed a Deno runtime and ran the Edge Function locally
+  (`deno run --allow-net --allow-env --env-file=supabase/.env.local supabase/functions/understand-task/index.ts`,
+  listening on `http://0.0.0.0:8000`). The host shell exports `GROQ_API_KEY*`; the function was
+  started with those unset so only Gemini is configured (the default Groq model is retired).
+- Added debug-only cleartext (`app/src/debug/AndroidManifest.xml` +
+  `app/src/debug/res/xml/network_security_config.xml`) and built the debug APK with
+  `-Pchrona.cloudEnabled=true -Pchrona.cloudFunctionUrl=http://localhost:8000`; installed it on the
+  `chrona_api36` emulator and confirmed the generated `BuildConfig` carried the values.
+- Ran a temporary (uncommitted, since removed) Robolectric probe driving the app's **own**
+  `CloudTaskUnderstandingProvider` + `UrlConnectionHttpTransport` + `TaskIntentWire` against the
+  local function: 2 of 3 phrases returned real Gemini drafts, e.g.
+  `"submit the physics assignment tomorrow"` → title `Submit the physics assignment`,
+  `requestedDate 2026-10-18`; the third fell back on a transient provider error.
+- Full gate re-run: `./scripts/verify.sh` PASS (309 unit tests, 0 failures); `gateway.test.ts` 24 pass.
+- **Emulator speech limitation:** the cloud parser is only reachable through on-device speech
+  (`VoiceCaptureViewModel.interpret` runs on `SpeechEvent.Final`). On this API 36 Google APIs
+  emulator the on-device recogniser is advertised but the `en-US` language pack is absent, so it
+  returns `ERROR_LANGUAGE_UNAVAILABLE` and the sheet correctly offers typing; a headless emulator
+  also has no microphone input, so an in-app voice-driven live demo is not possible here. The live
+  proof above uses the same production client classes.
+- **Transient provider limits:** Gemini intermittently returned `429`/timeouts; the app degrades to
+  the deterministic parser as designed.
+
+### Exact next phase
+
+**P07 — Privacy, resilience and accessibility**, with OPEN-018 (live cloud verification) cleared
+before any release claim about it.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -871,9 +952,10 @@ before P08.
       End-to-end slice: typed task -> validate -> Room -> Today -> complete.
       82 JVM/Room tests passing; instrumentation compiles but is NOT RUN.
 - [ ] P01/P02 Windows clean-clone build/test/lint — BLOCKED (no Windows host available).
-- [ ] P01/P02 API 36 emulator launch — BLOCKED. The AVD boots and accepts installs, but
-      `artd` finds no usable dex artifacts and `am start` returns `result code=-92`. Cause:
-      the build user is not in the `kvm` group, so only software emulation is available.
+- [x] API 36 emulator launch — RESOLVED (2026-10-17). `/dev/kvm` is accessible via a filesystem
+      ACL (the user is still not in the `kvm` group), so the `chrona_api36` AVD boots
+      hardware-accelerated in ~25s, installs the debug APK and runs the app. Instrumentation tests
+      still NOT RUN; on-device speech is unavailable (no `en-US` language pack) — see OPEN-007.
 - [x] P03 — tap-to-speak with an on-device-only recogniser, deterministic parser, review/
       correction and typed fallback. 70 new JVM/Robolectric tests (152 total). Device/on-device
       availability NOT RUN; voice kept optional.
@@ -890,6 +972,15 @@ before P08.
       optional best-effort overlay and in-app surface, and one inexact periodic reconciliation
       job. 49 new JVM/Room tests (280 total). v2→v3 migration tested. Device, notification and
       overlay runtime checks NOT RUN.
+- [x] Post-P06 scheduling correctness (ADR-036, policy `p04-v2`): requested-date horizon handling
+      (`OUTSIDE_HORIZON` for future days, carry-forward for overdue) and deadline-aware ordering
+      (earliest-deadline-first) so a feasible deadline combination is not rejected. 8 new JVM
+      tests (288 total), including an engine/recovery latency harness. Device checks NOT RUN.
+- [x] Post-P06 optional cloud task understanding (ADR-037): Supabase Edge Function with
+      Groq → Gemini → OpenRouter failover, and an off-by-default app client that falls back to
+      the deterministic parser on any failure. 24 gateway tests (`node --test`) + 20 JVM/Robolectric
+      app tests. Live provider RUN against a local Deno function with a real Gemini key via the app's
+      own client (2/3 phrases); hosted Supabase deploy NOT RUN (OPEN-018).
 - [ ] P07 — privacy, resilience, accessibility.
 - [ ] P08 — URE evaluation and final release.
 

@@ -19,6 +19,7 @@ This repository is the implementation of the approved product in
 | P04 | Scheduling and recovery engine | **DONE (automated)** — deterministic day preview, apply/undo, schema v2 + migration; device run NOT RUN |
 | P05 | Board and relationships | **DONE (automated)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run NOT RUN |
 | P06 | Quest Cards and notifications | **DONE (automated)** — deterministic reminder policy, Room v3 history, DataStore settings, four Quest Card actions, notification + optional overlay + in-app surfaces, hourly reconciliation; notification/overlay/worker device checks NOT RUN |
+| Cloud interpreter | Optional hosted task understanding | **DONE (automated, mocked)** — Supabase Edge Function with Groq → Gemini → OpenRouter failover; app client (off by default) falls back to the deterministic parser on any failure; live provider exercised locally with a real key via the app's own client; hosted Supabase deploy NOT RUN |
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
 
@@ -29,8 +30,8 @@ This repository is the implementation of the approved product in
   empty states that explain themselves.
 - **A real end-to-end slice:** type a task → it is validated in the domain layer → persisted in
   Room/SQLite → shown on Today → started, completed, postponed, skipped or archived → every
-  change written to an audit trail. Everything works offline; there is no account, no backend
-  and no network permission.
+  change written to an audit trail. Everything works offline; there is no account and no
+  backend, and the only network path is the optional, off-by-default cloud interpreter below.
 - Manual fixed commitments can be stored and are queried by overlap.
 - Task relationships enforce direction, reject self-links and detect cycles.
 - Typed task creation validates inline and refuses to save an empty or malformed task.
@@ -39,6 +40,12 @@ This repository is the implementation of the approved product in
   focused clarification when the parser is unsure, then save. The recogniser is the on-device
   one; if the device has none, or the microphone permission is denied, Chrona offers typing
   instead of switching to a possibly remote recogniser. No raw audio is stored.
+- **Optional cloud interpreter, off by default:** when a build supplies a function URL, capture
+  first tries Chrona's own Supabase Edge Function, which owns the provider keys and may use a
+  hosted model to read a messy phrase. Any failure — offline, timeout, bad status, malformed or
+  invalid draft — silently falls back to the deterministic parser, which stays the authority on
+  whether something is a task. The app never holds a provider key and never calls an AI provider
+  directly, and no task text leaves the device unless the owner configures it.
 - **A deterministic day plan:** the Schedule tab builds a preview from your tasks and fixed
   commitments — what is planned, what moved, and what could not be placed (with a reason).
   Fixed commitments and FIXED tasks are never moved; buffers, dependencies, earliest windows and
@@ -62,8 +69,14 @@ suite compiles but **has not been run** — see [Known limitations](#known-limit
 
 ## Privacy and scope boundaries
 
-- No account, no backend, no cloud sync, no remote AI. The core planner works offline.
-- No provider secrets, API keys or paid services anywhere in source or the APK.
+- No account, no backend, no cloud sync. The core planner works offline and never touches the
+  network.
+- Remote AI is an opt-in build configuration, off by default. When enabled the app calls Chrona's
+  own Supabase Edge Function (which owns the provider keys); a hosted model only reads a phrase
+  to propose a task draft, and the deterministic parser remains the authority. Any failure falls
+  back to it silently. The app never holds a provider key: no secret, API key or paid service is
+  in source or the APK.
+- Task text leaves the device only when the owner turns the cloud interpreter on.
 - On-device speech recognition only where Android reports it as available; typing is always a
   complete fallback and there is no silent switch to a possibly remote recognizer (P03).
 - The optional Quest Card overlay is best-effort. Notifications and in-app surfaces remain
@@ -131,6 +144,39 @@ Ubuntu and Windows setup.
 
 Always use the committed wrapper. Never rely on a globally installed Gradle.
 
+## Optional cloud interpreter
+
+Off by default. A stock build contains no URL, no key and no network path; the deterministic
+parser handles everything. To enable it:
+
+1. Deploy [`supabase/functions/understand-task`](supabase/functions/understand-task) with the
+   Supabase CLI (`supabase functions deploy understand-task`), setting at least one provider key
+   as a function secret — `GROQ_API_KEY`, `GEMINI_API_KEY` or `OPENROUTER_API_KEY` (plus the
+   optional `*_MODEL` overrides). See `supabase/.env.local.example` for the full list.
+2. Build the app with the function URL and the **anon** key:
+
+```bash
+JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug \
+  -Pchrona.cloudEnabled=true \
+  -Pchrona.cloudFunctionUrl=https://<project>.supabase.co/functions/v1/understand-task \
+  -Pchrona.cloudAnonKey=<supabase-anon-key>
+```
+
+The app calls only that function; it never holds a provider key and never calls an AI provider
+directly. Only the phrase, the reference time and the time zone are sent. Any failure — offline,
+timeout, non-2xx status, malformed or rule-breaking draft — silently falls back to the
+deterministic parser, which remains the authority on whether something is a task. The gateway's
+core logic and the app's wire mapper are covered by automated tests.
+
+For local development the function can be run with Deno
+(`deno run --allow-net --allow-env --env-file=supabase/.env.local
+supabase/functions/understand-task/index.ts`) and reached from a debug build over HTTP — debug
+builds permit cleartext **only** for `localhost`/`127.0.0.1`/`10.0.2.2`
+(`app/src/debug/res/xml/network_security_config.xml`). On 2026-10-17 the app's own client parsed
+real drafts from such a local function with a live Gemini key. A **hosted** Supabase deploy has
+**NOT RUN** (no credentials or project in this environment) — see `RISKS_AND_OPEN_ITEMS.md` and
+`PROGRESS.md`.
+
 ## Repository layout
 
 ```text
@@ -143,11 +189,12 @@ Always use the committed wrapper. Never rely on a globally installed Gradle.
 │       ├── domain/               Pure Kotlin: models, task rules, relations, parser, scheduling, recovery
 │       ├── data/                 Room database (v2), DAOs, mappers, repositories, migrations
 │       ├── usecase/              Orchestration layer (incl. task-intent create, apply/undo recovery)
-│       ├── platform/             Speech, and later notifications/overlay/work
+│       ├── platform/             Speech, notifications, overlay, work, and the optional cloud client
 │       ├── privacy/              Data inventory, export, delete (P07+)
 │       └── ui/                   Compose design system and screens (incl. ui/voice, ui/schedule)
 ├── gradle/libs.versions.toml     The single source of dependency versions
 ├── scripts/verify.sh|.ps1        Equivalent verification entry points per OS
+├── supabase/functions/understand-task/  Optional Edge Function (Deno) for cloud task understanding
 ├── opencode/                     Master execution prompt + phase prompts P01–P08
 └── *.md                          Canonical planning, contract and evidence documents
 ```
@@ -184,8 +231,10 @@ the domain core imports no Android, Room or network code.
   schedule preview/apply/undo has only been exercised at the JVM/Room layer.
 - **Schema migration** — v1→v2 is now tested (`MigrationTest1To2Test`) against a real SQLite v1
   database; both `1.json` and `2.json` are exported. Future versions must extend this test.
-- **Offline is true by construction, not measured.** No networking permission and no networking
-  dependency exist, but the airplane-mode acceptance test has not been executed on a device.
+- **Offline is true by construction, not measured.** The app declares `INTERNET` only because the
+  optional cloud interpreter can be enabled at build time; with it off (the default) no code path
+  opens a socket. No networking dependency exists. The airplane-mode acceptance test has not been
+  executed on a device.
 - Release build is unminified until a shrink/obfuscation audit exists.
 - No licence file has been chosen yet.
 

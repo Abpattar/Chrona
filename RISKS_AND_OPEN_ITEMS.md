@@ -10,17 +10,19 @@
 | OPEN-004 | required research method | supervisor before P08 | deterministic technical evaluation |
 | OPEN-005 | approval/ethics/consent requirements for participants | institution before recruitment | no participant study while unknown |
 | OPEN-006 | actual paper-board visual reference image | owner | written §6 in PDF only; image not separately included in current files |
-| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | **still OPEN — NOT RUN in P03** (no device attached). No language/offline support is assumed; voice is optional and typing always works. Code is guarded to API 31+ and uses the on-device recogniser only |
+| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | **still OPEN** — moto g54 measurement NOT RUN (no device). Observed on the API 36 Google APIs emulator (2026-10-17): the on-device recogniser is advertised (`com.google.android.as` `AiAiSpeechRecognitionService`) but the `en-US` language pack is absent, so it returns `ERROR_LANGUAGE_UNAVAILABLE` and the sheet offers typing. No language/offline support is assumed; voice is optional and typing always works. Code is guarded to API 31+ and uses the on-device recogniser only |
 | OPEN-008 | exact integrated toolchain matrix and stable patches | P01 agent | pins remain proposed until clean builds pass |
 | OPEN-009 | target SDK required by store on release date | re-check immediately before publishing | no store-compliance claim until checked |
 | OPEN-010 | independent DB encryption/backup requirements | P07 privacy review | app sandbox + intentional backup policy; no independent encryption claim |
 | OPEN-011 | actual overlay/background capability on moto g54 | P06 device testing | optional best-effort + notification/in-app fallback |
 | OPEN-012 | retention period for task/revision/reminder history | owner/product decision if not specified | minimize retention; clear data/delete path |
 | OPEN-013 | Windows host is not available in the current environment, so the Windows half of the P01 cross-OS gate (AT-033) cannot be run | owner supplies a Windows machine before P08 | gate stays BLOCKED; never report it as passed |
-| OPEN-014 | build user is not in the `kvm` group, so only software emulation is possible. Verified in P02: a `-no-accel` API 36 AVD boots and installs APKs, but `artd` finds no usable dex artifacts and `am start` returns `result code=-92` | owner adds the user to `kvm`, or supplies a device/Studio-managed emulator | instrumentation tests compile and are reported NOT RUN |
+| OPEN-014 | emulator acceleration. The build user is not in the `kvm` group, but `/dev/kvm` is accessible via a filesystem ACL (`user:neo:rw-`). Verified 2026-10-17: the API 36 AVD `chrona_api36` boots hardware-accelerated in ~25s, installs the debug APK, and runs the app (`MainActivity` resumed) | owner adds the user to the `kvm` group for portability; a physical device is still preferred for speech | instrumentation tests compile; device instrumentation still NOT RUN |
 | OPEN-015 | application licence has not been chosen | owner before any public distribution | no licence file; repository is not published as licensed work |
 | OPEN-016 | "Chrona" trademark/domain availability unchecked; no approved reverse-DNS application ID | owner | `com.chrona.app` used as a documented provisional identity (ADR-025) |
 | OPEN-017 | reminder batching groups by the task's `projectLabel` rather than the P05 relationship graph | revisit only if richer grouping is needed (P07+) | deliberate simplification; deterministic and unit-tested |
+| OPEN-018 | cloud task understanding is **partly verified**: on 2026-10-17 the app's own client (`CloudTaskUnderstandingProvider` + `UrlConnectionHttpTransport` + `TaskIntentWire`) parsed real drafts from a **local** Deno Edge Function with a live Gemini key (2 of 3 phrases; the third fell back on a transient provider error). Remaining gap: **no hosted Supabase deploy** — no Supabase CLI/project/credentials here, and hosted `verify_jwt` behavior is untested. The live provider also returned transient `429`/timeouts | owner supplies a Supabase project + at least one provider key, then runs a real deploy and one live capture | feature stays off by default; never report the **hosted** path as live-working until exercised |
+| OPEN-019 | provider keys were pasted in plaintext during development and should be rotated; the observed Gemini key format (`AQ.…`) is non-standard (`AIza…` expected) | owner rotates keys and confirms credential format | keys are never committed (git-ignored `supabase/.env.local`); invalid credentials must not be treated as transient |
 
 ## Resolved in P01
 
@@ -58,9 +60,10 @@
 ## Currently open blockers
 - **Windows clean-clone build/test/lint** — not run (OPEN-013). Blocking for P08 and for any
   honest "cross-OS parity" claim.
-- **Emulator / physical-device instrumentation** — not run (OPEN-014). Blocking for any claim
+- **Emulator / physical-device instrumentation** — an API 36 emulator now boots hardware-accelerated (OPEN-014, ACL on `/dev/kvm`) and the debug app runs; **instrumentation tests still NOT RUN**. Blocking for any claim
   about runtime behaviour, permissions, notifications, overlay or speech recognition. In P03
-  this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured; voice is
+  this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured — the emulator's
+  on-device recogniser lacks the `en-US` language pack; voice is
   kept optional and reported as unknown. In P05 the Compose board slice tests
   (`BoardSliceTest`, updated `NavigationShellTest`) compile but are NOT RUN, so the board's
   talkback order, live contrast and large-font reflow are asserted by construction only.
@@ -73,9 +76,9 @@
 
 ### Phase P06 — Reminders / Quest Cards
 
-- **Runtime surface checks NOT RUN (OPEN-011, OPEN-014).** No emulator/device is available
-  (`adb devices` empty), so notification posting/actions, the overlay window, and the hourly
-  `ReminderReconciliationWorker` are unobserved. They are implemented
+- **Runtime surface checks NOT RUN (OPEN-011, OPEN-014).** An API 36 emulator now boots, but
+  notification posting/actions, the overlay window, and the hourly
+  `ReminderReconciliationWorker` have not been observed. They are implemented
   (`NotificationPresenter`, `ReminderActionReceiver`, `OverlayPresenter`,
   `ReminderReconciliationWorker`, `POST_NOTIFICATIONS`, `SYSTEM_ALERT_WINDOW`) and unit-tested
   through the `ReminderPresenter` boundary only. Action: run on a device to verify channels,
@@ -95,3 +98,20 @@
 - **Reminder policy correctness.** `DeterministicReminderPolicyTest` (20) covers suppression,
   batching, the per-card non-urgent cap, card urgency and grouping; the policy stays pure. No open
   risk beyond the unmeasured runtime surfaces above.
+
+### Post-P06 — Cloud task understanding (ADR-037)
+
+- **Local live integration RUN; hosted deploy NOT RUN (OPEN-018).** On 2026-10-17 a Deno runtime
+  was installed and the Edge Function run locally with a live Gemini key; the app's **own** client
+  (`CloudTaskUnderstandingProvider` + `UrlConnectionHttpTransport` + `TaskIntentWire`) parsed real
+  drafts for 2 of 3 phrases (the third fell back on a transient provider error; the provider also
+  returned transient `429`/timeouts). Still unverified: a **hosted** Supabase deploy and hosted
+  `verify_jwt`. The feature stays off by default and the deterministic parser remains the authority.
+- **Secrets to rotate (OPEN-019).** Provider keys were pasted in plaintext during development.
+  They are not committed (git-ignored `supabase/.env.local`) and are never in the APK, but they
+  should be rotated; the observed Gemini key format is non-standard and must be validated at
+  deploy time. A bad credential is a configuration error, not a transient failure to retry.
+- **Data leaves the device only when enabled.** With the feature off (the default) no code path
+  opens a socket; when on, only the phrase (≤500 chars), the reference time and the zone are sent.
+  This is the one network path in an otherwise local-first app and is recorded as a coordinated
+  change (ADR-037); the README privacy section was updated to say so.

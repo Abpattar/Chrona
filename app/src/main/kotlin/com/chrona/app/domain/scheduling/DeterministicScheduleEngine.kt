@@ -14,7 +14,7 @@ import java.util.UUID
  * 1. Fixed commitments and FIXED tasks are never moved.
  * 2. A confirmed hard dependency is scheduled before its dependent; a loop is rejected outright.
  * 3. A deadline that cannot be met is reported, never quietly overrun.
- * 4. Among ready tasks, priority then deadline then id decide the order.
+ * 4. Among ready tasks, the nearest deadline wins, then priority, then id (deadline-aware).
  *
  * It is deliberately a heuristic, not an optimiser: every outcome can be explained in one
  * sentence, which is what a trustworthy planner needs (MASTER_ARCHITECTURE.md §5).
@@ -32,13 +32,41 @@ class DeterministicScheduleEngine : ScheduleEngine {
 
         val eligible = input.tasks.eligibleForScheduling()
         val graph = RelationGraph(input.relationships)
+        val horizon = input.horizonDate()
+
+        // A date-only request outside today is not a capacity problem. Keep it visible as
+        // OUTSIDE_HORIZON instead of silently planning it into the wrong day.
+        val deferred = eligible.filter { it.horizonMembership(horizon) == HorizonMembership.AFTER }
+        val deferredIds = deferred.map { it.id }.toSet()
+        for (task in deferred) {
+            unplaced += UnplacedTask(
+                task.id,
+                UnplacedReason.OUTSIDE_HORIZON,
+                "It is requested for ${task.requestedDate}, so it is left for that day.",
+            )
+        }
+        if (deferred.isNotEmpty()) {
+            assumptions += ScheduleAssumption(
+                "Task(s) requested for another day were left for that day, not planned into today.",
+            )
+        }
+
+        // An overdue open task is carried forward, never silently moved without saying so.
+        eligible.filter { it.horizonMembership(horizon) == HorizonMembership.BEFORE }.forEach { task ->
+            assumptions += ScheduleAssumption(
+                "\u201c${task.title}\u201d was requested for ${task.requestedDate} and is still open, " +
+                    "so it is planned into today.",
+            )
+        }
+
+        val considered = eligible.filter { it.id !in deferredIds }
 
         graph.findHardDependencyCycle()?.let { cycle ->
             val path = cycle.joinToString(" -> ") { it.value }
             assumptions += ScheduleAssumption(
                 "A dependency loop ($path) was found, so those tasks were left unplanned until it is fixed.",
             )
-            eligible.forEach {
+            considered.forEach {
                 unplaced += UnplacedTask(
                     it.id,
                     UnplacedReason.DEPENDENCY_INCOMPLETE,
@@ -52,8 +80,8 @@ class DeterministicScheduleEngine : ScheduleEngine {
             )
         }
 
-        val fixedTasks = eligible.filter { it.fixedRange != null }.sortedBy { it.fixedRange!!.start }
-        val flexible = eligible.filter { it.fixedRange == null }
+        val fixedTasks = considered.filter { it.fixedRange != null }.sortedBy { it.fixedRange!!.start }
+        val flexible = considered.filter { it.fixedRange == null }
         val completion = mutableMapOf<TaskId, ZonedDateTime>()
         val fixedRanges = mutableListOf<com.chrona.app.domain.model.TimeRange>()
 
@@ -89,7 +117,9 @@ class DeterministicScheduleEngine : ScheduleEngine {
         val titles = input.tasks.associate { it.id to it.title }
 
         for (task in ordered) {
-            val prereqs = graph.prerequisitesOf(task.id).filter { it in flexibleIds || completion.containsKey(it) }
+            val prereqs = graph.prerequisitesOf(task.id).filter {
+                it in flexibleIds || completion.containsKey(it) || it in deferredIds
+            }
             val unfinished = prereqs.firstOrNull { completion[it] == null }
             if (unfinished != null) {
                 unplaced += UnplacedTask(

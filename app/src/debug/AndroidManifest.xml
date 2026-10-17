@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Debug-only network policy for local development of the cloud interpreter.
+
+        The app talks to the Edge Function over HTTP on the developer machine, reached from the
+        emulator via `adb reverse tcp:8000 tcp:8000` (http://localhost:8000). Android blocks
+        cleartext by default, so debug builds opt in for the loopback host only.
+
+        This file is merged into debug builds only; release builds keep the platform default of
+        no cleartext at all.
+    -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+
+</manifest>
