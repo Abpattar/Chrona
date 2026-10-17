@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.chrona.app.navigation.ChronaNavHost
+import com.chrona.app.platform.work.ReminderReconciliationWorker
 import com.chrona.app.ui.design.ChronaTheme
 
 /**
@@ -16,6 +17,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // P06: the only background work Chrona schedules. Idempotent (`KEEP`), so repeated starts
+        // neither reset the interval nor stack duplicates.
+        ReminderReconciliationWorker.schedule(applicationContext)
         val container = (application as ChronaApplication).container
         setContent {
             ChronaTheme {

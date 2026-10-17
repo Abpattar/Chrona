@@ -24,15 +24,15 @@ when actual code/test evidence supports it. See `PROGRESS.md` for command-level 
 | CH-REC-002 | `UndoScheduleRevisionUseCase` | guarded undo (newest revision, no later edits) | P04 | TESTED | `RecoveryUseCasesTest` + Room test `undo is refused once a task was edited after the plan` |
 | CH-DATA-001 | `TaskRepository` | repository interface | P02 | TESTED | `RoomTaskRepositoryTest` (17 cases, real SQLite) |
 | CH-DATA-002 | `ScheduleRevisionRepository` | transaction `current`/`apply`/`undo` | P04 | TESTED | `RoomScheduleRevisionRepositoryTest` (6, real SQLite) + `MigrationTest1To2Test` |
-| CH-DATA-003 | `PreferencesRepository` | local settings | P06 | PLANNED | domain model exists; no repository yet, by design (see PROGRESS.md P02) |
-| CH-REM-001 | `ReminderPolicy` | pure policy; cap/quiet/batching/repeat logic | P06 | PLANNED | platform presenters; deterministic clock tests |
-| CH-REM-002 | `ReminderDecision` | surface/suppress/batch/reason | P06 | PLANNED | overlay/notification; fallback tests |
+| CH-DATA-003 | `PreferencesRepository` | local settings | P06 | IMPLEMENTED | `PreferencesDataStore` (`DataStorePreferencesRepository`, DataStore name `chrona_settings`); enum-by-name + `HH:mm` encodings, total reads fall back to defaults; Settings surface `SettingsViewModel`; existing policy symbols test the model |
+| CH-REM-001 | `ReminderPolicy` | pure policy; cap/quiet/batching/repeat logic | P06 | TESTED | `DeterministicReminderPolicy` (`domain/reminder/DeterministicReminderPolicy.kt`); `DeterministicReminderPolicyTest` (20) covers quiet hours (midnight wrap), batching, per-card non-urgent cap, dismissal/repeat suppression and styles |
+| CH-REM-002 | `ReminderDecision` | surface/suppress/batch/reason | P06 | TESTED | decision types in `domain/reminder/Reminder.kt`; `ReminderCandidateSelectorTest` (10), `ReminderUseCasesTest` (5), `DeliverRemindersUseCaseTest` (4) prove selection, surface mapping and fallback |
 | CH-PLAT-001 | `SpeechRecognitionAdapter` | explicit lifecycle-aware speech boundary, `platform/speech` | P03 | TESTED | capture UI/parser; `AndroidSpeechRecognitionAdapterTest` (11, Robolectric) + `VoiceCaptureViewModelTest` (11); device availability NOT RUN |
-| CH-PLAT-002 | `OverlayPresenter` | optional best-effort system overlay | P06 | PLANNED | permission system; physical device test |
-| CH-PLAT-003 | `NotificationPresenter` | ordinary Android notification/action surface | P06 | PLANNED | reminder manager; channel/permission/action tests |
+| CH-PLAT-002 | `OverlayPresenter` | optional best-effort system overlay | P06 | IMPLEMENTED | `platform/overlay/OverlayPresenter.kt` (opt-in, `Settings.canDrawOverlays`, `TYPE_APPLICATION_OVERLAY`, returns null on failure); device windowing NOT RUN |
+| CH-PLAT-003 | `NotificationPresenter` | ordinary Android notification/action surface | P06 | IMPLEMENTED | `platform/notification/NotificationPresenter.kt` + `ReminderActionReceiver.kt`; channels `chrona_reminders_urgent`/`chrona_reminders_quiet`, tag = card id, fixed id 4001; posting/actions NOT RUN (device) |
 | CH-SEC-001 | `DeleteUserDataUseCase` | clears app-owned local data/work/surfaces | P07 | PLANNED | privacy UI; residual-state tests |
 | CH-SEC-002 | `ExportUserDataUseCase` | versioned local export | P07 | PLANNED | privacy UI; schema/integrity tests |
-| CH-UI-001 | `TaskAction` | Start/Done/Later/Dismiss, distinct semantics | P06 | PLANNED | overlay/notification/UI; dismissal regression tests |
+| CH-UI-001 | `TaskAction` | Start/Done/Later/Dismiss, distinct semantics | P06 | TESTED | `ApplyReminderActionUseCaseTest` (3) — `DISMISS` writes history only and returns `null`, task stays `INBOX`; START/DONE/LATER transition the task; device buttons NOT RUN |
 
 Rows marked `PLANNED` are specifications only. A file existing does not prove symbol
 implementation or test completion. `IMPLEMENTED` means the symbol exists in the working tree;

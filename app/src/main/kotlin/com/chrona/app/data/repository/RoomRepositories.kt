@@ -8,6 +8,7 @@ import com.chrona.app.data.local.TaskRelationshipDao
 import com.chrona.app.data.local.ScheduleRevisionDao
 import com.chrona.app.data.local.TaskStatusLogDao
 import com.chrona.app.data.local.TaskStatusLogEntity
+import com.chrona.app.data.local.ReminderPresentationDao
 import com.chrona.app.data.local.toDomain
 import com.chrona.app.data.local.toEntity
 import com.chrona.app.domain.model.CalendarEvent
@@ -20,7 +21,9 @@ import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
 import com.chrona.app.domain.model.TaskQuery
 import com.chrona.app.domain.model.TaskRelationship
+import com.chrona.app.domain.reminder.ReminderPresentation
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZonedDateTime
 
 /**
@@ -468,6 +471,40 @@ internal suspend inline fun <T> storage(crossinline block: suspend () -> T): Out
     throw cancellation
 } catch (error: Exception) {
     Outcome.Failed(Failure.StorageFailure(error.message ?: "Local storage is unavailable."))
+}
+
+/** Room-backed [ReminderHistoryRepository]. Append-only; nothing here ever edits a task. */
+class RoomReminderHistoryRepository(
+    private val database: ChronaDatabase,
+    private val dao: ReminderPresentationDao = database.reminderPresentationDao(),
+) : ReminderHistoryRepository {
+
+    override suspend fun record(entry: ReminderPresentation): Outcome<Unit> = storage {
+        dao.insert(entry.toEntity())
+    }
+
+    override suspend fun recordAll(entries: List<ReminderPresentation>): Outcome<Unit> = storage {
+        if (entries.isNotEmpty()) {
+            database.withTransaction { dao.insertAll(entries.map { it.toEntity() }) }
+        }
+    }
+
+    override suspend fun historyFor(taskIds: Set<TaskId>): Outcome<List<ReminderPresentation>> =
+        storage {
+            if (taskIds.isEmpty()) {
+                emptyList()
+            } else {
+                dao.findForTasks(taskIds.map { it.value }).map { it.toDomain() }
+            }
+        }
+
+    override suspend fun nonUrgentSurfacedOn(localDate: LocalDate): Outcome<Int> = storage {
+        dao.countNonUrgentSurfacedOn(localDate.toString())
+    }
+
+    override suspend fun recent(limit: Int): Outcome<List<ReminderPresentation>> = storage {
+        dao.findRecent(limit).map { it.toDomain() }
+    }
 }
 
 /**

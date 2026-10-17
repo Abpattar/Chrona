@@ -208,3 +208,39 @@ data class SchedulePlacementEntity(
     @ColumnInfo(name = "end_zone_id") val endZoneId: String,
     @ColumnInfo(name = "session_index") val sessionIndex: Int,
 )
+
+/**
+ * One row per reminder decision and its outcome (schema v3, NOTIFY-001).
+ *
+ * This is the record that makes "restrained reminders" auditable without surveillance: it stores
+ * only stable reason codes and the minimum context needed for the non-urgent cap and repeat
+ * suppression, never notification text or user content. Like schedule placements, it is a
+ * historical record, so deleting a task does not cascade here; P07's delete path clears it
+ * explicitly.
+ */
+@Entity(
+    tableName = "reminder_presentation_history",
+    indices = [
+        Index("task_id"),
+        Index("local_date_iso"),
+        Index("created_at_epoch_millis"),
+    ],
+)
+data class ReminderPresentationEntity(
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "task_id") val taskId: String,
+    @ColumnInfo(name = "scheduled_for_epoch_millis") val scheduledForEpochMillis: Long,
+    @ColumnInfo(name = "surfaced_at_epoch_millis") val surfacedAtEpochMillis: Long?,
+    @ColumnInfo(name = "surface_type") val surfaceType: String,
+    @ColumnInfo(name = "outcome") val outcome: String,
+    @ColumnInfo(name = "reason_code") val reasonCode: String,
+    @ColumnInfo(name = "batch_group") val batchGroup: String?,
+    @ColumnInfo(name = "local_date_iso") val localDateIso: String,
+    /**
+     * Priority captured at presentation time. Stored (rather than re-reading the task) so the
+     * non-urgent daily cap still counts correctly after an edit or a task deletion
+     * (DATA_MODEL_AND_INTERFACES.md deviation, see CHANGELOG).
+     */
+    @ColumnInfo(name = "priority") val priority: String,
+    @ColumnInfo(name = "created_at_epoch_millis") val createdAtEpochMillis: Long,
+)

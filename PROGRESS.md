@@ -2,7 +2,8 @@
 
 **Status:** P01 complete. P02 complete. P03 complete for automated checks; device/voice
 availability NOT RUN. P04 complete for automated checks; device checks NOT RUN. P05 complete for
-automated checks; device/compose checks NOT RUN. P06 is next.
+automated checks; device/compose checks NOT RUN. P06 complete for automated checks; device and
+notification/overlay runtime checks NOT RUN. P07 is next.
 **Last updated:** 17 October 2026
 
 ## Status vocabulary
@@ -728,6 +729,136 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
 
 ---
 
+## P06 — Quest Cards and Reminders
+
+**Phase gate: PASSED for the automated checks that could run on this host; device and
+notification/overlay runtime checks are NOT RUN.** A deterministic, respectful reminder policy,
+persisted presentation history (Room v3), settings storage (DataStore), the four Quest Card
+actions, a dependable notification presenter, an optional best-effort overlay and in-app surface,
+and a single inexact periodic WorkManager reconciliation job. 49 new JVM/Room tests (280 total).
+Notification posting, overlay windowing and the reconciled worker cannot be observed without a
+device, so they are reported as NOT RUN with the code compiling and the logic unit-tested.
+
+### What was built
+
+| Layer | Files | Responsibility |
+|---|---|---|
+| Reminder domain | `domain/reminder/{Reminder,DeterministicReminderPolicy,ReminderCandidateSelector}.kt` | `ReminderCandidate`, `ReminderAction`, `ReminderDecisionReason`, `ReminderDecision`, `ReminderSurfaceType`, `ReminderOutcome`, `ReminderPresentation`, `ReminderHistoryEntry`, `ReminderPolicyConfig`, `ReminderPolicyInput`, `ReminderPolicy`, `TaskAction`, `ReminderCard`, `ReminderPresenter`; the pure `DeterministicReminderPolicy` (group-first, cap-per-card); the pure due-task selector |
+| Preferences | `domain/model/UserPreferences.kt` (modified), `data/preferences/PreferencesDataStore.kt` | `QuietHours` (midnight-wrapping) + `quietHours` computed value; the one DataStore (`chrona_settings`) and `DataStorePreferencesRepository` (total reads, name/`HH:mm` encodings, unreadable values fall back to defaults) |
+| Storage | `data/local/{Entities,Daos,ChronaDatabase,EntityMappers}.kt` (modified) | Room v3: `reminder_presentation_history` (+ captured `priority` column), `ReminderPresentationDao` (`countNonUrgentSurfacedOn` = `COUNT(DISTINCT batch_group) …`), `MIGRATION_2_3` |
+| Repositories | `data/repository/{RepositoryContracts,RoomRepositories}.kt` (modified) | `ReminderHistoryRepository`, `PreferencesRepository`, `RoomReminderHistoryRepository` |
+| Use cases | `usecase/ReminderUseCases.kt` | `EvaluateRemindersUseCase` (read-only), `RecordReminderHistoryUseCase`, `ApplyReminderActionUseCase`, `DeliverRemindersUseCase`, `reminderCardId` |
+| Platform | `platform/{permission,notification,overlay,work}/*.kt` | `ReminderPermissions`/availability helpers; `NotificationPresenter` + `ReminderActionReceiver`; `OverlayPresenter`; `ReminderReconciliationWorker` |
+| UI | `ui/questcard/*.kt`, `ui/settings/*.kt` | In-app Quest Card surface (VM + screen + route); Settings as a real route (style, cap, quiet hours, permission state, opt-in overlay) |
+| Composition | `di/AppContainer.kt`, `navigation/ChronaNavHost.kt`, `MainActivity.kt`, `AndroidManifest.xml` (modified) | Wires repositories/policy/use cases/presenters/worker + `MIGRATION_2_3`; adds the `questcard` route and a Today entry; schedules the worker; adds `POST_NOTIFICATIONS`, `SYSTEM_ALERT_WINDOW` and the receiver declaration |
+
+### Behavior actually implemented
+
+- **Surface order** for an eligible card: overlay when enabled *and* granted → `OVERLAY_BEST_EFFORT`;
+  else notification → `NOTIFICATION`; else in-app → `IN_APP` (always the final fallback). A presenter
+  returning null is a fallback, never an error (ADR-009).
+- **Style**: `QUIET` suppresses `LOW` entirely (`QUIET_MODE`) and batches related tasks; `BALANCED`
+  batches related tasks and subjects `LOW` to the cap; `MORE_GUIDANCE` shows each task alone.
+- **Non-urgent cap** applies to `LOW` only and counts **cards, not tasks**: a batch costs one. A
+  card containing any `CRITICAL`/`IMPORTANT` task is urgent and never capped. The cap is a stored
+  `priority` on each history row, so an edit or deletion of the task cannot change a past count.
+- **Suppression order** per candidate: repeated dismissals (`RECENTLY_DISMISSED`), recent surfacing
+  (`RECENTLY_SURFACED`; an explicit `LATER` overrides it), `QUIET_HOURS` (midnight-wrapping), then
+  `QUIET_MODE`; the cap (`DAILY_CAP_REACHED`) applies afterwards.
+- **Action semantics** (CH-UI-001/CARD-003): `START`→in-progress, `DONE`→completed, `LATER`→explicit
+  postpone (no replacement time means a transparent unscheduled outcome), `DISMISS`→presentation
+  history only and returns `null`. Dismissing never completes, deletes or postpones.
+- **Notification identity** is the card id (tag) with a fixed id, so a re-delivered card replaces
+  rather than stacks; tapping a Quest Card action runs through the same use case as every surface.
+- **Overlay** is opt-in; `present` adds a plain programmatic panel via `WindowManager`
+  (`TYPE_APPLICATION_OVERLAY`) only when `Settings.canDrawOverlays`, and returns null on any failure.
+- **Reconciliation** is one inexact hourly `PeriodicWorkRequest` under a stable unique name with
+  `ExistingPeriodicWorkPolicy.KEEP`, so repeated starts neither reset the interval nor duplicate.
+
+### Commands actually executed
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `./gradlew :app:compileDebugKotlin` | **PASS** |
+| 2 | `./gradlew :app:testDebugUnitTest --tests "…domain.reminder.*" --tests "…data.MigrationTest2To3Test"` | **PASS** (31 tests) |
+| 3 | `./gradlew :app:testDebugUnitTest --tests "…usecase.*Reminder*"` | FAIL once (test fake's `?:` masked a null), then **PASS** (14 tests) |
+| 4 | `./gradlew :app:testDebugUnitTest --tests "…data.RoomReminderHistoryRepositoryTest"` | **PASS** (4 tests) |
+| 5 | `./gradlew :app:lintDebug` | FAIL on 2 errors (`MissingPermission`, `DuplicateStrings`), then **PASS** — 0 errors |
+| 6 | `./scripts/verify.sh` | **PASS** — `clean assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest`; `OK: Chrona verification passed` |
+| 7 | `adb devices` | empty — device/notification/overlay checks NOT RUN |
+
+### Tests added and executed
+
+| Suite | Layer | Cases | Result |
+|---|---|---|---|
+| `DeterministicReminderPolicyTest` | JVM unit | 20 | **PASS** |
+| `ReminderCandidateSelectorTest` | JVM unit | 10 | **PASS** |
+| `ReminderUseCasesTest` | JVM unit (fakes) | 5 | **PASS** |
+| `RecordReminderHistoryUseCaseTest` | JVM unit (fakes) | 2 | **PASS** |
+| `ApplyReminderActionUseCaseTest` | JVM unit (fakes) | 3 | **PASS** |
+| `DeliverRemindersUseCaseTest` | JVM unit (fakes) | 4 | **PASS** |
+| `RoomReminderHistoryRepositoryTest` | Room integration (Robolectric + real SQLite) | 4 | **PASS** |
+| `MigrationTest2To3Test` | Room migration (raw v2 SQLite → v3) | 1 | **PASS** |
+| **P06 subtotal** | | **49** | **PASS** |
+| P01–P05 suites (unchanged) | JVM/Room | 231 | **PASS** |
+| **Total JVM/Room** | | **280** | **PASS** (0 failures, 0 errors, 0 skipped) |
+
+The policy suite asserts the seven-day fixture, quiet-hours suppression and wrap, quiet mode, the
+per-card cap (a two-task batch costs one), `LATER` overriding the resurface window, dismissal
+suppression, and `MORE_GUIDANCE` never batching. The Room suite proves the cap query counts distinct
+cards, ignores urgent/suppressed rows and other dates. The use-case suite proves surface selection
+and fallback, that an unavailable overlay falls back to the notification, that with no platform
+surface nothing is delivered or recorded (the in-app card shows it instead), and that `DISMISS`
+leaves the task in `INBOX` while `DONE`/`LATER` move it.
+
+### Defects the tests caught, and the fixes
+
+1. **Lint `MissingPermission` on `NotificationManagerCompat.notify`.** The custom
+   `notificationsAvailable()` check is invisible to Lint. Fixed with a targeted
+   `@SuppressLint("MissingPermission")` plus the existing `SecurityException` catch, so the check is
+   explicit in code and the annotation is justified in a comment.
+2. **Lint `DuplicateStrings`.** `channel_reminders_urgent_name` and `settings_reminders_title` both
+   resolved to "Reminders". Renamed the settings section to "Reminder settings".
+3. **The delivery test fake hid a null.** `return result ?: surface` could never return null, so the
+   "available overlay fails to show" path was untestable. Replaced with an explicit `canPresent`
+   flag; the fallback assertion then passed.
+4. **`ReminderPermissions.SYSTEM_ALERT_WINDOW` was misnamed and unused.** It held the settings
+   `ACTION_*` constant, not the permission, and no caller used it. Removed; the overlay check uses
+   `Settings.canDrawOverlays` directly.
+
+### Requirements addressed in P06
+
+| ID | Status | Evidence |
+|---|---|---|
+| NOTIFY-001 | `PASS (automated)` | Deterministic policy + persisted history; style, cap and quiet hours are user controls; the cap is enforced in cards |
+| UI-001 | `PASS (automated)` | In-app Quest Card surface reachable from Today without any permission; `DISMISS` never changes task state |
+| CARD-001/002/003 | `PASS (automated)` | Four distinct actions routed through `ApplyReminderActionUseCase`; dismissal writes history only |
+| CH-DATA-003 | `PASS (automated)` | `PreferencesRepository` (DataStore) with total reads; no interface without a caller |
+| CH-PLAT-002/003 | `Implemented, NOT RUN` | Overlay and notification presenters compile and are wired; posting/windowing unobserved (no device) |
+| RELIABILITY-001 | `PASS (automated)` | v2→v3 migration test; history is additive and never write-through to task state |
+
+### Known limitations, blockers and risks
+
+1. **Notification posting, overlay windowing and the reconciled worker are NOT RUN** — no
+   emulator/device. They are unit-tested only through the `ReminderPresenter` boundary.
+2. **Overlay is best-effort by design** and likely only shows while the app is foreground on modern
+   Android (background overlay-window restrictions). A failure returns null and falls back.
+3. **`LATER` from a surface has no replacement time**, so it produces the transparent unscheduled
+   outcome (`postponedUntil = null`) rather than picking a time on the user's behalf.
+4. **`relationGroup` uses the task's single `projectLabel`.** Batching is therefore by project, not
+   by the P05 relationship graph; recorded as a deliberate simplification.
+5. **The `priority` column on `reminder_presentation_history` is a DATA_MODEL deviation**, added so
+   the cap survives task edits/deletions (recorded in `DATA_MODEL_AND_INTERFACES.md` + CHANGELOG).
+6. **Windows host and device sub-checks still BLOCKED** (OPEN-007/OPEN-013/OPEN-014).
+
+### Exact next phase
+
+**P07 — Privacy, resilience and accessibility.** Prerequisite: P06 gate satisfied for automated
+work; the device, notification/overlay and cross-OS sub-checks stay BLOCKED and must be cleared
+before P08.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -754,7 +885,11 @@ device and cross-OS sub-checks stay BLOCKED and must be cleared before P08.
       threads, filter/search, a list alternative over the same records, and link editing that
       validates against `RelationGraph`. 40 new JVM/Room tests (231 total). Compose tests compile
       but NOT RUN.
-- [ ] P06 — Quest Cards and reminders.
+- [x] P06 — Quest Cards and reminders: deterministic reminder policy, Room v3 presentation
+      history, DataStore settings, the four Quest Card actions, a dependable notification, an
+      optional best-effort overlay and in-app surface, and one inexact periodic reconciliation
+      job. 49 new JVM/Room tests (280 total). v2→v3 migration tested. Device, notification and
+      overlay runtime checks NOT RUN.
 - [ ] P07 — privacy, resilience, accessibility.
 - [ ] P08 — URE evaluation and final release.
 

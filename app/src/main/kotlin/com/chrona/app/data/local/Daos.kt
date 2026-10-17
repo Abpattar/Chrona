@@ -230,3 +230,63 @@ interface ScheduleRevisionDao {
     @Query("SELECT COUNT(*) FROM tasks WHERE updated_at_epoch_millis > :epochMillis")
     suspend fun tasksUpdatedAfter(epochMillis: Long): Int
 }
+
+@Dao
+interface ReminderPresentationDao {
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(row: ReminderPresentationEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAll(rows: List<ReminderPresentationEntity>)
+
+    @Query(
+        """
+        SELECT * FROM reminder_presentation_history
+        WHERE task_id = :taskId
+        ORDER BY created_at_epoch_millis ASC, id ASC
+        """,
+    )
+    suspend fun findForTask(taskId: String): List<ReminderPresentationEntity>
+
+    /** History for a candidate set, newest-first within a task is left to the caller to sort. */
+    @Query(
+        """
+        SELECT * FROM reminder_presentation_history
+        WHERE task_id IN (:taskIds)
+        ORDER BY created_at_epoch_millis ASC, id ASC
+        """,
+    )
+    suspend fun findForTasks(taskIds: List<String>): List<ReminderPresentationEntity>
+
+    /**
+     * Non-urgent cards that actually reached a surface on a local date.
+     *
+     * Counted by distinct card (`batch_group`), so a batch of related tasks costs one, not one
+     * per task, and suppressed rows never consume the cap.
+     */
+    @Query(
+        """
+        SELECT COUNT(DISTINCT batch_group) FROM reminder_presentation_history
+        WHERE local_date_iso = :localDateIso
+          AND priority = 'LOW'
+          AND outcome = 'SHOWN'
+        """,
+    )
+    suspend fun countNonUrgentSurfacedOn(localDateIso: String): Int
+
+    @Query("SELECT COUNT(*) FROM reminder_presentation_history")
+    suspend fun count(): Int
+
+    @Query(
+        """
+        SELECT * FROM reminder_presentation_history
+        ORDER BY created_at_epoch_millis DESC, id ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun findRecent(limit: Int): List<ReminderPresentationEntity>
+
+    @Query("DELETE FROM reminder_presentation_history")
+    suspend fun deleteAll()
+}

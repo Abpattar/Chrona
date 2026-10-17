@@ -8,6 +8,36 @@ import java.time.ZonedDateTime
 enum class ReminderStyle { QUIET, BALANCED, MORE_GUIDANCE }
 
 /**
+ * A local-clock quiet-hours window (NOTIFY-001).
+ *
+ * Unlike [TimeWindow] this may wrap past midnight (`start > end`), because quiet hours
+ * commonly do: 21:00–07:00 is one span, not an error. `start == end` is rejected rather than
+ * guessed: an empty window and a 24-hour window are opposites and must never be confused.
+ */
+data class QuietHours(
+    val start: LocalTime,
+    val end: LocalTime,
+) {
+    init {
+        require(start != end) { "Quiet hours start and end must differ" }
+    }
+
+    /** True when the local [time] falls inside the window, wrapping midnight if needed. */
+    fun contains(time: LocalTime): Boolean =
+        if (start < end) time >= start && time < end else time >= start || time < end
+
+    /**
+     * The next instant the window closes, given a time already inside it.
+     *
+     * Deterministic: only depends on [now]'s date, time and zone.
+     */
+    fun nextEndAfter(now: ZonedDateTime): ZonedDateTime {
+        val endAt = now.toLocalDate().atTime(end).atZone(now.zone)
+        return if (now.toLocalTime() < end) endAt else endAt.plusDays(1)
+    }
+}
+
+/**
  * Local user preferences (DATA_MODEL_AND_INTERFACES.md §UserPreferences).
  *
  * Stored separately from the relational task graph. Note what is deliberately absent:
@@ -38,6 +68,14 @@ data class UserPreferences(
     init {
         require(nonUrgentDailyCap >= 0) { "nonUrgentDailyCap must not be negative" }
     }
+
+    /** The configured quiet-hours window, or null when the user has not set one. */
+    val quietHours: QuietHours?
+        get() = if (quietHoursStart != null && quietHoursEnd != null) {
+            QuietHours(quietHoursStart, quietHoursEnd)
+        } else {
+            null
+        }
 
     companion object {
         const val DEFAULT_NON_URGENT_DAILY_CAP: Int = 2

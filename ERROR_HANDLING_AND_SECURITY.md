@@ -58,3 +58,10 @@ Notifications can be denied/muted/delayed. WorkManager is deferrable, not exact-
 
 ## Failure behavior
 Never convert failure into fake success. Preserve existing schedule if a plan/revision fails. Show “not applied” when write fails; allow a manual retry where safe. Bound retries and do not auto-repeat irreversible actions. Record non-sensitive codes and the next safe step.
+
+### Phase P06 — Reminders / Quest Cards
+
+- Reminder storage uses only machine reason codes and decision metadata (e.g. `ReminderDecisionReason`, `ReminderOutcome`) — never notification text or user content.
+- Overlay presentation is opt-in and permission-gated (uses `canDrawOverlays()` and requires `SYSTEM_ALERT_WINDOW`). It is best-effort only.
+- No `INTERNET` permission was added. All reminder data remains local to the device.
+- `MissingPermission` (including `POST_NOTIFICATIONS`) is handled explicitly in the notification presenter.

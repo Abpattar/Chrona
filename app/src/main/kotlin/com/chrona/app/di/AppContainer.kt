@@ -3,9 +3,14 @@ package com.chrona.app.di
 import android.content.Context
 import androidx.room.Room
 import com.chrona.app.data.local.ChronaDatabase
+import com.chrona.app.data.preferences.DataStorePreferencesRepository
+import com.chrona.app.data.preferences.settingsDataStore
 import com.chrona.app.data.repository.EventRepository
+import com.chrona.app.data.repository.PreferencesRepository
+import com.chrona.app.data.repository.ReminderHistoryRepository
 import com.chrona.app.data.repository.RoomEventRepository
 import com.chrona.app.data.repository.RoomRelationshipRepository
+import com.chrona.app.data.repository.RoomReminderHistoryRepository
 import com.chrona.app.data.repository.RoomScheduleRevisionRepository
 import com.chrona.app.data.repository.RoomTaskRepository
 import com.chrona.app.data.repository.TaskRepository
@@ -19,21 +24,35 @@ import com.chrona.app.domain.recovery.DeterministicRecoveryPlanner
 import com.chrona.app.domain.recovery.ProposeRecoveryUseCase
 import com.chrona.app.domain.recovery.UndoScheduleRevisionUseCase
 import com.chrona.app.domain.relation.RelationGraph
+import com.chrona.app.domain.reminder.DeterministicReminderPolicy
+import com.chrona.app.domain.reminder.ReminderPolicy
+import com.chrona.app.domain.reminder.ReminderPresenter
+import com.chrona.app.domain.reminder.ReminderSurfaceType
 import com.chrona.app.domain.scheduling.DeterministicScheduleEngine
 import com.chrona.app.domain.scheduling.ScheduleEngine
+import com.chrona.app.platform.notification.NotificationPresenter
+import com.chrona.app.platform.overlay.OverlayPresenter
 import com.chrona.app.platform.speech.AndroidSpeechRecognitionAdapter
 import com.chrona.app.platform.speech.SpeechRecognitionAdapter
+import com.chrona.app.usecase.ApplyReminderActionUseCase
 import com.chrona.app.usecase.CreateTaskFromIntentUseCase
 import com.chrona.app.usecase.CreateTaskUseCase
+import com.chrona.app.usecase.DeliverRemindersUseCase
+import com.chrona.app.usecase.EvaluateRemindersUseCase
 import com.chrona.app.usecase.EventUseCases
 import com.chrona.app.usecase.IdGenerator
 import com.chrona.app.usecase.ListTasksUseCase
+import com.chrona.app.usecase.RecordReminderHistoryUseCase
 import com.chrona.app.usecase.TaskLifecycleUseCases
 import com.chrona.app.usecase.TimeSource
 import com.chrona.app.usecase.AddRelationshipUseCase
 import com.chrona.app.usecase.ConfirmRelationshipUseCase
 import com.chrona.app.usecase.DeleteRelationshipUseCase
 import com.chrona.app.usecase.UpdateRelationshipUseCase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
@@ -77,6 +96,56 @@ class AppContainer(
     val undoSchedule: UndoScheduleRevisionUseCase =
         DefaultUndoScheduleRevisionUseCase(scheduleRevisionRepository) { timeSource.now() }
 
+    /** Settings storage (CH-DATA-003). DataStore, not Room: new toggles need no migration. */
+    val preferencesRepository: PreferencesRepository =
+        DataStorePreferencesRepository(context.applicationContext.settingsDataStore)
+
+    /** Reminder presentation history (NOTIFY-001). Deliberately separate from task state. */
+    val reminderHistoryRepository: ReminderHistoryRepository =
+        RoomReminderHistoryRepository(database)
+
+    /** The one deterministic policy; pure, so it is also the unit-test seam. */
+    val reminderPolicy: ReminderPolicy = DeterministicReminderPolicy()
+
+    val evaluateReminders = EvaluateRemindersUseCase(
+        taskRepository = taskRepository,
+        scheduleRevisionRepository = scheduleRevisionRepository,
+        reminderHistoryRepository = reminderHistoryRepository,
+        preferencesRepository = preferencesRepository,
+        timeSource = timeSource,
+        policy = reminderPolicy,
+    )
+    val recordReminderHistory =
+        RecordReminderHistoryUseCase(reminderHistoryRepository, idGenerator, timeSource)
+    val applyReminderAction =
+        ApplyReminderActionUseCase(lifecycle, reminderHistoryRepository, idGenerator, timeSource)
+
+    /**
+     * Long-lived scope for actions started from system callbacks (overlay taps) that have no
+     * lifecycle of their own. A supervisor so one failure never tears down the scope.
+     */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    val notificationPresenter: ReminderPresenter =
+        NotificationPresenter(context.applicationContext)
+
+    val overlayPresenter: ReminderPresenter =
+        OverlayPresenter(context.applicationContext) { action, card ->
+            card.tasks.firstOrNull()?.let { primary ->
+                applicationScope.launch {
+                    applyReminderAction(primary.id, action, ReminderSurfaceType.OVERLAY, card.cardId)
+                }
+            }
+        }
+
+    /** Evaluate → present → record: the single delivery path shared by the worker and the UI. */
+    val deliverReminders = DeliverRemindersUseCase(
+        evaluate = evaluateReminders,
+        record = recordReminderHistory,
+        overlayPresenter = overlayPresenter,
+        notificationPresenter = notificationPresenter,
+    )
+
     /**
      * The deterministic parser. There is no provider switch: the interface exists so the parser
      * is a test seam and a replaceable boundary, not an invitation to add a remote provider
@@ -114,8 +183,8 @@ class AppContainer(
                 ChronaDatabase::class.java,
                 ChronaDatabase.FILE_NAME,
             )
-                // Purely additive migration; existing user data is preserved (AT-031).
-                .addMigrations(ChronaDatabase.MIGRATION_1_2)
+                // Purely additive migrations; existing user data is preserved (AT-031).
+                .addMigrations(ChronaDatabase.MIGRATION_1_2, ChronaDatabase.MIGRATION_2_3)
                 // No fallbackToDestructiveMigration(): losing real task data silently is worse
                 // than failing loudly. Every version bump needs an explicit migration + test.
                 .build()

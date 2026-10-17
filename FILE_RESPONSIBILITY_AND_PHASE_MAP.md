@@ -38,3 +38,25 @@
 
 ## Ownership rule
 Shared contracts, Gradle pins, migrations, manifest permissions and navigation IDs are high-impact shared files. Update all affected consumers and tests in one coherent change, then update contracts/registry/map, `CHANGELOG.md`, `PROGRESS.md`, and (for material decisions) `DECISIONS.md`/`CHANGE_CONTROL.md`.
+
+### Phase P06 — Quest Cards and Reminders (IMPLEMENTED)
+
+- `app/src/main/kotlin/com/chrona/app/domain/reminder/Reminder.kt` — core types: ReminderCandidate, ReminderAction, ReminderDecisionReason, ReminderDecision, ReminderSurfaceType, ReminderOutcome, ReminderPresentation, ReminderHistoryEntry, ReminderPolicyConfig, ReminderPolicyInput, ReminderPolicy, TaskAction, ReminderCard, ReminderPresenter — [P06]
+- `app/src/main/kotlin/com/chrona/app/domain/reminder/DeterministicReminderPolicy.kt` — pure policy (group-first, cap-per-card) — [P06]
+- `app/src/main/kotlin/com/chrona/app/domain/reminder/ReminderCandidateSelector.kt` — due-task selector (lead 10 min default) — [P06]
+- `app/src/main/kotlin/com/chrona/app/data/preferences/PreferencesDataStore.kt` — DataStore delegate + DataStorePreferencesRepository — [P06]
+- `app/src/main/kotlin/com/chrona/app/usecase/ReminderUseCases.kt` — EvaluateRemindersUseCase, RecordReminderHistoryUseCase, ApplyReminderActionUseCase, DeliverRemindersUseCase (REMINDER_WORK_NAME), ReminderEvaluation, ReminderDelivery, reminderCardId — [P06]
+- `app/src/main/kotlin/com/chrona/app/platform/permission/ReminderPermissions.kt` — POST_NOTIFICATIONS constant + permission helpers — [P06]
+- `app/src/main/kotlin/com/chrona/app/platform/notification/NotificationPresenter.kt` — ReminderPresenter impl (channels, actions, tag=id, fixed id 4001) — [P06]
+- `app/src/main/kotlin/com/chrona/app/platform/notification/ReminderActionReceiver.kt` — BroadcastReceiver for actions (goAsync) — [P06]
+- `app/src/main/kotlin/com/chrona/app/platform/overlay/OverlayPresenter.kt` — best-effort overlay (opt-in, permission-gated) — [P06]
+- `app/src/main/kotlin/com/chrona/app/platform/work/ReminderReconciliationWorker.kt` — hourly inexact PeriodicWorkRequest (KEEP) — [P06]
+- `app/src/main/kotlin/com/chrona/app/ui/questcard/QuestCardViewModel.kt`, `QuestCardScreen.kt`, `QuestCardRoute.kt` — in-app Quest Card — [P06]
+- `app/src/main/kotlin/com/chrona/app/ui/settings/SettingsViewModel.kt`, `SettingsScreen.kt` — Settings (SettingsRoute + real screen) — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/domain/model/UserPreferences.kt` (QuietHours + quietHours computed) — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/data/local/Entities.kt` (ReminderPresentationEntity, table + indices, priority column), `Daos.kt` (ReminderPresentationDao incl. countNonUrgentSurfacedOn), `ChronaDatabase.kt` (v3, MIGRATION_2_3), `EntityMappers.kt` — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/data/repository/RepositoryContracts.kt` (ReminderHistoryRepository, PreferencesRepository), `RoomRepositories.kt` (RoomReminderHistoryRepository) — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/di/AppContainer.kt` (wires prefs/reminder history/policy/use cases/applicationScope/presenters/deliver + MIGRATION_2_3) — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/navigation/ChronaNavHost.kt` (QUEST_CARD_ROUTE, SettingsRoute, Today entry) — [P06]
+- Modified: `app/src/main/kotlin/com/chrona/app/MainActivity.kt` (schedules ReminderReconciliationWorker), `AndroidManifest.xml` (POST_NOTIFICATIONS, SYSTEM_ALERT_WINDOW, ReminderActionReceiver), `app/src/main/res/values/strings.xml` (channels/actions/settings) — [P06]
+- Tests: `app/src/test/kotlin/.../domain/reminder/DeterministicReminderPolicyTest.kt` (20), `ReminderCandidateSelectorTest.kt` (10); `app/src/test/kotlin/.../usecase/ReminderUseCasesTest.kt` (5), `RecordReminderHistoryUseCaseTest.kt` (2), `ApplyReminderActionUseCaseTest.kt` (3), `DeliverRemindersUseCaseTest.kt` (4); `app/src/test/kotlin/.../data/RoomReminderHistoryRepositoryTest.kt` (4, Robolectric), `MigrationTest2To3Test.kt` (1) — [P06]

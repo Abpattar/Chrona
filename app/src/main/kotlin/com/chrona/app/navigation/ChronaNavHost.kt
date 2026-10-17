@@ -21,8 +21,9 @@ import androidx.navigation.compose.rememberNavController
 import com.chrona.app.di.AppContainer
 import com.chrona.app.ui.board.BoardRoute
 import com.chrona.app.ui.history.HistoryScreen
+import com.chrona.app.ui.questcard.QuestCardRoute
 import com.chrona.app.ui.schedule.ScheduleRoute
-import com.chrona.app.ui.settings.SettingsScreen
+import com.chrona.app.ui.settings.SettingsRoute
 import com.chrona.app.ui.today.TodayRoute
 
 /** Navigation shell: five top-level destinations, all peers (UI-001). */
@@ -55,15 +56,23 @@ fun ChronaNavHost(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(ChronaDestination.TODAY.route) {
-                TodayRoute(container)
+                TodayRoute(
+                    container = container,
+                    onOpenQuestCards = { navController.navigate(QUEST_CARD_ROUTE) },
+                )
             }
             composable(ChronaDestination.SCHEDULE.route) { ScheduleRoute(container) }
             composable(ChronaDestination.BOARD.route) { BoardRoute(container) }
             composable(ChronaDestination.HISTORY.route) { HistoryScreen() }
-            composable(ChronaDestination.SETTINGS.route) { SettingsScreen() }
+            composable(ChronaDestination.SETTINGS.route) { SettingsRoute(container) }
+            // Quest Cards are a detail surface reached from Today, not a sixth bottom-bar tab.
+            composable(QUEST_CARD_ROUTE) { QuestCardRoute(container) }
         }
     }
 }
+
+/** Quest Cards live outside the bottom bar: a detail surface opened from Today. */
+const val QUEST_CARD_ROUTE: String = "questcard"
 
 /**
  * Top-level destinations keep a single entry on the back stack, so switching tabs never grows

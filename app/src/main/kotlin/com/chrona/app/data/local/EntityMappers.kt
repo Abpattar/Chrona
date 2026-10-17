@@ -9,6 +9,9 @@ import com.chrona.app.domain.model.RelationCreatedBy
 import com.chrona.app.domain.model.RelationId
 import com.chrona.app.domain.model.RelationType
 import com.chrona.app.domain.model.RevisionId
+import com.chrona.app.domain.reminder.ReminderOutcome
+import com.chrona.app.domain.reminder.ReminderPresentation
+import com.chrona.app.domain.reminder.ReminderSurfaceType
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
 import com.chrona.app.domain.model.TaskOrigin
@@ -191,4 +194,32 @@ fun ScheduleRevision.toEntity(): ScheduleRevisionEntity = ScheduleRevisionEntity
     basedOnRevisionId = basedOnRevisionId?.value,
     reasonCode = reasonCode,
     appliedAtEpochMillis = appliedAt.toEpochMilli(),
+)
+
+fun ReminderPresentationEntity.toDomain(): ReminderPresentation = ReminderPresentation(
+    id = id,
+    taskId = TaskId(taskId),
+    scheduledFor = Instant.ofEpochMilli(scheduledForEpochMillis),
+    surfacedAt = surfacedAtEpochMillis?.let(Instant::ofEpochMilli),
+    surfaceType = ReminderSurfaceType.valueOf(surfaceType),
+    outcome = ReminderOutcome.valueOf(outcome),
+    reasonCode = reasonCode,
+    batchGroup = batchGroup,
+    localDate = LocalDate.parse(localDateIso),
+    priority = Priority.valueOf(priority),
+    createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
+)
+
+fun ReminderPresentation.toEntity(): ReminderPresentationEntity = ReminderPresentationEntity(
+    id = id,
+    taskId = taskId.value,
+    scheduledForEpochMillis = scheduledFor.toEpochMilli(),
+    surfacedAtEpochMillis = surfacedAt?.toEpochMilli(),
+    surfaceType = surfaceType.name,
+    outcome = outcome.name,
+    reasonCode = reasonCode,
+    batchGroup = batchGroup,
+    localDateIso = localDate.toString(),
+    priority = priority.name,
+    createdAtEpochMillis = createdAt.toEpochMilli(),
 )

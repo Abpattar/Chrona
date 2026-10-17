@@ -22,7 +22,7 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-016 | VERIFIED (Ubuntu, P01) | Kotlin + Compose, single Gradle app module, Room, DataStore and pure domain packages | native, testable, proportionate; `scripts/verify.sh` built, tested and linted clean | P01 |
 | ADR-017 | VERIFIED (Ubuntu, P01) | minSdk 26, compileSdk 36, targetSdk 36 | stable API 36 path; built against Platform 36 / Build-Tools 36.0.0. Release target policy must be rechecked before publishing | P01/release |
 | ADR-018 | VERIFIED (Ubuntu, P01) | JDK17, AGP8.13.2, Gradle8.13, Kotlin2.2.21, KSP2.2.21-2.0.5, Compose BOM2026.06.00; Room2.8.5, DataStore1.2.1, WorkManager2.12.0, Activity Compose1.13.0 | every pin resolved and built. Navigation/Lifecycle corrected — see ADR-018a | P01 |
-| ADR-019 | PROPOSED—P06 VERIFY | WorkManager for deferrable reminders/reconciliation; no exact-alarm promise | lower permission and battery scope; OS may delay non-exact work | P06 |
+| ADR-019 | APPROVED (P06) | WorkManager for deferrable reminders/reconciliation; no exact-alarm promise | lower permission and battery scope; OS may delay non-exact work. Implemented as one inexact hourly `PeriodicWorkRequest` (`ExistingPeriodicWorkPolicy.KEEP`); on-device timing NOT RUN (OPEN-014) | P06 |
 | ADR-020 | APPROVED | URE deadline, official report/demo rubric remain unknown until provided | avoid invented submission constraints | P08 |
 | ADR-021 | APPROVED | No participant study until institution’s ethics/consent/data rules confirmed | safeguards and course policy unknown | P08 |
 | ADR-022 | APPROVED | Standalone visual reference image absent from currently available uploaded files; use written PRD §6 until supplied | don't hallucinate unseen composition | UI |
@@ -38,6 +38,8 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 | ADR-031 | APPROVED | `AddRelationshipUseCase` explicitly rejects a duplicate `(source, target, type)` triple with `Failure.Validation` | Room `@Upsert` silently swallows the unique-index violation and reports success while storing nothing, which would hand the UI an id that was never persisted; an explicit check makes the outcome truthful and testable. The index remains the last-line database guard | P05 |
 | ADR-032 | APPROVED | A `SUGGESTED` hard dependency is stored with `confirmedAt = null` and never constrains order until the user confirms it | REL-002 forbids a silent consequential dependency; dormant storage lets a suggestion be shown without changing the plan, and `ConfirmRelationshipUseCase` re-validates before activating | P05 |
 | ADR-033 | APPROVED | Board layout is a pure deterministic function (`BoardLayoutCalculator`) over tasks+relationships; no randomness, wall clock or animation state | stable, reproducible note coordinates (P05 "stable coordinates") and JVM-testable layout, including the 100/200 performance fixture | P05 |
+| ADR-034 | APPROVED | Reminder style is a user choice with distinct, testable semantics: `QUIET` suppresses `LOW` entirely (`QUIET_MODE`) and batches related tasks; `BALANCED` batches related tasks and subjects `LOW` to the daily cap; `MORE_GUIDANCE` never batches | NOTIFY-001 and ADR-010 require the user to control the intensity of reminders. Making each style a pure, unit-tested rule (rather than platform behaviour) keeps the promise deterministic and evaluable | P06 |
+| ADR-035 | APPROVED | Surface selection order is overlay (enabled + permission granted) → notification → in-app, and a presenter returning `null` is a fallback rather than an error; the non-urgent daily cap counts dispatched **cards** (not tasks) and a `priority` column on `reminder_presentation_history` preserves the count across later task edits/deletions | ADR-009 makes the overlay optional and best-effort, so delivery must always fall back cleanly. Counting cards matches what the user actually experienced (a batch is one interruption) and keeps urgent cards uncapped. The added `priority` column is a documented DATA_MODEL deviation: it prevents a later edit/delete from rewriting a past day's cap; `MIGRATION_2_3` is additive with no destructive fallback | P06 |
 
 ### ADR-018a — Coordinated toolchain change record
 
@@ -110,6 +112,26 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
 - **Verification:** `./scripts/verify.sh` passes on Ubuntu — 231 unit/Robolectric tests, 0
   failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. Instrumented
   Compose board tests compile but are NOT RUN (OPEN-014).
+
+### P06 change record — Quest Cards and reminders
+
+- **Date:** 17 October 2026. **Phase:** P06.
+- **Structure:** the pure reminder rules live in `domain/reminder/{Reminder,DeterministicReminderPolicy,ReminderCandidateSelector}.kt`;
+  orchestration in `usecase/ReminderUseCases.kt`; persistence in `data/local` (Room v3) and
+  `data/repository`; settings in `data/preferences`; Android surfaces in
+  `platform/{notification,overlay,permission,work}`; UI in `ui/questcard` and `ui/settings`.
+- **Contract additions:** `ReminderPolicy`, `ReminderDecision`, `ReminderSurfaceType`,
+  `ReminderOutcome`, `ReminderCard`, `ReminderPresenter`, `TaskAction`, `ReminderPolicyConfig`,
+  `ReminderCandidateSelector`, `EvaluateRemindersUseCase`, `RecordReminderHistoryUseCase`,
+  `ApplyReminderActionUseCase`, `DeliverRemindersUseCase`, `PreferencesRepository`,
+  `ReminderHistoryRepository`; `UserPreferences.QuietHours`/`quietHours`.
+- **Decisions:** ADR-019 (WorkManager, now APPROVED), ADR-034 (style semantics), ADR-035 (surface
+  order + card-counting cap and the `priority` column). `DISMISS` writes presentation history only
+  and never completes/deletes/postpones a task.
+- **Verification:** `./scripts/verify.sh` passes on Ubuntu — 280 unit/Robolectric tests, 0
+  failures; lint 0 errors; `assembleDebugAndroidTest` compiles; debug APK builds. v2→v3 migration
+  tested (`MigrationTest2To3Test`). Notification/overlay/worker runtime checks are NOT RUN
+  (OPEN-011/OPEN-014).
 
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.

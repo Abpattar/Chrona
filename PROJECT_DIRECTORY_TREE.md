@@ -55,7 +55,7 @@ chrona/
 │   ├── lint.xml                                     [P01] accessibility checks = error
 │   └── src/
 │       ├── main/
-│       │   ├── AndroidManifest.xml                  [P01] no runtime permissions yet
+│       │   ├── AndroidManifest.xml                  [P01; P06 adds POST_NOTIFICATIONS, SYSTEM_ALERT_WINDOW, ReminderActionReceiver]
 │       │   ├── res/                                 [P01]
 │       │   └── kotlin/com/chrona/app/
 │       │       ├── ChronaApplication.kt             [P01]
@@ -68,23 +68,24 @@ chrona/
 │       │       │   ├── relation/                    (planned P02)
 │       │       │   ├── scheduling/                  (P04) deterministic engine + contract
 │       │       │   ├── recovery/                    (P04) planner, use cases, revision contract
-│       │       │   ├── reminder/                    (planned P06)
+│       │       │   ├── reminder/                    [P06] policy, selector, reminder contracts
 │       │       │   └── parse/                       (P03) deterministic parser + contract
 │       │       ├── data/
-│       │       │   ├── local/                       [P02] Room v1; [P04] v2 + migration + schedule tables
+│       │       │   ├── local/                       [P02] Room v1; [P04] v2 + migration + schedule tables; [P06] v3 + reminder_presentation_history
 │       │       │   ├── migration/                    (planned) explicit migrations live in ChronaDatabase
-│       │       │   ├── repository/                  [P02; P04 adds RoomScheduleRevisionRepository]
+│       │       │   ├── repository/                  [P02; P04 adds RoomScheduleRevisionRepository; P06 adds RoomReminderHistoryRepository]
+│       │       │   ├── preferences/                 [P06] DataStore settings repository
 │       │       │   └── export/                      (planned P07)
-│       │       ├── usecase/                         [P02; P05 relationship use cases]
+│       │       ├── usecase/                         [P02; P05 relationship use cases; P06 reminder use cases]
 │       │       ├── input/
 │       │       │   ├── parser/                      (planned P03)
 │       │       │   └── voice/                       (planned P03)
 │       │       ├── platform/
-│       │       │   ├── notification/                (planned P06)
-│       │       │   ├── overlay/                     (planned P06)
+│       │       │   ├── notification/                [P06] NotificationPresenter, ReminderActionReceiver
+│       │       │   ├── overlay/                     [P06] OverlayPresenter (best-effort, opt-in)
 │       │       │   ├── speech/                      (P03) on-device speech adapter
-│       │       │   ├── permission/                  (planned P06/P07)
-│       │       │   └── work/                        (planned P04/P06)
+│       │       │   ├── permission/                  [P06] ReminderPermissions; (P07 continues)
+│       │       │   └── work/                        [P06] ReminderReconciliationWorker
 │       │       ├── privacy/                         (planned P07)
 │       │       └── ui/
 │       │           ├── design/                      [P01] theme, paper tokens, components
@@ -93,7 +94,7 @@ chrona/
 │       │           ├── board/                       [P01 shell; canvas + list + link editing in P05]
 │       │           ├── history/                     [P01 shell; content in P04/P07]
 │       │           ├── taskeditor/                  [P02] typed task editor
-│       │           ├── questcard/                   (planned P06)
+│       │           ├── questcard/                   [P06] in-app Quest Card surface
 │       │           ├── recovery/                     (reserved; recovery UI lives in ui/schedule for P04)
 │       │           ├── settings/                    [P01 shell; preferences P06/P07]
 │       │           ├── voice/                       [P03] tap-to-speak capture sheet + VM
@@ -103,17 +104,17 @@ chrona/
 │       │       ├── parse/                               [P03] parser/tests
 │       │       ├── scheduling/                          [P04] engine/scenario tests
 │       │       ├── recovery/                            [P04] use-case tests
-│       │   ├── data/                                    [P04] Room repo + migration tests; [P05] relationship repo tests
+│       │       └── reminder/                            [P06] policy + selector tests
+│       │   ├── data/                                    [P04] Room repo + migration tests; [P05] relationship repo tests; [P06] reminder history repo + v2→v3 migration
 │       │   ├── navigation/                          [P01]
 │       │       ├── platform/                             [P03] speech adapter tests
 │       │       ├── ui/                                   [P03] voice VM tests; [P04] schedule VM tests; [P05] board layout/VM tests
-│       │       ├── usecase/                               [P03] intent-create tests; [P05] relationship use-case tests
-│       │       └── reminder/                            (planned P06)
+│       │       ├── usecase/                               [P03] intent-create tests; [P05] relationship use-case tests; [P06] reminder use-case tests
 │       └── androidTest/kotlin/com/chrona/app/
 │           ├── ui/                                  [P01] navigation smoke
 │           ├── data/                                (planned P02) Room integration
 │           ├── BoardSliceTest.kt                    [P05] board/list/link slice (compile-only; NOT RUN)
-│           └── platform/                            (planned P06)
+│           └── platform/                            (P06: no instrumented tests; runtime checks NOT RUN)
 ├── scripts/
 │   ├── verify.sh                                    [P01]
 │   └── verify.ps1                                   [P01]

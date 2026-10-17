@@ -20,6 +20,7 @@
 | OPEN-014 | build user is not in the `kvm` group, so only software emulation is possible. Verified in P02: a `-no-accel` API 36 AVD boots and installs APKs, but `artd` finds no usable dex artifacts and `am start` returns `result code=-92` | owner adds the user to `kvm`, or supplies a device/Studio-managed emulator | instrumentation tests compile and are reported NOT RUN |
 | OPEN-015 | application licence has not been chosen | owner before any public distribution | no licence file; repository is not published as licensed work |
 | OPEN-016 | "Chrona" trademark/domain availability unchecked; no approved reverse-DNS application ID | owner | `com.chrona.app` used as a documented provisional identity (ADR-025) |
+| OPEN-017 | reminder batching groups by the task's `projectLabel` rather than the P05 relationship graph | revisit only if richer grouping is needed (P07+) | deliberate simplification; deterministic and unit-tested |
 
 ## Resolved in P01
 
@@ -69,3 +70,28 @@
   exported and committed. (Note: `MigrationTestHelper` cannot read exported schemas from JVM
   unit tests, so the test builds the v1 database from frozen DDL instead.) No destructive
   fallback is registered.
+
+### Phase P06 — Reminders / Quest Cards
+
+- **Runtime surface checks NOT RUN (OPEN-011, OPEN-014).** No emulator/device is available
+  (`adb devices` empty), so notification posting/actions, the overlay window, and the hourly
+  `ReminderReconciliationWorker` are unobserved. They are implemented
+  (`NotificationPresenter`, `ReminderActionReceiver`, `OverlayPresenter`,
+  `ReminderReconciliationWorker`, `POST_NOTIFICATIONS`, `SYSTEM_ALERT_WINDOW`) and unit-tested
+  through the `ReminderPresenter` boundary only. Action: run on a device to verify channels,
+  tag/id replacement, action intents, overlay grant/revoke, DND handling and reconciliation; then
+  record the result against OPEN-011.
+- **Overlay remains best-effort (OPEN-011).** Opt-in and permission-gated
+  (`Settings.canDrawOverlays`, `TYPE_APPLICATION_OVERLAY`); it may not appear in every
+  OEM/lockscreen context, and a failure returns `null` so delivery falls back to the notification
+  or the in-app card. No foreground service is used.
+- **OPEN-017 (low): `relationGroup` = task's `projectLabel`.** Batching groups by project rather
+  than the P05 relationship graph — a deliberate simplification; revisit only if richer grouping
+  is actually needed.
+- **Resolved in P06 (documented deviation): `priority` column on
+  `reminder_presentation_history`.** Added so the non-urgent daily cap counts dispatched cards and
+  survives later task edits/deletions. `MIGRATION_2_3` adds it; entity, DAO and mappers updated;
+  recorded in `CHANGELOG.md` and `DATA_MODEL_AND_INTERFACES.md`. No destructive fallback.
+- **Reminder policy correctness.** `DeterministicReminderPolicyTest` (20) covers suppression,
+  batching, the per-card non-urgent cap, card urgency and grouping; the policy stays pure. No open
+  risk beyond the unmeasured runtime surfaces above.

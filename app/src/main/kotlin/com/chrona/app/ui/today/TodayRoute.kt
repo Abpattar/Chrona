@@ -25,7 +25,7 @@ import java.util.Locale
  * stays free of storage and clock details and remains previewable in isolation.
  */
 @Composable
-fun TodayRoute(container: AppContainer) {
+fun TodayRoute(container: AppContainer, onOpenQuestCards: () -> Unit = {}) {
     val zoneId = remember { ZoneId.systemDefault() }
     // The recogniser is asked for the device language. Chrona only parses English, so a
     // non-English transcript is refused for the user rather than misread (P03 limitation).
@@ -102,5 +102,6 @@ fun TodayRoute(container: AppContainer) {
         onEditorOpen = { viewModel.openEditor() },
         onEditorClose = viewModel::closeEditor,
         onSpeak = voiceViewModel::open,
+        onOpenQuestCards = onOpenQuestCards,
     )
 }

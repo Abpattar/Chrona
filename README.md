@@ -9,7 +9,7 @@ This repository is the implementation of the approved product in
 [`MASTER_REQUIREMENTS.md`](MASTER_REQUIREMENTS.md), following the canonical contracts in
 [`SHARED_CONTRACT.md`](SHARED_CONTRACT.md).
 
-## Current status — P01–P05 complete, P06 next
+## Current status — P01–P06 complete, P07 next
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -18,7 +18,7 @@ This repository is the implementation of the approved product in
 | P03 | Voice input and deterministic parser | **DONE (automated)** — tap-to-speak, on-device-only recogniser, parser, review/correction; device availability NOT RUN |
 | P04 | Scheduling and recovery engine | **DONE (automated)** — deterministic day preview, apply/undo, schema v2 + migration; device run NOT RUN |
 | P05 | Board and relationships | **DONE (automated)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run NOT RUN |
-| P06 | Quest Cards and notifications | Not started |
+| P06 | Quest Cards and notifications | **DONE (automated)** — deterministic reminder policy, Room v3 history, DataStore settings, four Quest Card actions, notification + optional overlay + in-app surfaces, hourly reconciliation; notification/overlay/worker device checks NOT RUN |
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
 
@@ -53,7 +53,7 @@ This repository is the implementation of the approved product in
   duplicate link is refused with a plain reason. Nothing is drawn between tasks that are hidden
   by a filter.
 
-**Not working yet:** Quest Cards and reminders, and the Privacy Centre. They belong to P06–P07.
+**Not working yet:** the Privacy Centre. It belongs to P07.
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.

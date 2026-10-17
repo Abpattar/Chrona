@@ -1,0 +1,754 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "5687865184383cf77b947d18e29f9cb3",
+    "entities": [
+      {
+        "tableName": "tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `details` TEXT, `priority` TEXT NOT NULL, `estimated_duration_minutes` INTEGER, `deadline_instant_epoch_millis` INTEGER, `deadline_zone_id` TEXT, `requested_date_iso` TEXT, `earliest_start_epoch_millis` INTEGER, `earliest_start_zone_id` TEXT, `preferred_start` TEXT, `preferred_end` TEXT, `flexibility` TEXT NOT NULL, `fixed_start_epoch_millis` INTEGER, `fixed_end_epoch_millis` INTEGER, `fixed_zone_id` TEXT, `splittable` INTEGER NOT NULL, `minimum_session_minutes` INTEGER, `status` TEXT NOT NULL, `origin` TEXT NOT NULL, `project_label` TEXT, `created_at_epoch_millis` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `completed_at_epoch_millis` INTEGER, `postponed_until_epoch_millis` INTEGER, `postponed_until_zone_id` TEXT, `version` INTEGER NOT NULL, `assumptions` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "details",
+            "columnName": "details",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimatedDurationMinutes",
+            "columnName": "estimated_duration_minutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deadlineEpochMillis",
+            "columnName": "deadline_instant_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deadlineZoneId",
+            "columnName": "deadline_zone_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "requestedDateIso",
+            "columnName": "requested_date_iso",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "earliestStartEpochMillis",
+            "columnName": "earliest_start_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "earliestStartZoneId",
+            "columnName": "earliest_start_zone_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "preferredStart",
+            "columnName": "preferred_start",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "preferredEnd",
+            "columnName": "preferred_end",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "flexibility",
+            "columnName": "flexibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fixedStartEpochMillis",
+            "columnName": "fixed_start_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fixedEndEpochMillis",
+            "columnName": "fixed_end_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fixedZoneId",
+            "columnName": "fixed_zone_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "splittable",
+            "columnName": "splittable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minimumSessionMinutes",
+            "columnName": "minimum_session_minutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectLabel",
+            "columnName": "project_label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtEpochMillis",
+            "columnName": "completed_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "postponedUntilEpochMillis",
+            "columnName": "postponed_until_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "postponedUntilZoneId",
+            "columnName": "postponed_until_zone_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "assumptions",
+            "columnName": "assumptions",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tasks_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_tasks_deadline_instant_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "deadline_instant_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_deadline_instant_epoch_millis` ON `${TABLE_NAME}` (`deadline_instant_epoch_millis`)"
+          },
+          {
+            "name": "index_tasks_project_label",
+            "unique": false,
+            "columnNames": [
+              "project_label"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_project_label` ON `${TABLE_NAME}` (`project_label`)"
+          },
+          {
+            "name": "index_tasks_updated_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "updated_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_updated_at_epoch_millis` ON `${TABLE_NAME}` (`updated_at_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "calendar_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `details` TEXT, `start_at_epoch_millis` INTEGER NOT NULL, `end_at_epoch_millis` INTEGER NOT NULL, `zone_id` TEXT NOT NULL, `is_fixed` INTEGER NOT NULL, `source` TEXT NOT NULL, `created_at_epoch_millis` INTEGER NOT NULL, `updated_at_epoch_millis` INTEGER NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "details",
+            "columnName": "details",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startAtEpochMillis",
+            "columnName": "start_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endAtEpochMillis",
+            "columnName": "end_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zoneId",
+            "columnName": "zone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFixed",
+            "columnName": "is_fixed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updated_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_calendar_events_start_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "start_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calendar_events_start_at_epoch_millis` ON `${TABLE_NAME}` (`start_at_epoch_millis`)"
+          },
+          {
+            "name": "index_calendar_events_updated_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "updated_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calendar_events_updated_at_epoch_millis` ON `${TABLE_NAME}` (`updated_at_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "task_relationships",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `source_task_id` TEXT NOT NULL, `target_task_id` TEXT NOT NULL, `type` TEXT NOT NULL, `label` TEXT, `explanation` TEXT, `created_by` TEXT NOT NULL, `confirmed_at_epoch_millis` INTEGER, `created_at_epoch_millis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`source_task_id`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`target_task_id`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceTaskId",
+            "columnName": "source_task_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetTaskId",
+            "columnName": "target_task_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explanation",
+            "columnName": "explanation",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdBy",
+            "columnName": "created_by",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confirmedAtEpochMillis",
+            "columnName": "confirmed_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_task_relationships_source_task_id",
+            "unique": false,
+            "columnNames": [
+              "source_task_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_relationships_source_task_id` ON `${TABLE_NAME}` (`source_task_id`)"
+          },
+          {
+            "name": "index_task_relationships_target_task_id",
+            "unique": false,
+            "columnNames": [
+              "target_task_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_relationships_target_task_id` ON `${TABLE_NAME}` (`target_task_id`)"
+          },
+          {
+            "name": "index_task_relationships_source_task_id_target_task_id_type",
+            "unique": true,
+            "columnNames": [
+              "source_task_id",
+              "target_task_id",
+              "type"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_task_relationships_source_task_id_target_task_id_type` ON `${TABLE_NAME}` (`source_task_id`, `target_task_id`, `type`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "tasks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "source_task_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tasks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "target_task_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "task_status_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`rowid_local` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `task_id` TEXT NOT NULL, `from_status` TEXT, `to_status` TEXT NOT NULL, `reason_code` TEXT NOT NULL, `changed_at_epoch_millis` INTEGER NOT NULL, FOREIGN KEY(`task_id`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "rowId",
+            "columnName": "rowid_local",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskId",
+            "columnName": "task_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromStatus",
+            "columnName": "from_status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "toStatus",
+            "columnName": "to_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason_code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changedAtEpochMillis",
+            "columnName": "changed_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "rowid_local"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_task_status_log_task_id",
+            "unique": false,
+            "columnNames": [
+              "task_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_status_log_task_id` ON `${TABLE_NAME}` (`task_id`)"
+          },
+          {
+            "name": "index_task_status_log_changed_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "changed_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_status_log_changed_at_epoch_millis` ON `${TABLE_NAME}` (`changed_at_epoch_millis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "tasks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "task_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "schedule_revisions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `based_on_revision_id` TEXT, `reason_code` TEXT NOT NULL, `applied_at_epoch_millis` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "basedOnRevisionId",
+            "columnName": "based_on_revision_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason_code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appliedAtEpochMillis",
+            "columnName": "applied_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_schedule_revisions_applied_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "applied_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_schedule_revisions_applied_at_epoch_millis` ON `${TABLE_NAME}` (`applied_at_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "schedule_placements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`rowid_local` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `revision_id` TEXT NOT NULL, `task_id` TEXT NOT NULL, `start_epoch_millis` INTEGER NOT NULL, `start_zone_id` TEXT NOT NULL, `end_epoch_millis` INTEGER NOT NULL, `end_zone_id` TEXT NOT NULL, `session_index` INTEGER NOT NULL, FOREIGN KEY(`revision_id`) REFERENCES `schedule_revisions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "rowId",
+            "columnName": "rowid_local",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revisionId",
+            "columnName": "revision_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskId",
+            "columnName": "task_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startEpochMillis",
+            "columnName": "start_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startZoneId",
+            "columnName": "start_zone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endEpochMillis",
+            "columnName": "end_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endZoneId",
+            "columnName": "end_zone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionIndex",
+            "columnName": "session_index",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "rowid_local"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_schedule_placements_revision_id",
+            "unique": false,
+            "columnNames": [
+              "revision_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_schedule_placements_revision_id` ON `${TABLE_NAME}` (`revision_id`)"
+          },
+          {
+            "name": "index_schedule_placements_task_id",
+            "unique": false,
+            "columnNames": [
+              "task_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_schedule_placements_task_id` ON `${TABLE_NAME}` (`task_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "schedule_revisions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "revision_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "reminder_presentation_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `task_id` TEXT NOT NULL, `scheduled_for_epoch_millis` INTEGER NOT NULL, `surfaced_at_epoch_millis` INTEGER, `surface_type` TEXT NOT NULL, `outcome` TEXT NOT NULL, `reason_code` TEXT NOT NULL, `batch_group` TEXT, `local_date_iso` TEXT NOT NULL, `priority` TEXT NOT NULL, `created_at_epoch_millis` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskId",
+            "columnName": "task_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledForEpochMillis",
+            "columnName": "scheduled_for_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surfacedAtEpochMillis",
+            "columnName": "surfaced_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "surfaceType",
+            "columnName": "surface_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason_code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "batchGroup",
+            "columnName": "batch_group",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localDateIso",
+            "columnName": "local_date_iso",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reminder_presentation_history_task_id",
+            "unique": false,
+            "columnNames": [
+              "task_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reminder_presentation_history_task_id` ON `${TABLE_NAME}` (`task_id`)"
+          },
+          {
+            "name": "index_reminder_presentation_history_local_date_iso",
+            "unique": false,
+            "columnNames": [
+              "local_date_iso"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reminder_presentation_history_local_date_iso` ON `${TABLE_NAME}` (`local_date_iso`)"
+          },
+          {
+            "name": "index_reminder_presentation_history_created_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "created_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reminder_presentation_history_created_at_epoch_millis` ON `${TABLE_NAME}` (`created_at_epoch_millis`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5687865184383cf77b947d18e29f9cb3')"
+    ]
+  }
+}

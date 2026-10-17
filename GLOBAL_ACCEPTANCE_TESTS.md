@@ -40,3 +40,16 @@ The following are future acceptance tests, not results. Map tests to automated t
 | AT-034 | moto g54 Android 15 with battery controls | behavior documented from actual device; no promise of exact timing/universal overlay | PLAT-001 |
 | AT-035 | mic, notification and overlay permissions denied | essential task/plan flows still work | privacy/permission fallback |
 | AT-036 | human study considered; ethics unknown | recruitment not started until official institution requirements/approvals are resolved | RESEARCH-002 |
+
+## Status notes
+
+- **AT-020/AT-021/AT-022/AT-023 (NOTIFY-001, policy level): covered by automated tests.**
+  `DeterministicReminderPolicyTest` (20) and `ReminderCandidateSelectorTest` (10) prove quiet
+  hours (incl. midnight wrap), batching of related items, the per-card non-urgent cap, and repeat
+  dismissal suppression with a deterministic clock — the exact wording that AT-021 requires (the
+  cap is configurable, not a hard-coded universal rule).
+- **AT-006/AT-007/AT-008 (CARD-001/CARD-003, device level): NOT RUN.** Surface selection and
+  fallback are unit-tested through the `ReminderPresenter` boundary, but real notification posting,
+  overlay permission grant/revoke, and dismissal from a live notification/overlay require a device
+  or emulator (none available; `adb devices` empty). Tracked as OPEN-011/OPEN-014 in
+  `RISKS_AND_OPEN_ITEMS.md`.

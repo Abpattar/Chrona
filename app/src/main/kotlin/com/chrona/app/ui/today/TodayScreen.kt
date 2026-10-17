@@ -58,6 +58,7 @@ fun TodayScreen(
     onEditorClose: () -> Unit,
     onSpeak: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenQuestCards: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -68,6 +69,12 @@ fun TodayScreen(
             title = stringResource(R.string.nav_today),
             subtitle = state.nextTask?.let { "Next: ${it.title}" } ?: "Nothing queued yet",
         )
+        TextButton(
+            onClick = onOpenQuestCards,
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .semantics { testTag = "today_open_quest_cards" },
+        ) { Text("Quest Cards") }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
         if (state.isEditorOpen) {
