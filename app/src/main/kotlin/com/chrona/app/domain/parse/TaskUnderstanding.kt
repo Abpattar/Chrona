@@ -175,7 +175,19 @@ enum class ParseFailureReason(val message: String) {
 
 /** The three outcomes the contract allows. Anything else is a bug. */
 sealed interface TaskUnderstandingResult {
-    data class Parsed(val draft: TaskIntentDraft) : TaskUnderstandingResult
+    /**
+     * One or more independent tasks understood from a single utterance.
+     *
+     * A list, not a single draft: "a function on the 25th, and I need to start studying in two
+     * hours" is two tasks, and they are two records. Holding them in a list here is what makes
+     * "never silently drop the extras" a property of the type rather than a rule to remember in
+     * every caller — the caller creates what it is given.
+     *
+     * Today every implementation returns exactly one element (see
+     * `RISKS_AND_OPEN_ITEMS.md`); decomposition is the provider's job, and this shape is where
+     * it lands when the parser learns to split an utterance.
+     */
+    data class Parsed(val drafts: List<TaskIntentDraft>) : TaskUnderstandingResult
 
     data class NeedsClarification(val prompt: ClarificationPrompt) : TaskUnderstandingResult
 

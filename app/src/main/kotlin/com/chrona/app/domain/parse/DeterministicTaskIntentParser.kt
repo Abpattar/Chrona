@@ -73,7 +73,10 @@ class DeterministicTaskIntentParser(
         if (title.isEmpty()) return TaskUnderstandingResult.Unsupported(ParseFailureReason.NO_TITLE_REMAINING)
 
         clarificationFor(scan, title)?.let { return TaskUnderstandingResult.NeedsClarification(it) }
-        return TaskUnderstandingResult.Parsed(scan.buildDraft(title))
+        // One utterance, one task: this grammar reads a single clause and never invents a second
+        // task out of it. Task decomposition is not implemented here (RISKS_AND_OPEN_ITEMS.md), so
+        // the list carries exactly one draft and the caller still has to handle more than one.
+        return TaskUnderstandingResult.Parsed(listOf(scan.buildDraft(title)))
     }
 
     /**

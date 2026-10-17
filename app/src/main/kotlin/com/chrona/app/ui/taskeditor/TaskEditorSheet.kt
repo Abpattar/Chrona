@@ -32,8 +32,9 @@ import java.time.LocalDate
 /**
  * Typed task creation — the complete first path to a stored task (TASK-001, UX-001).
  *
- * Voice capture enters this same sheet in P03; typing must remain usable on its own, with no
- * permission and no recognizer involved.
+ * Voice capture hands over to this same sheet when a capture cannot be understood or the user
+ * asks to type instead; typing must remain usable on its own, with no permission and no
+ * recognizer involved.
  *
  * The submit button is disabled while the domain validator rejects the input, and the reasons
  * are shown as text. Validation lives in `TaskValidator`, not here, so the editor and every
@@ -49,7 +50,6 @@ fun TaskEditorSheet(
         deadlineDate: LocalDate?,
     ) -> Unit,
     onDismiss: () -> Unit,
-    onSpeak: () -> Unit,
     modifier: Modifier = Modifier,
     /** Text the editor opens with, used when a voice draft is handed over for correction. */
     initialTitle: String = "",
@@ -74,14 +74,8 @@ fun TaskEditorSheet(
     ) {
         Text("New task", style = MaterialTheme.typography.headlineSmall)
 
-        // Voice is offered here and nowhere else in the Today surface: one explicit tap, no
-        // background listening, and typing stays available at every point.
-        TextButton(
-            onClick = onSpeak,
-            modifier = Modifier.semantics { testTag = "editor_speak" },
-        ) {
-            Text("Speak instead")
-        }
+        // Voice is not offered here: the microphone is fixed to every screen, so a second voice
+        // affordance here would only offer the same action in two places.
 
         OutlinedTextField(
             value = title,

@@ -29,10 +29,28 @@ object TaskIntentWire {
             .put("zoneId", zoneId)
             .toString()
 
-    /** Reads the `{provider, draft}` envelope. Returns null when the payload is not usable. */
-    fun decodeDraft(body: String): TaskIntentDraft? {
-        val draftJson = runCatching { JSONObject(body).optJSONObject("draft") }.getOrNull() ?: return null
-        return runCatching { toDraft(draftJson) }.getOrNull()
+    /**
+     * Reads the `{provider, drafts: [...]}` envelope and returns every draft it carries.
+     *
+     * A single `draft` object is also accepted, because that is what the deployed function emits
+     * today; both spellings decode to the same list, so the capture flow never sees the
+     * difference. Returns null when the payload is not usable — one unusable draft discards the
+     * whole response rather than silently storing half of what the user said.
+     */
+    fun decodeDrafts(body: String): List<TaskIntentDraft>? {
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val array = root.optJSONArray("drafts")
+        if (array == null) {
+            val single = root.optJSONObject("draft") ?: return null
+            return runCatching { listOf(toDraft(single)) }.getOrNull()
+        }
+        if (array.length() == 0) return null
+        return runCatching {
+            (0 until array.length()).map { index ->
+                val item = array.optJSONObject(index) ?: error("draft $index is not an object")
+                toDraft(item)
+            }
+        }.getOrNull()
     }
 
     fun toDraft(json: JSONObject): TaskIntentDraft {

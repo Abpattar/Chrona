@@ -43,9 +43,10 @@ class TaskIntentWireTest {
             .put("fixedEnd", "2026-10-16T16:00:00+00:00")
             .put("assumptions", JSONArray().put(JSONObject().put("field", "DURATION").put("text", "assumed two hours")))
 
-        val result = TaskIntentWire.decodeDraft(envelope(draft))
-        assertNotNull(result)
-        assertEquals("submit the report", result!!.title)
+        val drafts = TaskIntentWire.decodeDrafts(envelope(draft))
+        assertNotNull(drafts)
+        val result = drafts!!.single()
+        assertEquals("submit the report", result.title)
         assertEquals("for the finance class", result.detail)
         assertEquals(LocalDate.of(2026, 10, 16), result.requestedDate)
         assertEquals(Duration.ofMinutes(120), result.estimatedDuration)
@@ -60,9 +61,10 @@ class TaskIntentWireTest {
 
     @Test
     fun `a minimal draft maps with nulls`() {
-        val result = TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "buy milk")))
-        assertNotNull(result)
-        assertNull(result!!.requestedDate)
+        val drafts = TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "buy milk")))
+        assertNotNull(drafts)
+        val result = drafts!!.single()
+        assertNull(result.requestedDate)
         assertNull(result.priority)
         assertNull(result.estimatedDuration)
         assertNull(result.fixedRange)
@@ -71,13 +73,13 @@ class TaskIntentWireTest {
 
     @Test
     fun `rejects a missing title`() {
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("detail", "no title"))))
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "   "))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("detail", "no title"))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "   "))))
     }
 
     @Test
     fun `rejects a bad requested date`() {
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "x").put("requestedDate", "16/10/2026"))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "x").put("requestedDate", "16/10/2026"))))
     }
 
     @Test
@@ -86,29 +88,70 @@ class TaskIntentWireTest {
             .put("title", "x")
             .put("fixedStart", "2026-10-16T10:00:00+00:00")
             .put("fixedEnd", "2026-10-16T09:00:00+00:00")
-        assertNull(TaskIntentWire.decodeDraft(envelope(draft)))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(draft)))
     }
 
     @Test
     fun `rejects a fixed range with only one end`() {
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "x").put("fixedStart", "2026-10-16T10:00:00+00:00"))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "x").put("fixedStart", "2026-10-16T10:00:00+00:00"))))
     }
 
     @Test
     fun `rejects an unusable duration`() {
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "x").put("estimatedDurationMinutes", 0))))
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "x").put("estimatedDurationMinutes", 2000))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "x").put("estimatedDurationMinutes", 0))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "x").put("estimatedDurationMinutes", 2000))))
     }
 
     @Test
     fun `rejects an unknown priority`() {
-        assertNull(TaskIntentWire.decodeDraft(envelope(JSONObject().put("title", "x").put("priority", "URGENT"))))
+        assertNull(TaskIntentWire.decodeDrafts(envelope(JSONObject().put("title", "x").put("priority", "URGENT"))))
+    }
+
+    @Test
+    fun `reads every task in a multi-task utterance`() {
+        val drafts = TaskIntentWire.decodeDrafts(
+            JSONObject()
+                .put("provider", "groq")
+                .put(
+                    "drafts",
+                    JSONArray()
+                        .put(JSONObject().put("title", "function on the 25th").put("requestedDate", "2026-10-25"))
+                        .put(JSONObject().put("title", "start studying").put("requestedDate", "2026-10-15")),
+                )
+                .toString(),
+        )
+
+        assertEquals(
+            listOf("function on the 25th", "start studying"),
+            drafts!!.map { it.title },
+        )
+        assertEquals(LocalDate.of(2026, 10, 25), drafts.first().requestedDate)
+    }
+
+    @Test
+    fun `rejects the whole response when one task in it is unusable`() {
+        val body = JSONObject()
+            .put("provider", "groq")
+            .put(
+                "drafts",
+                JSONArray()
+                    .put(JSONObject().put("title", "function on the 25th"))
+                    .put(JSONObject().put("detail", "no title here")),
+            )
+            .toString()
+
+        assertNull("a half-understood utterance must not be stored", TaskIntentWire.decodeDrafts(body))
+    }
+
+    @Test
+    fun `rejects an empty task list`() {
+        assertNull(TaskIntentWire.decodeDrafts(JSONObject().put("drafts", JSONArray()).toString()))
     }
 
     @Test
     fun `rejects a payload without a draft envelope`() {
-        assertNull(TaskIntentWire.decodeDraft("{\"provider\":\"groq\"}"))
-        assertNull(TaskIntentWire.decodeDraft("not json"))
+        assertNull(TaskIntentWire.decodeDrafts("{\"provider\":\"groq\"}"))
+        assertNull(TaskIntentWire.decodeDrafts("not json"))
     }
 
     @Test
@@ -144,9 +187,10 @@ class TaskIntentWireTest {
             if (i % 2 == 1) json = json.put("splittable", true)
             if (i % 4 == 0) json = json.put("assumptions", JSONArray().put("assumed $i"))
 
-            val result = TaskIntentWire.decodeDraft(envelope(json))
-            assertNotNull("fixture $i must decode", result)
-            assertEquals("fixture $i title", "task $i", result!!.title)
+            val drafts = TaskIntentWire.decodeDrafts(envelope(json))
+            assertNotNull("fixture $i must decode", drafts)
+            val result = drafts!!.single()
+            assertEquals("fixture $i title", "task $i", result.title)
             assertEquals("fixture $i date", expectedDate, result.requestedDate)
             assertEquals("fixture $i duration", expectedMinutes?.let { Duration.ofMinutes(it.toLong()) }, result.estimatedDuration)
             assertEquals("fixture $i priority", expectedPriority?.let { Priority.valueOf(it) }, result.priority)

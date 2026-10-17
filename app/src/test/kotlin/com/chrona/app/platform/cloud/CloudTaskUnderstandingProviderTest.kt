@@ -99,7 +99,7 @@ class CloudTaskUnderstandingProviderTest {
 
         val result = provider(usable, transport, fallback).understand(request)
 
-        val draft = (result as TaskUnderstandingResult.Parsed).draft
+        val draft = (result as TaskUnderstandingResult.Parsed).drafts.single()
         assertEquals("submit the report", draft.title)
         assertEquals(0, fallback.calls)
     }

@@ -146,7 +146,7 @@ class CreateTaskFromIntentUseCaseTest {
             ),
         )
         assertTrue("\"$text\" did not parse: $result", result is TaskUnderstandingResult.Parsed)
-        return (result as TaskUnderstandingResult.Parsed).draft
+        return (result as TaskUnderstandingResult.Parsed).drafts.single()
     }
 
     private companion object {

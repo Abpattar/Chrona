@@ -14,10 +14,11 @@ import java.time.Instant
  * the provider keys and may itself fail over between providers. This class only decides what the
  * user sees:
  *
- * - the remote draft is used only when it is schema-valid and passes the canonical task rules;
+ * - every remote draft is used only when all of them are schema-valid and pass the canonical
+ *   task rules;
  * - any transport error, timeout, non-2xx status, malformed payload or invalid draft silently
  *   falls back to [fallback] (the deterministic parser), so the capture flow never stops. The
- *   remote either yields a usable draft or nothing: it never returns a clarification, so the
+ *   remote either yields usable drafts or nothing: it never returns a clarification, so the
  *   deterministic parser remains the authority on whether something is a task and on when to ask
  *   a focused question.
  *
@@ -56,8 +57,10 @@ class CloudTaskUnderstandingProvider(
             ),
         )
         if (response.status !in 200..299) return null
-        val draft = TaskIntentWire.decodeDraft(response.body) ?: return null
-        if (TaskIntentDraftValidator.validate(draft, now()).isNotEmpty()) return null
-        return TaskUnderstandingResult.Parsed(draft)
+        // Every draft the function returns is validated, not just the first: an utterance that
+        // yields several tasks is either wholly trustworthy or it is not used at all.
+        val drafts = TaskIntentWire.decodeDrafts(response.body) ?: return null
+        if (drafts.any { TaskIntentDraftValidator.validate(it, now()).isNotEmpty() }) return null
+        return TaskUnderstandingResult.Parsed(drafts)
     }
 }

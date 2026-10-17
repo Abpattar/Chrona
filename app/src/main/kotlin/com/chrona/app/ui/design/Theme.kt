@@ -1,10 +1,8 @@
 package com.chrona.app.ui.design
 
 import android.app.Activity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
@@ -15,90 +13,103 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val LightColors = lightColorScheme(
-    primary = ChronaColors.Ink,
-    onPrimary = ChronaColors.PaperRaised,
-    primaryContainer = ChronaColors.PaperShaded,
+/**
+ * One scheme, deliberately: charcoal ground, amber accent.
+ *
+ * A light variant would need a second opinion about every surface in `Components.kt`, and the
+ * product intent is a single low-light look, so the theme exposes one palette rather than
+ * pretending to support two.
+ */
+private val ChronaColorScheme = darkColorScheme(
+    primary = ChronaColors.Amber,
+    onPrimary = ChronaColors.Backdrop,
+    primaryContainer = ChronaColors.AmberDeep,
     onPrimaryContainer = ChronaColors.Ink,
-    secondary = ChronaColors.Thread,
-    onSecondary = ChronaColors.PaperRaised,
-    background = ChronaColors.Paper,
+    secondary = ChronaColors.AmberBright,
+    onSecondary = ChronaColors.Backdrop,
+    secondaryContainer = ChronaColors.PaperRaised,
+    onSecondaryContainer = ChronaColors.Ink,
+    tertiary = ChronaColors.Thread,
+    onTertiary = ChronaColors.Backdrop,
+    background = ChronaColors.Backdrop,
     onBackground = ChronaColors.Ink,
     surface = ChronaColors.Paper,
     onSurface = ChronaColors.Ink,
-    surfaceVariant = ChronaColors.PaperShaded,
+    surfaceVariant = ChronaColors.PaperRaised,
     onSurfaceVariant = ChronaColors.InkMuted,
+    surfaceContainer = ChronaColors.PaperRaised,
+    surfaceContainerHigh = ChronaColors.PaperShaded,
     outline = ChronaColors.Outline,
-    error = Color(0xFF9B2C2C),
-    onError = ChronaColors.PaperRaised,
+    outlineVariant = ChronaColors.GlassBorder,
+    error = ChronaColors.Danger,
+    onError = ChronaColors.Backdrop,
+    scrim = ChronaColors.Scrim,
 )
 
-private val DarkColors = darkColorScheme(
-    primary = ChronaColors.InkDark,
-    onPrimary = ChronaColors.PaperDark,
-    primaryContainer = ChronaColors.CorkDark,
-    onPrimaryContainer = ChronaColors.InkDark,
-    secondary = ChronaColors.Thread,
-    onSecondary = ChronaColors.PaperDark,
-    background = ChronaColors.PaperDark,
-    onBackground = ChronaColors.InkDark,
-    surface = ChronaColors.PaperDark,
-    onSurface = ChronaColors.InkDark,
-    surfaceVariant = ChronaColors.PaperShadedDark,
-    onSurfaceVariant = ChronaColors.InkMutedDark,
-    outline = ChronaColors.OutlineDark,
-    error = Color(0xFFE29191),
-    onError = ChronaColors.PaperDark,
-)
-
-/** Paper-like tokens that Material's colour scheme has no slot for. */
-data class PaperTokens(
-    val paperRaised: Color,
-    val cork: Color,
+/**
+ * Tokens Material's colour scheme has no slot for: the glass surfaces, the warm accent and the
+ * ambient glow used by floating controls.
+ */
+data class ChronaTokens(
+    /** Raised graphite surface for cards. */
+    val surfaceRaised: Color,
+    /** Translucent surface for floating controls. */
+    val glass: Color,
+    /** Opaque variant, for panels that sit over scrolling content. */
+    val glassStrong: Color,
+    /** Hairline border that separates a floating control from what is behind it. */
+    val glassBorder: Color,
+    /** The single warm accent. */
+    val accent: Color,
+    /** Accent at full strength, for text and icons on a dark ground. */
+    val accentBright: Color,
+    /** Restrained halo behind the accent, used only while listening. */
+    val glow: Color,
+    val pin: Color,
     val thread: Color,
+    val cork: Color,
 )
 
-val LocalPaperTokens = staticCompositionLocalOf {
-    PaperTokens(paperRaised = LightColors.surface, cork = LightColors.primary, thread = ChronaColors.Thread)
-}
+private val ChronaTokensValue = ChronaTokens(
+    surfaceRaised = ChronaColors.PaperRaised,
+    glass = ChronaColors.Glass,
+    glassStrong = ChronaColors.GlassStrong,
+    glassBorder = ChronaColors.GlassBorder,
+    accent = ChronaColors.Amber,
+    accentBright = ChronaColors.AmberBright,
+    glow = ChronaColors.Amber,
+    pin = ChronaColors.Amber,
+    thread = ChronaColors.Thread,
+    cork = ChronaColors.Cork,
+)
+
+val LocalChronaTokens = staticCompositionLocalOf { ChronaTokensValue }
 
 object ChronaTheme {
-    val paper: PaperTokens
-        @Composable @ReadOnlyComposable get() = LocalPaperTokens.current
+    val tokens: ChronaTokens
+        @Composable @ReadOnlyComposable get() = LocalChronaTokens.current
 }
 
 @Composable
 fun ChronaTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (darkTheme) DarkColors else LightColors
-    val paperTokens = if (darkTheme) {
-        PaperTokens(
-            paperRaised = ChronaColors.PaperRaisedDark,
-            cork = ChronaColors.CorkDark,
-            thread = ChronaColors.Thread,
-        )
-    } else {
-        PaperTokens(
-            paperRaised = ChronaColors.PaperRaised,
-            cork = ChronaColors.Cork,
-            thread = ChronaColors.Thread,
-        )
-    }
-
     val view = LocalView.current
     if (!view.isInEditMode) {
         val context = LocalContext.current
         SideEffect {
             val window = (context as? Activity)?.window ?: return@SideEffect
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            // The app is dark in every system mode, so the system bars follow suit.
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
         }
     }
 
-    CompositionLocalProvider(LocalPaperTokens provides paperTokens) {
+    CompositionLocalProvider(LocalChronaTokens provides ChronaTokensValue) {
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = ChronaColorScheme,
             typography = ChronaTypography,
             content = content,
         )

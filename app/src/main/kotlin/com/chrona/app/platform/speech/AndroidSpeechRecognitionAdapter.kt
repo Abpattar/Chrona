@@ -48,6 +48,14 @@ class AndroidSpeechRecognitionAdapter(
 
     private val appContext: Context = context.applicationContext
 
+    /**
+     * The recogniser of the running session, so [stop] can end it politely.
+     *
+     * Written only from the main thread, which is the thread `listen` runs on and the thread
+     * Compose calls this from, so no synchronisation is needed.
+     */
+    private var activeRecognizer: SpeechRecognizer? = null
+
     override fun availability(): SpeechAvailability = when {
         !onDeviceRecognitionAvailable() -> SpeechAvailability.OnDeviceUnavailable
         !hasMicrophonePermission() -> SpeechAvailability.PermissionRequired
@@ -123,11 +131,13 @@ class AndroidSpeechRecognitionAdapter(
         }
 
         recognizer.setRecognitionListener(listener)
+        activeRecognizer = recognizer
         recognizer.startListening(intent)
 
         awaitClose {
             if (released) return@awaitClose
             released = true
+            activeRecognizer = null
             // Cancel first so a live session stops recording, then destroy to release the
             // platform service. Both are guarded: the session may already have ended, and a
             // recogniser must never be destroyed twice.
@@ -135,6 +145,17 @@ class AndroidSpeechRecognitionAdapter(
             runCatching { recognizer.destroy() }
         }
     }.flowOn(Dispatchers.Main.immediate)
+
+    /**
+     * Ends the running session without throwing away its transcript.
+     *
+     * `stopListening` asks the platform for the result it has so far, which is what a
+     * press-and-hold release needs; cancelling the flow instead would discard it.
+     */
+    override fun stop() {
+        val recognizer = activeRecognizer ?: return
+        runCatching { recognizer.stopListening() }
+    }
 
     private fun onDeviceRecognitionAvailable(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

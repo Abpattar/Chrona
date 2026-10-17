@@ -31,95 +31,118 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * Every state the capture flow can be in (DATA_MODEL_AND_INTERFACES.md §"Voice states are
- * explicit").
+ * Every state the capture flow can be in.
  *
- * The permission and platform states are named, not folded into a generic error, because each
- * one has a different honest answer: [RequestingPermission] asks, [Unavailable] and [Failed]
- * point at typing, and only [Review] can reach storage.
+ * The permission and platform states are named, not folded into a generic error, because each one
+ * has a different honest answer: [RequestingPermission] asks, [Unavailable] and [Failed] point at
+ * typing, and only [Clarify] can reach storage.
  */
 sealed interface VoiceUiState {
 
-    /** No capture sheet. Reached by closing it or by saving. */
-    data object Closed : VoiceUiState
-
-    /** The sheet is open and nothing has started. The microphone button is visible. */
+    /** No capture in progress. Reached by dismissing the panel or after a confirmation. */
     data object Idle : VoiceUiState
 
     /** Waiting for the user's answer to the system permission dialog. */
     data object RequestingPermission : VoiceUiState
 
-    /** The recognizer is armed. [partialText] is interim feedback only. */
+    /** The recogniser is armed. [partialText] is interim feedback only. */
     data class Listening(val partialText: String? = null) : VoiceUiState
 
     /**
-     * The transcript was understood and is waiting for confirmation.
+     * The transcript is understood and the tasks are being written.
      *
-     * [prompt] is non-null while one question is unanswered; answering it replaces [draft] with
-     * the chosen option and clears the prompt.
+     * Its own state, not a blank screen: cloud understanding is a network round trip, and the
+     * user has to be able to see that the whole utterance is being worked on.
      */
-    data class Review(
+    data class Interpreting(val transcript: String) : VoiceUiState
+
+    /**
+     * One field in the utterance is genuinely ambiguous, so one task waits for a decision.
+     *
+     * Nothing else blocks: this state exists for the question the parser could not answer on the
+     * user's behalf, never as a confirmation step before every task is stored.
+     */
+    data class Clarify(
         val transcript: String,
         val draft: TaskIntentDraft,
-        val prompt: ClarificationPrompt?,
+        val question: String,
+        val options: List<ClarificationOption>,
         val title: String,
         val durationMinutes: String,
         val dateText: String,
         val problems: List<String> = emptyList(),
     ) : VoiceUiState {
 
-        /** True when saving should be offered for the text currently in the fields. */
-        val canSave: Boolean get() = title.isNotBlank() && problems.isEmpty()
+        /** True when the text currently in the fields is enough to create the task. */
+        val canCreate: Boolean get() = title.isNotBlank() && problems.isEmpty()
     }
+
+    /**
+     * What was stored, one entry per task.
+     *
+     * A single utterance can produce several tasks, and every one of them appears here, because
+     * an extra task that was created quietly is a task the user cannot find later.
+     */
+    data class Created(
+        val tasks: List<Task>,
+        /** Drafts that could not be stored, in plain language. Empty on a clean capture. */
+        val problems: List<String> = emptyList(),
+    ) : VoiceUiState
 
     /**
      * This phone cannot listen, or the user declined.
      *
-     * Not a dead end: the same screen still opens the typed editor.
+     * Not a dead end: typing remains available.
      */
     data class Unavailable(val message: String) : VoiceUiState
 
     /** A session failed. [canRetry] is false when retrying would fail the same way. */
     data class Failed(val message: String, val canRetry: Boolean = true) : VoiceUiState
-
-    data object Cancelled : VoiceUiState
-
-    data class Saved(val title: String) : VoiceUiState
 }
 
 /**
- * Drives one explicit tap-to-speak capture (CH-PLAT-001, CH-PARSE-001).
+ * Drives one explicit press-to-speak capture.
  *
  * It owns the state machine and nothing else: no scheduling rules, no storage rules, no
- * recogniser. Every collaborator is injected, so the whole flow is exercised in JVM tests with
- * a fake adapter and a fixed clock.
+ * recogniser. Every collaborator is injected, so the whole flow is exercised in JVM tests with a
+ * fake adapter and a fixed clock.
  *
- * Tapping the microphone is the only way in (MODULE_DEPENDENCY_MAP rule 8); nothing here starts
- * listening on its own, and leaving the screen or clearing the ViewModel cancels the session,
- * which releases the platform recogniser.
+ * The flow is voice-first and low-friction: hold the microphone, speak, release, and the tasks
+ * are stored. Two rules are structural rather than documented:
+ *
+ * - **Nothing is asked twice.** A transcript is stored straight away; the only screen between
+ *   speech and storage is [VoiceUiState.Clarify], reached only when the parser genuinely cannot
+ *   choose between two readings of a field.
+ * - **Nothing is dropped.** Every draft the parser returns becomes its own record, and every
+ *   record is reported back in [VoiceUiState.Created].
  */
 class VoiceCaptureViewModel(
     private val speech: SpeechRecognitionAdapter,
     private val parser: TaskUnderstandingProvider,
-    private val createTaskFromIntent: suspend (TaskIntentDraft) -> Outcome<Task>,
+    private val createTasksFromIntents: suspend (List<TaskIntentDraft>) -> List<Outcome<Task>>,
     private val timeSource: TimeSource,
     private val zoneId: ZoneId,
     private val localeTag: String,
     private val parsePreferences: ParsePreferences = ParsePreferences(),
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow<VoiceUiState>(VoiceUiState.Closed)
+    private val _state = MutableStateFlow<VoiceUiState>(VoiceUiState.Idle)
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
 
     private var session: Job? = null
 
-    /** Opens the capture sheet. The only entry point into the voice flow. */
-    fun open() {
-        _state.value = VoiceUiState.Idle
-    }
-
-    /** Called by the microphone button. Checks the platform before touching the recogniser. */
-    fun start() {
+    /**
+     * Opened when the microphone is pressed.
+     *
+     * Re-entrant by construction: a press that arrives while a session is already running, or
+     * while the previous transcript is still being stored, is ignored rather than starting a
+     * second one. That is what stops a held or repeated press from creating duplicate tasks.
+     */
+    fun pressToListen() {
+        if (_state.value is VoiceUiState.Listening || _state.value is VoiceUiState.RequestingPermission) return
+        if (_state.value is VoiceUiState.Interpreting) return
+        session?.cancel()
+        session = null
         when (speech.availability()) {
             SpeechAvailability.Available -> listen()
             SpeechAvailability.PermissionRequired -> _state.value = VoiceUiState.RequestingPermission
@@ -127,6 +150,18 @@ class VoiceCaptureViewModel(
                 "This phone has no on-device speech recognition. Typing works exactly the same way.",
             )
         }
+    }
+
+    /**
+     * Opened when the microphone is released.
+     *
+     * The recogniser is asked to stop rather than cancelled, so the platform still delivers the
+     * transcript it has assembled so far. If it has heard nothing, the session ends with nothing
+     * and the microphone simply returns to idle — that is not an error worth a message.
+     */
+    fun release() {
+        if (_state.value !is VoiceUiState.Listening) return
+        speech.stop()
     }
 
     /**
@@ -144,57 +179,45 @@ class VoiceCaptureViewModel(
         }
     }
 
-    /** Stops listening and returns to the idle state. The recogniser is released. */
-    fun cancel() {
-        session?.cancel()
-        session = null
-        _state.value = VoiceUiState.Cancelled
-    }
-
-    /** Tries the same request again after a recoverable failure. */
-    fun retry() = start()
-
-    /** Back to the start of the sheet, keeping the typed fallback available. */
-    fun reset() {
+    /** Returns to the microphone without a pending decision, cancelling any live session. */
+    fun dismiss() {
         session?.cancel()
         session = null
         _state.value = VoiceUiState.Idle
     }
 
-    /** Closes the sheet. Any live session is cancelled, which releases the recogniser. */
-    fun close() {
-        session?.cancel()
-        session = null
-        _state.value = VoiceUiState.Closed
-    }
+    /** Tries the same request again after a recoverable failure. */
+    fun retry() = pressToListen()
 
-    /** Accepts one offered answer. The patch replaces the draft outright. */
+    /**
+     * Accepts one offered answer. An option carries the whole draft it stands for, so choosing
+     * one stores that exact interpretation rather than a re-parse of the same words.
+     */
     fun answer(option: ClarificationOption) {
-        val current = _state.value as? VoiceUiState.Review ?: return
-        _state.value = current.withDraft(option.patch, prompt = null, problems = emptyList())
+        if (_state.value !is VoiceUiState.Clarify) return
+        viewModelScope.launch { store(listOf(option.patch)) }
     }
 
-    /** Records a corrected field from the review screen. */
+    /** Records a corrected field while a question is outstanding. */
     fun editTitle(value: String) = edit { it.copy(title = value) }
 
     fun editDurationMinutes(value: String) = edit { it.copy(durationMinutes = value) }
 
     fun editDate(value: String) = edit { it.copy(dateText = value) }
 
-    private fun edit(change: (VoiceUiState.Review) -> VoiceUiState.Review) {
-        _state.update { current -> if (current is VoiceUiState.Review) change(current) else current }
+    private fun edit(change: (VoiceUiState.Clarify) -> VoiceUiState.Clarify) {
+        _state.update { current -> if (current is VoiceUiState.Clarify) change(current) else current }
     }
 
     /**
-     * Saves the reviewed draft.
+     * Creates the task behind an outstanding question, from the fields as they now read.
      *
-     * The draft is rebuilt from the fields the user can correct, so what is stored is what is
-     * on screen. A validation failure keeps the sheet open with the reasons as plain text
-     * instead of discarding the transcript.
+     * The draft is rebuilt from those fields, so what is stored is what is on screen. A field the
+     * user corrected replaces the parser's assumption about it instead of contradicting it.
      */
-    fun confirm() {
-        val current = _state.value as? VoiceUiState.Review ?: return
-        if (!current.canSave) return
+    fun create() {
+        val current = _state.value as? VoiceUiState.Clarify ?: return
+        if (!current.canCreate) return
 
         val duration = current.durationMinutes.trim().takeIf { it.isNotEmpty() }?.toLongOrNull()
         if (current.durationMinutes.isNotBlank() && duration == null) {
@@ -209,8 +232,6 @@ class VoiceCaptureViewModel(
             return
         }
 
-        // A corrected field replaces the parser's assumption about it rather than contradicting
-        // it, so what the task records is exactly what the user agreed to.
         val durationChanged = duration != current.draft.estimatedDuration?.toMinutes()
         val dateChanged = date != current.draft.requestedDate
         val assumptions = buildList {
@@ -228,42 +249,59 @@ class VoiceCaptureViewModel(
             }
         }
 
-        val draft = current.draft.copy(
-            title = current.title.trim(),
-            estimatedDuration = duration?.let { java.time.Duration.ofMinutes(it) },
-            requestedDate = date,
-            assumptions = assumptions,
-        )
-
         viewModelScope.launch {
-            when (val result = createTaskFromIntent(draft)) {
-                is Outcome.Success -> _state.value = VoiceUiState.Saved(result.value.title)
-                is Outcome.Failed -> _state.value = current.copy(problems = describe(result.failure))
-            }
+            store(
+                listOf(
+                    current.draft.copy(
+                        title = current.title.trim(),
+                        estimatedDuration = duration?.let { java.time.Duration.ofMinutes(it) },
+                        requestedDate = date,
+                        assumptions = assumptions,
+                    ),
+                ),
+            )
         }
     }
 
     private fun listen() {
-        session?.cancel()
         _state.value = VoiceUiState.Listening()
         session = viewModelScope.launch {
             speech.listen(SpeechRequest(localeTag = localeTag)).collect { event ->
                 when (event) {
-                    SpeechEvent.Ready -> _state.value = VoiceUiState.Listening()
-                    is SpeechEvent.Partial -> _state.value = VoiceUiState.Listening(event.text)
-                    is SpeechEvent.Final -> interpret(event.text)
-                    is SpeechEvent.Failed -> _state.value = VoiceUiState.Failed(
-                        message = event.reason.guidance,
-                        canRetry = event.reason != SpeechError.INSUFFICIENT_PERMISSIONS,
-                    )
+                    SpeechEvent.Ready -> if (_state.value is VoiceUiState.Listening) {
+                        _state.value = VoiceUiState.Listening()
+                    }
+
+                    is SpeechEvent.Partial -> if (_state.value is VoiceUiState.Listening) {
+                        _state.value = VoiceUiState.Listening(event.text)
+                    }
+
+                    is SpeechEvent.Final -> {
+                        // Stop collecting before understanding, so a second final result cannot
+                        // start a second interpretation of the same utterance.
+                        session?.cancel()
+                        session = null
+                        viewModelScope.launch { interpret(event.text) }
+                    }
+
+                    is SpeechEvent.Failed -> {
+                        session = null
+                        _state.value = VoiceUiState.Failed(
+                            message = event.reason.guidance,
+                            canRetry = event.reason != SpeechError.INSUFFICIENT_PERMISSIONS,
+                        )
+                    }
                 }
             }
+            // The session ended without a transcript: a release too early, or a recogniser that
+            // simply stopped. Nothing was heard, so there is nothing to report.
+            if (_state.value is VoiceUiState.Listening) _state.value = VoiceUiState.Idle
         }
     }
 
-    /** Parses a transcript and moves to review, clarification or a plain-language refusal. */
+    /** Understands a transcript and stores what it found. */
     private suspend fun interpret(transcript: String) {
-        _state.value = VoiceUiState.Listening(transcript)
+        _state.value = VoiceUiState.Interpreting(transcript)
         val reference = timeSource.now().atZone(zoneId)
         val request = TaskUnderstandingRequest(
             text = transcript,
@@ -272,11 +310,10 @@ class VoiceCaptureViewModel(
             preferences = parsePreferences,
         )
         when (val result = parser.understand(request)) {
-            is TaskUnderstandingResult.Parsed ->
-                _state.value = result.draft.toReview(transcript, prompt = null)
+            is TaskUnderstandingResult.Parsed -> store(result.drafts)
 
             is TaskUnderstandingResult.NeedsClarification -> _state.value =
-                result.prompt.base.toReview(transcript, result.prompt)
+                result.prompt.toClarify(transcript)
 
             is TaskUnderstandingResult.Unsupported -> _state.value = VoiceUiState.Failed(
                 message = result.reason.message,
@@ -285,25 +322,44 @@ class VoiceCaptureViewModel(
         }
     }
 
-    private fun VoiceUiState.Review.withDraft(
-        draft: TaskIntentDraft,
-        prompt: ClarificationPrompt?,
-        problems: List<String>,
-    ): VoiceUiState.Review = draft.toReview(transcript, prompt, problems)
+    /**
+     * Writes the drafts and reports exactly what happened.
+     *
+     * Every draft is attempted, so one draft the domain rejects cannot swallow the others, and
+     * nothing is stored behind the user's back: the result names each task that now exists.
+     */
+    private suspend fun store(drafts: List<TaskIntentDraft>) {
+        if (drafts.isEmpty()) {
+            _state.value = VoiceUiState.Failed(
+                message = "Chrona did not hear a task in that. Hold the microphone and try again.",
+                canRetry = true,
+            )
+            return
+        }
+        val results = createTasksFromIntents(drafts)
+        val created = results.filterIsInstance<Outcome.Success<Task>>().map { it.value }
+        val problems = results.filterIsInstance<Outcome.Failed>()
+            .flatMap { describe(it.failure) }
+        _state.value = if (created.isEmpty()) {
+            VoiceUiState.Failed(
+                message = problems.firstOrNull() ?: "Chrona could not save that. Try again.",
+                canRetry = true,
+            )
+        } else {
+            VoiceUiState.Created(created, problems)
+        }
+    }
 
-    private fun TaskIntentDraft.toReview(
-        transcript: String,
-        prompt: ClarificationPrompt?,
-        problems: List<String> = emptyList(),
-    ): VoiceUiState.Review = VoiceUiState.Review(
-        transcript = transcript,
-        draft = this,
-        prompt = prompt,
-        title = title,
-        durationMinutes = estimatedDuration?.toMinutes()?.toString().orEmpty(),
-        dateText = requestedDate?.toString().orEmpty(),
-        problems = problems,
-    )
+    private fun ClarificationPrompt.toClarify(transcript: String): VoiceUiState.Clarify =
+        VoiceUiState.Clarify(
+            transcript = transcript,
+            draft = base,
+            question = question,
+            options = options,
+            title = base.title,
+            durationMinutes = base.estimatedDuration?.toMinutes()?.toString().orEmpty(),
+            dateText = base.requestedDate?.toString().orEmpty(),
+        )
 
     /**
      * Explicit collaborators, mirroring `TodayViewModel.Factory`, so the state machine can be
@@ -312,7 +368,7 @@ class VoiceCaptureViewModel(
     class Factory(
         private val speech: SpeechRecognitionAdapter,
         private val parser: TaskUnderstandingProvider,
-        private val createTaskFromIntent: suspend (TaskIntentDraft) -> Outcome<Task>,
+        private val createTasksFromIntents: suspend (List<TaskIntentDraft>) -> List<Outcome<Task>>,
         private val timeSource: TimeSource,
         private val zoneId: ZoneId,
         private val localeTag: String,
@@ -322,7 +378,7 @@ class VoiceCaptureViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T = VoiceCaptureViewModel(
             speech = speech,
             parser = parser,
-            createTaskFromIntent = createTaskFromIntent,
+            createTasksFromIntents = createTasksFromIntents,
             timeSource = timeSource,
             zoneId = zoneId,
             localeTag = localeTag,

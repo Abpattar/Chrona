@@ -2,17 +2,16 @@ package com.chrona.app.ui.today
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PostAdd
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +33,6 @@ import com.chrona.app.domain.model.TaskId
 import com.chrona.app.domain.model.TaskStatus
 import com.chrona.app.domain.task.label
 import com.chrona.app.ui.design.ChronaTheme
-import com.chrona.app.ui.design.ChronaColors
 import com.chrona.app.ui.design.EmptyState
 import com.chrona.app.ui.design.PinnedNoteCard
 import com.chrona.app.ui.design.priorityStyleOf
@@ -43,9 +41,12 @@ import com.chrona.app.ui.taskeditor.TaskEditorSheet
 /**
  * Today — "What should I do next?".
  *
- * Shows the next action, the rest of the day, and manual fixed commitments. Every row carries
- * an explicit status label and an explicit priority label, so nothing depends on colour alone
- * (UI-002, ACC-001).
+ * Voice is not offered here: the microphone is on every screen, in the same place, because the
+ * fastest way to add a task should not depend on which tab the user happens to be on. Typing
+ * stays available through exactly one control.
+ *
+ * Every row carries an explicit status label and an explicit priority label, so nothing depends
+ * on colour alone (UI-002, ACC-001).
  */
 @Composable
 fun TodayScreen(
@@ -56,7 +57,6 @@ fun TodayScreen(
     onPostpone: (TaskId) -> Unit,
     onEditorOpen: () -> Unit,
     onEditorClose: () -> Unit,
-    onSpeak: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenQuestCards: () -> Unit = {},
 ) {
@@ -67,21 +67,33 @@ fun TodayScreen(
     ) {
         ScreenHeader(
             title = stringResource(R.string.nav_today),
-            subtitle = state.nextTask?.let { "Next: ${it.title}" } ?: "Nothing queued yet",
+            // Never the same words as the empty state below, and always pointing at the way a
+            // task actually gets added.
+            subtitle = state.nextTask?.let { "Next: ${it.title}" } ?: "Hold the microphone to add one",
+            trailing = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = onOpenQuestCards,
+                        modifier = Modifier.semantics { testTag = "today_open_quest_cards" },
+                    ) { Text("Quest Cards") }
+                    // The one text-entry control, kept in the header where it cannot be pushed
+                    // out of the screen by a long list.
+                    TextButton(
+                        onClick = onEditorOpen,
+                        modifier = Modifier.semantics { testTag = "today_add_task" },
+                    ) {
+                        Icon(Icons.Outlined.Edit, contentDescription = null)
+                        Text("  Type a task")
+                    }
+                }
+            },
         )
-        TextButton(
-            onClick = onOpenQuestCards,
-            modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .semantics { testTag = "today_open_quest_cards" },
-        ) { Text("Quest Cards") }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        HorizontalDivider(color = ChronaTheme.tokens.glassBorder)
 
         if (state.isEditorOpen) {
             TaskEditorSheet(
                 onSubmit = onCreate,
                 onDismiss = onEditorClose,
-                onSpeak = onSpeak,
                 initialTitle = state.editorPrefill,
             )
             return@Column
@@ -90,22 +102,15 @@ fun TodayScreen(
         if (state.tasks.isEmpty() && state.commitments.isEmpty()) {
             EmptyState(
                 title = "Nothing queued yet",
-                message = "Add a task and it is stored on this device straight away — " +
-                    "no account, no setup.",
+                message = "Hold the microphone and say what needs doing. Everything stays on this device.",
                 icon = Icons.Outlined.PostAdd,
-                action = {
-                    TextButton(
-                        onClick = onEditorOpen,
-                        modifier = Modifier.semantics { testTag = "today_add_task_cta" },
-                    ) {
-                        Text("Add your first task")
-                    }
-                },
             )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                // Bottom padding clears the microphone and the navigation bar, so the last card
+                // is never trapped underneath them.
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 state.message?.let { message ->
@@ -139,16 +144,6 @@ fun TodayScreen(
                 }
             }
         }
-
-        ExtendedFloatingActionButton(
-            onClick = onEditorOpen,
-            icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
-            text = { Text("New task") },
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.End)
-                .semantics { testTag = "today_add_task" },
-        )
     }
 }
 
@@ -156,7 +151,7 @@ fun TodayScreen(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 8.dp),
     )
@@ -164,7 +159,7 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun CommitmentRow(title: String, timeRange: String) {
-    PinnedNoteCard(modifier = Modifier.fillMaxWidth(), accent = ChronaColors.Thread) {
+    PinnedNoteCard(modifier = Modifier.fillMaxWidth(), accent = ChronaTheme.tokens.thread) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         Text(
             timeRange,
@@ -215,7 +210,7 @@ private fun TaskNoteCard(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (task.status != TaskStatus.IN_PROGRESS && task.status.isOpen) {
-                TextButton(onClick = onStart, modifier = Modifier.width(96.dp)) { Text("Start") }
+                TextButton(onClick = onStart) { Text("Start") }
             }
             if (task.status.isOpen) {
                 TextButton(
@@ -228,26 +223,36 @@ private fun TaskNoteCard(
     }
 }
 
+/** Screen title with an optional trailing action, so the header stays one element. */
 @Composable
 internal fun ScreenHeader(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    PinnedNoteCard(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        if (subtitle != null) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
+        trailing?.invoke()
     }
 }
 
@@ -275,7 +280,6 @@ private fun TodayScreenPreview() {
             onPostpone = {},
             onEditorOpen = {},
             onEditorClose = {},
-            onSpeak = {},
         )
     }
 }

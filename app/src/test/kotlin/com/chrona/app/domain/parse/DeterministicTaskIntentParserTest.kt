@@ -371,7 +371,7 @@ class DeterministicTaskIntentParserTest {
     fun `a different reference date changes only the resolved dates`() {
         val nextWeek = ZonedDateTime.of(2026, 10, 22, 9, 0, 0, 0, ZONE)
         val result = runBlocking { parser.understand(request("water the plants on monday", nextWeek)) }
-        val draft = (result as TaskUnderstandingResult.Parsed).draft
+        val draft = (result as TaskUnderstandingResult.Parsed).drafts.single()
         assertEquals(LocalDate.of(2026, 10, 26), draft.requestedDate)
     }
 
@@ -420,11 +420,12 @@ class DeterministicTaskIntentParserTest {
             val result = understand(words)
             when (result) {
                 is TaskUnderstandingResult.Parsed -> {
-                    assertTrue("\"$words\" produced an empty title", result.draft.title.isNotBlank())
-                    val problems = TaskIntentDraftValidator.validate(result.draft, CREATED_AT)
+                    val draft = result.drafts.single()
+                    assertTrue("\"$words\" produced an empty title", draft.title.isNotBlank())
+                    val problems = TaskIntentDraftValidator.validate(draft, CREATED_AT)
                     assertTrue("\"$words\" produced an invalid draft: $problems", problems.isEmpty())
-                    assertTrue(result.draft.confidence in 0f..1f)
-                    assertTrue(result.draft.assumptions.size <= MAX_ASSUMPTIONS)
+                    assertTrue(draft.confidence in 0f..1f)
+                    assertTrue(draft.assumptions.size <= MAX_ASSUMPTIONS)
                 }
 
                 is TaskUnderstandingResult.NeedsClarification -> {
@@ -467,7 +468,7 @@ class DeterministicTaskIntentParserTest {
     private fun parsed(text: String, preferences: ParsePreferences = ParsePreferences()): TaskIntentDraft {
         val result = understand(text, preferences = preferences)
         assertTrue("\"$text\" was not parsed: $result", result is TaskUnderstandingResult.Parsed)
-        return (result as TaskUnderstandingResult.Parsed).draft
+        return (result as TaskUnderstandingResult.Parsed).drafts.single()
     }
 
     private fun clarify(text: String): ClarificationPrompt {

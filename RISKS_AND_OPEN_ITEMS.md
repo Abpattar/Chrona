@@ -115,3 +115,27 @@
   opens a socket; when on, only the phrase (≤500 chars), the reference time and the zone are sent.
   This is the one network path in an otherwise local-first app and is recorded as a coordinated
   change (ADR-037); the README privacy section was updated to say so.
+
+### Post-P06 — Voice-first task creation (multi-task utterances)
+
+- **OPEN-020: no provider decomposes one utterance into several tasks (high).** A single
+  recording can only ever produce **one** task today. `DeterministicTaskIntentParser` reads one
+  clause, and the Edge Function returns one draft, so "I have a function on October 25th, and I
+  need to start studying in two hours" becomes a single task with a merged title. The plumbing
+  for the fix is in place and exercised by tests, but the split itself does not exist:
+  - `TaskUnderstandingResult.Parsed` carries `List<TaskIntentDraft>`, so "N tasks" is the type,
+    not a special case, and no caller can silently drop the extras.
+  - `CreateTaskFromIntentUseCase.createAll` writes one independent record per draft and reports
+    each outcome; the capture flow stores every task immediately and names them all back to the
+    user in `VoiceUiState.Created`.
+  - `TaskIntentWire.decodeDrafts` reads a `drafts: [...]` envelope (and still accepts the
+    deployed function's single `draft`), refusing the whole response if any task in it is
+    unusable.
+  - **Remaining work:** teach `supabase/functions/understand-task` to emit `drafts` with one
+    entry per independent task (prompt + schema change + gateway validation), and teach the
+    deterministic parser to split coordinated utterances ("X on the 25th, and Y in two hours").
+    Until then the multi-task path is wired but unreachable from real speech.
+- **Per-task ambiguity is single-task only.** `NeedsClarification` carries one prompt for one
+  draft, so the capture flow can hold back at most one task while asking. When decomposition
+  lands, ambiguity has to become per-task so a clear task in the same utterance is stored
+  immediately rather than waiting on an unrelated question.

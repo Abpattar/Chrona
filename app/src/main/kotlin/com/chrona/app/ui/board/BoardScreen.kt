@@ -418,7 +418,7 @@ private fun BoardNoteView(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Pin(color = if (isSelected) ChronaColors.Thread else ChronaTheme.paper.cork)
+            Pin(color = if (isSelected) ChronaColors.Thread else ChronaTheme.tokens.pin)
             Text(
                 text = task.title,
                 style = MaterialTheme.typography.bodyMedium,

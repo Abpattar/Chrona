@@ -31,6 +31,15 @@ interface SpeechRecognitionAdapter {
      * so a user can speak, cancel and speak again.
      */
     fun listen(request: SpeechRequest): Flow<SpeechEvent>
+
+    /**
+     * Ends the running session at the user's request, keeping what has been heard.
+     *
+     * Distinct from cancelling the collector, which discards the session: a press-and-hold
+     * interaction needs the transcript the recogniser has already assembled, so it must be asked
+     * to finish rather than cancelled. A no-op when no session is running.
+     */
+    fun stop()
 }
 
 /** What the platform reports before Chrona asks to listen. */
