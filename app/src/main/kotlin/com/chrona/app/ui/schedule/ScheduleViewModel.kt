@@ -61,6 +61,18 @@ class ScheduleViewModel(
         refresh()
     }
 
+    private var hasLoadedOnce = false
+
+    /**
+     * Re-plans when the surface is shown again.
+     *
+     * The view model outlives the navigation to another destination, so a plan made before a
+     * task was created or completed elsewhere would otherwise be offered as if it were current.
+     */
+    fun refreshOnEntry() {
+        if (hasLoadedOnce) refresh() else hasLoadedOnce = true
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }

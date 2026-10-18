@@ -1,6 +1,7 @@
 package com.chrona.app.ui.schedule
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,6 +34,8 @@ fun ScheduleRoute(container: AppContainer) {
     )
 
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { viewModel.refreshOnEntry() }
 
     ScheduleScreen(
         state = state,

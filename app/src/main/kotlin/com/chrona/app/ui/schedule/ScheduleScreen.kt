@@ -90,7 +90,9 @@ fun ScheduleScreen(
                 modifier = Modifier.padding(16.dp),
             )
 
-            proposal == null -> EmptyState(
+            // An empty day needs saying out loud. The engine answers with an empty proposal
+            // rather than nothing, so "nothing to plan" is judged by the world, not the result.
+            proposal == null || state.titles.isEmpty() -> EmptyState(
                 title = "No day planned yet",
                 message = "Add tasks and fixed commitments, then Chrona will propose a plan you can review.",
                 icon = Icons.Outlined.CalendarMonth,

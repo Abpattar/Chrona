@@ -55,10 +55,34 @@ class BoardSliceTest {
     @After
     fun cleanUp() {
         runBlocking {
+            // Relationships outlive a task deletion unless they are removed explicitly, and a
+            // leaked link would make the next test's count wrong.
+            relationships().forEach { container().relationshipRepository.delete(it.id) }
             val tasks = activeTasks() +
                 (container().taskRepository.list(TaskQuery.CLOSED) as Outcome.Success).value
             tasks.forEach { container().taskRepository.delete(it.id) }
         }
+    }
+
+    /**
+     * Drives the sheet's link editor: pick the target task, choose `Depends on`, confirm.
+     *
+     * The relation type is chosen rather than assumed — a link's meaning is explicit, and the
+     * sheet defaults to `Supports`, so leaving it untouched would assert the wrong thing.
+     */
+    private fun link(source: TaskId, target: TaskId) {
+        composeRule.onNodeWithTag("board_add_link_target").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("board_add_link_target_item_${target.value}").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("board_add_link_type").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("board_add_link_type_item_DEPENDS_ON").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("board_add_link_confirm").performClick()
+        composeRule.waitForIdle()
     }
 
     @Test
@@ -75,10 +99,8 @@ class BoardSliceTest {
 
         // Select the first note and link it to the second as a dependency.
         composeRule.onNodeWithTag("board_note_${first.value}").performClick()
-        composeRule.onNodeWithTag("board_add_link_target").performClick()
-        composeRule.onNodeWithText("Revise them").performClick()
-        composeRule.onNodeWithTag("board_add_link_confirm").performClick()
         composeRule.waitForIdle()
+        link(first, second)
 
         // The link is a real stored row between the two shared tasks.
         val stored = relationships().single()
@@ -104,10 +126,8 @@ class BoardSliceTest {
 
         // Link from the list alternative, which also runs through the selection panel.
         composeRule.onNodeWithTag("board_list_note_${first.value}").performClick()
-        composeRule.onNodeWithTag("board_add_link_target").performClick()
-        composeRule.onNodeWithText("Revise them").performClick()
-        composeRule.onNodeWithTag("board_add_link_confirm").performClick()
         composeRule.waitForIdle()
+        link(first, second)
 
         assertEquals(1, relationships().size)
     }
@@ -122,10 +142,8 @@ class BoardSliceTest {
         composeRule.onNodeWithTag("board_mode_list").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("board_list_note_${first.value}").performClick()
-        composeRule.onNodeWithTag("board_add_link_target").performClick()
-        composeRule.onNodeWithText("Revise them").performClick()
-        composeRule.onNodeWithTag("board_add_link_confirm").performClick()
         composeRule.waitForIdle()
+        link(first, second)
 
         val relationshipId = relationships().single().id.value
         composeRule.onNodeWithTag("board_link_$relationshipId").performClick()
@@ -144,6 +162,7 @@ class BoardSliceTest {
         composeRule.onNodeWithTag("board_note_${first.value}").assertIsDisplayed()
 
         runBlocking { container().taskRepository.delete(first) }
+
         composeRule.onNodeWithTag("board_refresh").performClick()
         composeRule.waitForIdle()
 
@@ -163,6 +182,12 @@ class BoardSliceTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("complete_${id.value}").performClick()
         composeRule.waitForIdle()
+        // Completion is written from a coroutine; wait for the row to land before the board is
+        // asked to read it, otherwise the assertion below is a race rather than a claim.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            (runBlocking { container().taskRepository.get(id) } as? Outcome.Success)
+                ?.value?.status == TaskStatus.COMPLETED
+        }
 
         composeRule.onNodeWithTag("nav_board").performClick()
         composeRule.waitForIdle()

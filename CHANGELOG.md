@@ -3,6 +3,51 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-18 — First run on real hardware (moto g54 5G, Android 15): three device-only defects fixed
+
+The instrumentation suite had compiled since P02 but had never been executed. With a physical
+`moto g54 5G` (Android 15, API 35) attached, `./gradlew :app:connectedDebugAndroidTest` ran it
+for the first time: **15 tests, 9 failed**. All nine are now fixed and the suite passes on that
+device. Nothing below is inferred — each defect was reproduced on the handset and re-measured
+after the fix.
+
+- Fixed (ui): `ui/board/BoardScreen.kt` — **the board could not be used at all on a phone.** The
+  root `Column` held the canvas with `fillMaxSize()`, so every sibling after it (the note/thread
+  selection panel, the link editor, the Refresh button) was measured at **0×0** and lay outside
+  the window. Measured on device: `board_selection_panel`, `board_add_link_target`,
+  `board_add_link_confirm` and `board_refresh` all reported `Rect(0,0,0,0)`. Notes could be seen
+  but never selected, so nothing could be linked. The canvas/list now lives in a
+  `Box(Modifier.weight(1f))`, note and thread details open as a `ModalBottomSheet` over the board
+  (the panel body scrolls), and Refresh moved into the header. After the fix the same probe reports
+  `selection_panel=Rect(40,1674,1040,2330)` on a 1080×2400 screen, and a link created through the
+  sheet is stored as a real `DEPENDS_ON` relationship.
+- Fixed (ui): `ui/board/BoardScreen.kt` — dropdown entries now carry per-item test tags
+  (`board_add_link_target_item_<id>`, `board_add_link_type_item_<TYPE>`). The same words appear on
+  the notes behind the sheet, so a menu entry could not be addressed unambiguously before.
+- Fixed (viewmodel): `ui/board/BoardViewModel.kt` + `ui/board/BoardRoute.kt`,
+  `ui/schedule/ScheduleViewModel.kt` + `ui/schedule/ScheduleRoute.kt` — both view models survive
+  navigation, so a task completed on Today stayed pinned on the board until Refresh, and a schedule
+  plan could be offered from a pre-change snapshot. Both now re-read on entry via
+  `refreshOnEntry()`, which no-ops on the first entry so `init` remains the single first load.
+- Fixed (ui): `ui/schedule/ScheduleScreen.kt` — "No day planned yet" was unreachable: the engine
+  always returns a proposal, so `proposal == null` held only before the first load. The empty state
+  is now judged by the world (`state.titles.isEmpty()`), which is what it always meant.
+- Tests: `BoardSliceTest` cleanup now deletes relationships as well as tasks (a leaked link made
+  the next test's count wrong), the link flow is driven through one helper that picks the target
+  *and* the relation type (the sheet defaults to `Supports`, so the previous `DEPENDS_ON`
+  assertion could never have held), and the completion assertion waits for the write instead of
+  racing it. `TaskLifecycleSliceTest` matches the printed priority/status labels as substrings, as
+  the card prints them on one line. `NavigationShellTest` scrolls the settings note into view and
+  asserts a real settings element instead of an empty state that never existed.
+- Measured (device, OPEN-007): on the moto g54 `hasSystemFeature(MICROPHONE)=true`,
+  `isRecognitionAvailable=true`, `isOnDeviceRecognitionAvailable=true`, and the app's own adapter
+  reports `Available` with `RECORD_AUDIO` granted — but a real session ends in
+  `ERROR_LANGUAGE_UNAVAILABLE`: the `en-US` on-device pack is not installed on this handset. A
+  press-and-hold in the app therefore ends in the designed plain-language failure with typing still
+  reachable. No language/offline support is assumed; voice stays optional.
+- Verification: `./gradlew :app:connectedDebugAndroidTest` → **15 tests, 0 failures** on
+  `moto g54 5G - 15`; `./scripts/verify.sh` → PASS (318 unit tests, lint clean).
+
 ## 2026-10-17 — Voice-first task creation (charcoal theme, persistent microphone, immediate storage)
 
 - Changed (design): `ui/design/Color.kt` + `Theme.kt` — one charcoal scheme with a warm amber accent, glass tokens (`ChronaTokens`: `glass`, `glassStrong`, `glassBorder`, `accent`, `glow`) replacing the light/dark paper pair; `ChronaTheme.paper` is now `ChronaTheme.tokens`. `PriorityStyle` tones retuned for the dark ground (neutral / amber / thread).

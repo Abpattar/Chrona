@@ -1,6 +1,7 @@
 package com.chrona.app.ui.board
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -29,6 +30,8 @@ fun BoardRoute(container: AppContainer) {
     )
 
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { viewModel.refreshOnEntry() }
 
     BoardScreen(
         state = state,

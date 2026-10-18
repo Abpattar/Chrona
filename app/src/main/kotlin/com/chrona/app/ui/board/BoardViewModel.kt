@@ -118,6 +118,18 @@ class BoardViewModel(
         refresh()
     }
 
+    private var hasLoadedOnce = false
+
+    /**
+     * Re-reads the shared records when the board is shown again.
+     *
+     * Navigation keeps this view model alive, so without this a task completed on Today would
+     * still be pinned here — two surfaces of the same records disagreeing.
+     */
+    fun refreshOnEntry() {
+        if (hasLoadedOnce) refresh() else hasLoadedOnce = true
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }

@@ -940,6 +940,76 @@ before any release claim about it.
 
 ---
 
+## Device verification on real hardware (moto g54 5G, Android 15)
+
+### What happened
+
+A physical `moto g54 5G` (Android 15, API 35) was attached over adb, which made the checks that
+have read "compiles but NOT RUN" since P02 executable. The suite ran for the first time and
+**9 of its 15 tests failed.** Every failure was a real defect or a stale expectation, not a
+flaky test; all are now fixed.
+
+### Commands actually executed
+
+- `ANDROID_SERIAL=ZD222DXHJK ./gradlew :app:connectedDebugAndroidTest` → first run **15 tests,
+  9 failed**; after the fixes **15 tests, 0 failures** on `moto g54 5G - 15`.
+- `./scripts/verify.sh` → PASS (318 unit tests, 0 failures; lint clean).
+- `adb shell pm grant com.chrona.app android.permission.RECORD_AUDIO` then a speech measurement
+  probe (temporary, removed afterwards) driving the app's own `AndroidSpeechRecognitionAdapter`.
+- Screenshots taken with `adb exec-out screencap` on every surface inspected (Today, editor,
+  Board canvas, board sheet, voice failure).
+
+### Defects found only on a device
+
+1. **The Board was unusable on a phone.** The canvas took `fillMaxSize()` inside the root
+   `Column`, so the selection panel, the link editor and Refresh were measured at **0×0**:
+   notes were visible but could not be opened, and no link could ever be created. Reproduced with
+   a bounds probe (`board_selection_panel=Rect(0,0,0,0)`), fixed by giving the canvas a
+   `weight(1f)` box and moving note/thread details into a `ModalBottomSheet`; after the fix the
+   same probe reports `Rect(40,1674,1040,2330)` and a created `DEPENDS_ON` link is stored.
+2. **Board and Schedule showed stale records on return.** Their view models are scoped to the
+   navigation entry, so `init` ran once: a task completed on Today stayed pinned on the Board
+   until the user pressed Refresh. Both now refresh on entry.
+3. **The Schedule empty state was unreachable** — the engine always returns a proposal, so
+   "No day planned yet" only existed in the moment before the first load. It is now driven by the
+   absence of tasks, which is what it always meant.
+4. Dropdown entries in the board sheet had no identity of their own, so a menu item could not be
+   addressed without ambiguity (the same words appear on the notes behind the sheet).
+
+### Tests corrected, not weakened
+
+- `BoardSliceTest` now deletes relationships in `@After` (a leaked link made the next test's count
+  wrong), drives the link flow through one helper that chooses the target **and** the relation
+  type (the sheet defaults to `Supports`, so the previous `DEPENDS_ON` assertion could never have
+  held), and waits for the completion write instead of racing it.
+- `TaskLifecycleSliceTest` matches the priority/status labels as substrings, because the note card
+  prints both on one line by design.
+- `NavigationShellTest` scrolls the settings privacy note into view, and asserts a real settings
+  element in place of an empty state ("Nothing to configure yet") that never existed in the app.
+
+### OPEN-007 measured on hardware
+
+`hasSystemFeature(MICROPHONE)=true`, `isRecognitionAvailable=true`,
+`isOnDeviceRecognitionAvailable=true`, and the app's own adapter reports `Available` with
+`RECORD_AUDIO` granted — but a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`: the `en-US`
+on-device language pack is not installed on this handset. A press-and-hold in the app therefore
+lands in the designed plain-language failure ("That did not work … Tap the microphone and try
+again") with typing still one tap away. Voice is optional and no language or offline support is
+assumed. **Installing the language pack and hearing a real utterance is still NOT MEASURED.**
+
+### Still not verified on a device
+
+- Notification posting, Quest Card actions and the overlay (OPEN-011).
+- Large-font reflow, TalkBack order and contrast on the board sheet and the voice panel.
+- A successful voice capture end to end (needs the language pack; see OPEN-007).
+
+### Exact next phase
+
+**P07 — Privacy, resilience and accessibility**, now with instrumentation evidence available on
+real hardware.
+
+---
+
 ## Phase status summary
 
 - [x] Source requirements PDF included unchanged.
@@ -950,7 +1020,8 @@ before any release claim about it.
 - [x] P01 — skeleton, pinned toolchain, navigation shell, theme, empty states (Ubuntu).
 - [x] P02 — Room schema v1, repositories, task lifecycle, Today list and task editor.
       End-to-end slice: typed task -> validate -> Room -> Today -> complete.
-      82 JVM/Room tests passing; instrumentation compiles but is NOT RUN.
+      82 JVM/Room tests passing; the instrumentation suite now RUNS on the attached moto g54
+      (see "Device verification on real hardware").
 - [ ] P01/P02 Windows clean-clone build/test/lint — BLOCKED (no Windows host available).
 - [x] API 36 emulator launch — RESOLVED (2026-10-17). `/dev/kvm` is accessible via a filesystem
       ACL (the user is still not in the `kvm` group), so the `chrona_api36` AVD boots
@@ -959,7 +1030,14 @@ before any release claim about it.
 - [x] P03 — tap-to-speak with an on-device-only recogniser, deterministic parser, review/
       correction and typed fallback. 70 new JVM/Robolectric tests (152 total). Device/on-device
       availability NOT RUN; voice kept optional.
-- [ ] P03/P06/P07 moto g54 (Android 15) checks — NOT RUN (no device attached).
+- [x] moto g54 (Android 15) attached — RESOLVED (2026-10-18). The instrumentation suite ran for the
+      first time on it (`connectedDebugAndroidTest`, 15 tests) and found **9 real defects**, all now
+      fixed and passing on the handset; the Board was unusable on a phone (its selection panel and
+      Refresh button measured 0x0) and Board/Schedule showed stale records on return. Speech
+      capability measured: recogniser present and on-device, but no `en-US` pack on this handset —
+      a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`. See "Device verification on real
+      hardware". Notification, Quest Card action and overlay runtime checks are still NOT RUN, and
+      a successful voice capture is still unmeasured (OPEN-007, OPEN-011).
 - [x] P04 — deterministic scheduler and recovery: preview-before-apply Schedule surface,
       transactional apply/undo over a new `schedule_revisions` table, v1→v2 migration.
       39 new JVM/Room tests (191 total). Device checks NOT RUN.

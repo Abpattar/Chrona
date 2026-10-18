@@ -10,14 +10,14 @@
 | OPEN-004 | required research method | supervisor before P08 | deterministic technical evaluation |
 | OPEN-005 | approval/ethics/consent requirements for participants | institution before recruitment | no participant study while unknown |
 | OPEN-006 | actual paper-board visual reference image | owner | written §6 in PDF only; image not separately included in current files |
-| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | **still OPEN** — moto g54 measurement NOT RUN (no device). Observed on the API 36 Google APIs emulator (2026-10-17): the on-device recogniser is advertised (`com.google.android.as` `AiAiSpeechRecognitionService`) but the `en-US` language pack is absent, so it returns `ERROR_LANGUAGE_UNAVAILABLE` and the sheet offers typing. No language/offline support is assumed; voice is optional and typing always works. Code is guarded to API 31+ and uses the on-device recogniser only |
+| OPEN-007 | on-device speech languages and offline availability | measure on moto g54 in P03 | **PARTLY CLOSED (2026-10-18) — measurement taken on the real handset.** On the moto g54 5G (Android 15, API 35): `hasSystemFeature(MICROPHONE)=true`, `isRecognitionAvailable=true`, `isOnDeviceRecognitionAvailable=true`, and the app's own `AndroidSpeechRecognitionAdapter` reports `Available` once `RECORD_AUDIO` is granted — but a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`, i.e. this handset has no `en-US` on-device pack. In the app a press-and-hold therefore lands in the plain-language failure state with typing one tap away (verified by screenshot). **Still open:** installing the language pack and hearing a real utterance end to end. No language/offline support is assumed; voice stays optional and typing always works. Code is guarded to API 31+ and uses the on-device recogniser only |
 | OPEN-008 | exact integrated toolchain matrix and stable patches | P01 agent | pins remain proposed until clean builds pass |
 | OPEN-009 | target SDK required by store on release date | re-check immediately before publishing | no store-compliance claim until checked |
 | OPEN-010 | independent DB encryption/backup requirements | P07 privacy review | app sandbox + intentional backup policy; no independent encryption claim |
 | OPEN-011 | actual overlay/background capability on moto g54 | P06 device testing | optional best-effort + notification/in-app fallback |
 | OPEN-012 | retention period for task/revision/reminder history | owner/product decision if not specified | minimize retention; clear data/delete path |
 | OPEN-013 | Windows host is not available in the current environment, so the Windows half of the P01 cross-OS gate (AT-033) cannot be run | owner supplies a Windows machine before P08 | gate stays BLOCKED; never report it as passed |
-| OPEN-014 | emulator acceleration. The build user is not in the `kvm` group, but `/dev/kvm` is accessible via a filesystem ACL (`user:neo:rw-`). Verified 2026-10-17: the API 36 AVD `chrona_api36` boots hardware-accelerated in ~25s, installs the debug APK, and runs the app (`MainActivity` resumed) | owner adds the user to the `kvm` group for portability; a physical device is still preferred for speech | instrumentation tests compile; device instrumentation still NOT RUN |
+| OPEN-014 | emulator acceleration. The build user is not in the `kvm` group, but `/dev/kvm` is accessible via a filesystem ACL (`user:neo:rw-`). Verified 2026-10-17: the API 36 AVD `chrona_api36` boots hardware-accelerated in ~25s, installs the debug APK, and runs the app (`MainActivity` resumed). Updated 2026-10-18: a physical `moto g54 5G` (Android 15, API 35) was attached over adb and the instrumentation suite runs and passes on it | owner adds the user to the `kvm` group for portability | instrumentation runs on the device; notification, overlay and successful-capture checks remain NOT RUN |
 | OPEN-015 | application licence has not been chosen | owner before any public distribution | no licence file; repository is not published as licensed work |
 | OPEN-016 | "Chrona" trademark/domain availability unchecked; no approved reverse-DNS application ID | owner | `com.chrona.app` used as a documented provisional identity (ADR-025) |
 | OPEN-017 | reminder batching groups by the task's `projectLabel` rather than the P05 relationship graph | revisit only if richer grouping is needed (P07+) | deliberate simplification; deterministic and unit-tested |
@@ -60,13 +60,16 @@
 ## Currently open blockers
 - **Windows clean-clone build/test/lint** — not run (OPEN-013). Blocking for P08 and for any
   honest "cross-OS parity" claim.
-- **Emulator / physical-device instrumentation** — an API 36 emulator now boots hardware-accelerated (OPEN-014, ACL on `/dev/kvm`) and the debug app runs; **instrumentation tests still NOT RUN**. Blocking for any claim
-  about runtime behaviour, permissions, notifications, overlay or speech recognition. In P03
-  this also leaves VOICE-001/002 and OPEN-007 (on-device availability) unmeasured — the emulator's
-  on-device recogniser lacks the `en-US` language pack; voice is
-  kept optional and reported as unknown. In P05 the Compose board slice tests
-  (`BoardSliceTest`, updated `NavigationShellTest`) compile but are NOT RUN, so the board's
-  talkback order, live contrast and large-font reflow are asserted by construction only.
+- **Device instrumentation — PARTLY CLEARED (2026-10-18).** A physical `moto g54 5G` (Android 15,
+  API 35) was attached, and `./gradlew :app:connectedDebugAndroidTest` now runs and **passes all
+  15 tests there** (`BoardSliceTest`, `TaskLifecycleSliceTest`, `NavigationShellTest`,
+  `MainActivityLaunchTest`). The first run found 9 real device-only defects — most seriously, the
+  Board could not be used on a phone at all (its selection panel, link editor and Refresh button
+  measured 0×0) — all fixed and re-measured; see `PROGRESS.md` → "Device verification on real
+  hardware". **Still NOT RUN:** notification posting and Quest Card actions, the overlay window and
+  the reconciliation job (OPEN-011); large-font reflow, TalkBack order and live contrast on the new
+  board sheet and voice panel; and a successful voice capture, because this handset has no `en-US`
+  on-device language pack (OPEN-007). Claims about those remain blocked.
 - **Room schema migration** — *resolved in P04*. Schema v2 adds `schedule_revisions` and
   `schedule_placements`; `MIGRATION_1_2` is committed and exercised end-to-end by
   `MigrationTest1To2Test` against a real SQLite v1 database. Both `1.json` and `2.json` are

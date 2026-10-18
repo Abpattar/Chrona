@@ -218,15 +218,18 @@ the domain core imports no Android, Room or network code.
 - **Windows host not verified.** The cross-OS gate needs a clean clone build on the Windows
   machine. `scripts/verify.ps1` is written but has never been executed. Marked BLOCKED, not
   passed.
-- **Compose instrumentation has NOT been run.** An API 36 AVD was created and does boot on this
-  host, and both APKs install — but the build user is not in the `kvm` group, so only software
-  emulation is available; `artd` reports "no usable artifacts" and `am start` is rejected with
-  `result code=-92`. The instrumentation suites compile and will run unchanged once a
-  `kvm`-capable host or the moto g54 is available.
-- **Physical device (moto g54, Android 15) untested** — required before P03/P04/P06/P07 claims.
-  In particular, on-device speech availability, the permission flow and observed network
-  behaviour are NOT RUN (OPEN-007); voice stays optional and typing is always complete. The P04
-  schedule preview/apply/undo has only been exercised at the JVM/Room layer.
+- **Instrumentation runs on a real device (2026-10-18).** `./gradlew :app:connectedDebugAndroidTest`
+  passes all 15 tests on the attached `moto g54 5G` (Android 15, API 35). The first run found 9
+  real device-only defects — most seriously the Board was unusable on a phone, because its
+  selection panel, link editor and Refresh button were laid out at 0×0 and could never be reached
+  — all fixed; see `PROGRESS.md` → "Device verification on real hardware". An API 36 AVD also boots
+  on this host through a filesystem ACL on `/dev/kvm`, but the phone is the primary target.
+- **Physical device (moto g54, Android 15) — partially checked.** Speech capability is measured:
+  the on-device recogniser is present and the app's adapter reports `Available`, but this handset
+  has no `en-US` on-device language pack, so a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`
+  and the app offers typing (OPEN-007). A successful voice capture end to end is still NOT
+  measured. Notification posting, Quest Card actions and the overlay are still NOT RUN
+  (OPEN-011), and large-font/TalkBack passes are still by construction only.
 - **Schema migration** — v1→v2 is now tested (`MigrationTest1To2Test`) against a real SQLite v1
   database; both `1.json` and `2.json` are exported. Future versions must extend this test.
 - **Offline is true by construction, not measured.** The app declares `INTERNET` only because the

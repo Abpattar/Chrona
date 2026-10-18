@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.chrona.app.MainActivity
 import org.junit.Rule
 import org.junit.Test
@@ -46,9 +47,11 @@ class NavigationShellTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Nothing recorded yet").assertIsDisplayed()
 
+        // Settings has no empty state to reach: every control is always available, so what is
+        // asserted is that the privacy centre itself is there to be read.
         composeRule.onNodeWithTag("nav_settings").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Nothing to configure yet").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_local_first_note").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -60,6 +63,9 @@ class NavigationShellTest {
             composeRule.onNodeWithTag("nav_${destination.route}").performClick()
             composeRule.waitForIdle()
         }
-        composeRule.onNodeWithTag("settings_local_first_note").assertIsDisplayed()
+        // Settings is a scrolling privacy centre; the note is below the fold on a phone.
+        composeRule.onNodeWithTag("settings_local_first_note")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Article
@@ -29,8 +30,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -86,6 +89,7 @@ private val NoteGap = 16.dp
  * or re-created here. Because the canvas alone is not fully accessible, the list is a
  * first-class alternative with the same records, filters and actions (ACC-001).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BoardScreen(
     state: BoardUiState,
@@ -114,6 +118,13 @@ fun BoardScreen(
         ScreenHeader(
             title = stringResource(R.string.nav_board),
             subtitle = "Your tasks as pinned notes, joined by typed relationships.",
+            // Reloading lives in the header, because the board itself owns the whole area below
+            // it and a control underneath the canvas could never be reached.
+            trailing = {
+                TextButton(onClick = onRefresh, modifier = Modifier.semantics { testTag = "board_refresh" }) {
+                    Text("Refresh")
+                }
+            },
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
@@ -146,49 +157,58 @@ fun BoardScreen(
 
         ViewModeToggle(mode = state.viewMode, onViewMode = onViewMode)
 
-        when {
-            state.isLoading -> Text(
-                text = "Reading your board\u2026",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(16.dp),
-            )
+        // The canvas and the list both fill this box, and only this box. Anything laid out as a
+        // sibling would be measured against whatever the canvas left behind — which on a real
+        // phone is nothing at all.
+        Box(modifier = Modifier.weight(1f)) {
+            when {
+                state.isLoading -> Text(
+                    text = "Reading your board\u2026",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(16.dp),
+                )
 
-            state.visibleTasks.isEmpty() -> EmptyState(
-                title = "Nothing to pin yet",
-                message = if (state.allTasks.isEmpty()) {
-                    "Add a task on Today and it appears here as a note, ready to link."
-                } else {
-                    "No task matches these filters."
-                },
-                icon = Icons.Outlined.ViewQuilt,
-            )
+                state.visibleTasks.isEmpty() -> EmptyState(
+                    title = "Nothing to pin yet",
+                    message = if (state.allTasks.isEmpty()) {
+                        "Add a task on Today and it appears here as a note, ready to link."
+                    } else {
+                        "No task matches these filters."
+                    },
+                    icon = Icons.Outlined.ViewQuilt,
+                )
 
-            state.viewMode == BoardViewMode.BOARD -> BoardCanvas(
-                state = state,
-                onSelectTask = onSelectTask,
-            )
+                state.viewMode == BoardViewMode.BOARD -> BoardCanvas(
+                    state = state,
+                    onSelectTask = onSelectTask,
+                )
 
-            else -> BoardListAlternative(
-                state = state,
-                onSelectTask = onSelectTask,
-                onSelectRelation = onSelectRelation,
-            )
+                else -> BoardListAlternative(
+                    state = state,
+                    onSelectTask = onSelectTask,
+                    onSelectRelation = onSelectRelation,
+                )
+            }
         }
 
-        SelectionPanel(
-            state = state,
-            onSelectTask = onSelectTask,
-            onSelectRelation = onSelectRelation,
-            onAddLink = onAddLink,
-            onChangeLinkType = onChangeLinkType,
-            onRemoveLink = onRemoveLink,
-            onConfirmLink = onConfirmLink,
-            onClearSelection = onClearSelection,
-        )
-
-        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-            TextButton(onClick = onRefresh, modifier = Modifier.semantics { testTag = "board_refresh" }) {
-                Text("Refresh")
+        // Note and thread details sit over the board rather than under it: on a phone the canvas
+        // needs the height, and the panel carries the actions that must always be reachable.
+        if (state.selectedTask != null || state.selectedRelation != null) {
+            ModalBottomSheet(
+                onDismissRequest = onClearSelection,
+                containerColor = ChronaTheme.tokens.glassStrong,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                SelectionPanel(
+                    state = state,
+                    onSelectTask = onSelectTask,
+                    onSelectRelation = onSelectRelation,
+                    onAddLink = onAddLink,
+                    onChangeLinkType = onChangeLinkType,
+                    onRemoveLink = onRemoveLink,
+                    onConfirmLink = onConfirmLink,
+                    onClearSelection = onClearSelection,
+                )
             }
         }
     }
@@ -554,6 +574,7 @@ private fun RelationRow(
 }
 
 /** The panel under the board: details for the selected note or thread. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectionPanel(
     state: BoardUiState,
@@ -573,6 +594,7 @@ private fun SelectionPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
+            .verticalScroll(rememberScrollState())
             .semantics { testTag = "board_selection_panel" },
     ) {
         Row(
@@ -726,6 +748,7 @@ private fun AddLinkRow(
                 itemLabel = { it.title },
                 onSelect = { targetId = it.id },
                 testTag = "board_add_link_target",
+                itemTestTag = { "board_add_link_target_item_${it.id.value}" },
             )
             SimpleDropdown(
                 label = type.displayLabel(),
@@ -733,6 +756,7 @@ private fun AddLinkRow(
                 itemLabel = { it.displayLabel() },
                 onSelect = { type = it },
                 testTag = "board_add_link_type",
+                itemTestTag = { "board_add_link_type_item_${it.name}" },
             )
             OutlinedButton(
                 onClick = { targetId?.let { onAddLink(it, type) } },
@@ -750,6 +774,11 @@ private fun <T> SimpleDropdown(
     itemLabel: (T) -> String,
     onSelect: (T) -> Unit,
     testTag: String,
+    /**
+     * Tag per menu entry. The same words appear on the notes behind the sheet, so an entry can
+     * only be addressed unambiguously by identity.
+     */
+    itemTestTag: ((T) -> String)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -759,9 +788,15 @@ private fun <T> SimpleDropdown(
         ) { Text(label) }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             items.forEach { item ->
+                val tag = itemTestTag?.invoke(item)
                 DropdownMenuItem(
                     text = { Text(itemLabel(item)) },
                     onClick = { onSelect(item); expanded = false },
+                    modifier = if (tag == null) {
+                        Modifier
+                    } else {
+                        Modifier.semantics { this.testTag = tag }
+                    },
                 )
             }
         }

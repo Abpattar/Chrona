@@ -145,9 +145,10 @@ class TaskLifecycleSliceTest {
         composeRule.onNodeWithTag("editor_save").performClick()
         composeRule.waitForIdle()
 
-        // Priority is never carried by colour alone: the label is part of the note's text.
-        composeRule.onNodeWithText("Very important").assertIsDisplayed()
-        composeRule.onNodeWithText("in your list").assertIsDisplayed()
+        // Priority is never carried by colour alone: both labels are words on the note itself,
+        // printed together on one line.
+        composeRule.onNodeWithText("Very important", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("in your list", substring = true).assertIsDisplayed()
     }
 
     private fun activeTasks() = (runBlocking {
