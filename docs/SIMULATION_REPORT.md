@@ -1,11 +1,11 @@
 # Chrona simulation report
 
 - **Run id:** `life-2026-01-05`
-- **Generated:** 2026-10-19T04:53:49.772929755Z
+- **Generated:** 2026-10-19T06:02:55.922444647Z
 - **Processing mode:** Deterministic (no AI)
 - **Environment:** JVM (Gradle testDebugUnitTest)
 - **Result:** PASSED (40 passed, 0 failed, 40 total)
-- **Total simulation runtime:** 403 ms
+- **Total simulation runtime:** 333 ms
 
 ## Scenarios
 
@@ -16,7 +16,7 @@ College, flute, routine, family and deadlines, with disruptions throughout.
 - Days simulated: 14
 - Tasks in the pool: 142
 - Distinct task titles: 58
-- Runtime: 135 ms
+- Runtime: 127 ms
 
 | Day | Date | Active | Scheduled | Completed | Missed | Unplaced | Overdue | At risk | Moved |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -63,7 +63,7 @@ More work than the day can hold; the surplus must be reported, not deleted.
 - Days simulated: 1
 - Tasks in the pool: 136
 - Distinct task titles: 52
-- Runtime: 18 ms
+- Runtime: 3 ms
 
 | Day | Date | Active | Scheduled | Completed | Missed | Unplaced | Overdue | At risk | Moved |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -80,7 +80,7 @@ No AI provider is reachable; planning must be identical and fully local.
 - Days simulated: 14
 - Tasks in the pool: 142
 - Distinct task titles: 58
-- Runtime: 247 ms
+- Runtime: 200 ms
 
 | Day | Date | Active | Scheduled | Completed | Missed | Unplaced | Overdue | At risk | Moved |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---:|

@@ -1,12 +1,12 @@
 {
   "runId": "life-2026-01-05",
-  "generatedAt": "2026-10-19T04:53:49.772929755Z",
+  "generatedAt": "2026-10-19T06:02:55.922444647Z",
   "processingMode": "Deterministic (no AI)",
   "environment": "JVM (Gradle testDebugUnitTest)",
   "result": "PASSED",
   "passed": 40,
   "failed": 0,
-  "totalRuntimeMillis": 403,
+  "totalRuntimeMillis": 333,
   "scenarios": [
     {
       "id": "full-life",
@@ -14,7 +14,7 @@
       "days": 14,
       "poolSize": 142,
       "distinctTitles": 58,
-      "runtimeMillis": 135,
+      "runtimeMillis": 127,
       "totals": {
         "completed": 55,
         "missed": 1,
@@ -46,7 +46,7 @@
       "days": 1,
       "poolSize": 136,
       "distinctTitles": 52,
-      "runtimeMillis": 18,
+      "runtimeMillis": 3,
       "totals": {
         "completed": 0,
         "missed": 0,
@@ -62,7 +62,7 @@
       "days": 14,
       "poolSize": 142,
       "distinctTitles": 58,
-      "runtimeMillis": 247,
+      "runtimeMillis": 200,
       "totals": {
         "completed": 0,
         "missed": 0,

@@ -32,7 +32,7 @@ function providerConfigs(env: (key: string) => string | undefined): ProviderConf
       kind: "openai",
       url: "https://api.groq.com/openai/v1/chat/completions",
       apiKey: groqKey,
-      model: env("GROQ_MODEL") ?? "llama-3.3-70b-versatile",
+      model: env("GROQ_MODEL") ?? "qwen/qwen3.8-27b",
     });
   }
   const geminiKey = env("GEMINI_API_KEY");

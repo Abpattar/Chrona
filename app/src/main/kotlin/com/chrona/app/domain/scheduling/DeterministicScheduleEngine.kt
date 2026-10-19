@@ -318,7 +318,9 @@ class DeterministicScheduleEngine : ScheduleEngine {
             val explanation = when {
                 before == null -> "Newly planned."
                 after == null -> "Could not be placed this time."
-                else -> "Moved from ${before.toLocalTime()} to ${after.toLocalTime()}."
+                // Wall-clock to the minute. A raw ZonedDateTime prints nanosecond precision
+                // ("10:35:33.580 to 11:10:23.569999"), which is noise, not information.
+                else -> "Moved from ${CLOCK_FORMAT.format(before)} to ${CLOCK_FORMAT.format(after)}."
             }
             changes += ScheduleChange(id, before, after, explanation)
         }
@@ -372,6 +374,12 @@ class DeterministicScheduleEngine : ScheduleEngine {
             unplaced.sortedBy { it.taskId.value }.forEach { append(it.taskId.value).append(':').append(it.reason).append(';') }
         }
         return UUID.nameUUIDFromBytes(signature.toByteArray()).toString()
+    }
+
+    private companion object {
+        /** How a placement time is written in a sentence meant for a person. */
+        private val CLOCK_FORMAT: java.time.format.DateTimeFormatter =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm")
     }
 
     private data class Slot(val start: ZonedDateTime, val end: ZonedDateTime)

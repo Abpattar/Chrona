@@ -16,8 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,11 +40,16 @@ import com.chrona.app.domain.model.Priority
 import com.chrona.app.domain.scheduling.SchedulePlacement
 import com.chrona.app.domain.scheduling.UnplacedReason
 import com.chrona.app.domain.scheduling.UnplacedTask
+import com.chrona.app.ui.design.ChronaCard
+import com.chrona.app.ui.design.SectionHeading
 import com.chrona.app.ui.design.ChronaTheme
 import com.chrona.app.ui.design.EmptyState
-import com.chrona.app.ui.design.PinnedNoteCard
+import com.chrona.app.ui.design.StatRow
+import com.chrona.app.ui.design.StatTileData
+import com.chrona.app.ui.design.StatTileGrid
 import com.chrona.app.ui.design.priorityStyleOf
 import com.chrona.app.ui.today.ScreenHeader
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 private val timeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -258,35 +261,38 @@ fun ScheduleScreen(
 @Composable
 private fun DayHeader(state: ScheduleUiState) {
     val horizon = state.horizon
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(
-            text = horizon?.date?.format(dayFormat) ?: "Today",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { testTag = "schedule_date" },
-        )
-        val windows = horizon?.windows.orEmpty()
-        val availability = if (windows.isEmpty()) {
-            "No available hours configured"
-        } else {
-            windows.joinToString(", ") {
-                "${it.start.format(timeFormat)}\u2013${it.end.format(timeFormat)}"
-            }
+    val windows = horizon?.windows.orEmpty()
+    val availability = when {
+        windows.isEmpty() -> "No available hours configured"
+        // A window that ends exactly at midnight is the end of that day, not a zero-length span.
+        // Rendering it as "00:00-00:00" is what made an unconfigured day look broken.
+        windows.all { it.end.toLocalTime() == LocalTime.MIDNIGHT && it.end.toLocalDate() == it.start.toLocalDate().plusDays(1) } ->
+            "All day (${windows.first().start.format(timeFormat)}\u201324:00)"
+        else -> windows.joinToString(", ") {
+            val end = if (it.end.toLocalTime() == LocalTime.MIDNIGHT) "24:00" else it.end.format(timeFormat)
+            "${it.start.format(timeFormat)}\u2013$end"
         }
-        Text(
-            text = "Available: $availability",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { testTag = "schedule_availability" },
+    }
+    ChronaCard(
+        title = horizon?.date?.format(dayFormat) ?: "Today",
+        accent = ChronaTheme.tokens.accent,
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .semantics { testTag = "schedule_date" },
+    ) {
+        StatRow(
+            label = "Your available hours",
+            value = availability,
+            testTag = "schedule_availability",
         )
-        Text(
-            text = if (state.currentRevisionId == null) {
-                "No plan applied yet \u2014 this is a preview"
+        StatRow(
+            label = "Plan",
+            value = if (state.currentRevisionId == null) {
+                "Preview only \u2014 nothing applied"
             } else {
-                "Revision ${state.currentRevisionId?.value} applied"
+                "${shortRevision(state.currentRevisionId?.value)} applied"
             },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { testTag = "schedule_revision" },
+            testTag = "schedule_revision",
         )
     }
 }
@@ -297,43 +303,42 @@ private fun DayHeader(state: ScheduleUiState) {
  * Reporting only what fitted would be the worst version of this screen: it would look like a
  * perfect day while a third of the work quietly had nowhere to go.
  */
+/**
+ * Counts the whole task pool, not just the plan.
+ *
+ * Reporting only what fitted would be the worst version of this screen: it would look like a
+ * perfect day while a third of the work quietly had nowhere to go. Tiles rather than chips so the
+ * numbers are readable at a glance instead of competing with the plan for attention.
+ */
 @Composable
 private fun CountsRow(state: ScheduleUiState) {
     val proposal = state.proposal ?: return
     val open = state.allTasks.count { it.status.isOpen }
     val scheduled = proposal.placements.map { it.taskId }.toSet().size
     val unplaced = proposal.unplaced.size
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        CountChip("Active", open, "schedule_count_active")
-        CountChip("Scheduled", scheduled, "schedule_count_scheduled")
-        CountChip("Unplaced", unplaced, "schedule_count_unplaced")
-        CountChip("Completed", state.allTasks.count { it.status == com.chrona.app.domain.model.TaskStatus.COMPLETED }, "schedule_count_completed")
-    }
-}
-
-@Composable
-private fun CountChip(label: String, value: Int, tag: String) {
-    AssistChip(
-        onClick = {},
-        enabled = false,
-        label = { Text("$label $value", style = MaterialTheme.typography.labelMedium) },
-        colors = AssistChipDefaults.assistChipColors(
-            disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+    val completed = state.allTasks.count { it.status == com.chrona.app.domain.model.TaskStatus.COMPLETED }
+    StatTileGrid(
+        tiles = listOf(
+            StatTileData("Active", open.toString(), "schedule_count_active"),
+            StatTileData(
+                "Scheduled", scheduled.toString(), "schedule_count_scheduled",
+                ChronaTheme.tokens.accent,
+            ),
+            StatTileData(
+                "Unplaced", unplaced.toString(), "schedule_count_unplaced",
+                if (unplaced > 0) MaterialTheme.colorScheme.error else null,
+            ),
+            StatTileData("Completed", completed.toString(), "schedule_count_completed"),
         ),
-        modifier = Modifier.semantics { testTag = tag },
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
 }
 
 @Composable
 private fun OverloadNotice(overloaded: Boolean, unplacedCount: Int) {
-    PinnedNoteCard(
-        accent = if (overloaded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+    ChronaCard(
+        title = null,
+        accent = if (overloaded) MaterialTheme.colorScheme.error else ChronaTheme.tokens.accent,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -353,12 +358,10 @@ private fun OverloadNotice(overloaded: Boolean, unplacedCount: Int) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(
+    SectionHeading(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
-            .semantics { contentDescription = text },
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
+        testTag = "section_$text",
     )
 }
 
@@ -427,6 +430,16 @@ private fun PlacementRow(
             }
         }
     }
+}
+
+/**
+ * A revision id is a UUID: 36 characters of machine noise. Only its tail distinguishes one plan
+ * from the next, so that is what a person is shown.
+ */
+private fun shortRevision(id: String?): String {
+    if (id == null) return "Plan"
+    val tail = id.substringAfterLast('-').take(6)
+    return if (tail.isNotEmpty()) "Revision \u2026$tail applied" else "Revision applied"
 }
 
 /** Plain-language reason for an unplaced task. Every branch has a sentence the user can act on. */

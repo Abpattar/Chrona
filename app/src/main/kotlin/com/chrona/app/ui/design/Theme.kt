@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
@@ -37,6 +38,8 @@ private val ChronaColorScheme = darkColorScheme(
     onSurface = ChronaColors.Ink,
     surfaceVariant = ChronaColors.PaperRaised,
     onSurfaceVariant = ChronaColors.InkMuted,
+    // Tertiary ink. Material has no slot for it, so it rides in the token set below.
+    surfaceContainerLow = ChronaColors.Paper,
     surfaceContainer = ChronaColors.PaperRaised,
     surfaceContainerHigh = ChronaColors.PaperShaded,
     outline = ChronaColors.Outline,
@@ -68,6 +71,8 @@ data class ChronaTokens(
     val pin: Color,
     val thread: Color,
     val cork: Color,
+    /** Tertiary text: timestamps, separators. Never used for anything a reader must not miss. */
+    val inkFaint: Color,
 )
 
 private val ChronaTokensValue = ChronaTokens(
@@ -81,6 +86,7 @@ private val ChronaTokensValue = ChronaTokens(
     pin = ChronaColors.Amber,
     thread = ChronaColors.Thread,
     cork = ChronaColors.Cork,
+    inkFaint = ChronaColors.InkFaint,
 )
 
 val LocalChronaTokens = staticCompositionLocalOf { ChronaTokensValue }
@@ -107,7 +113,15 @@ fun ChronaTheme(
         }
     }
 
-    CompositionLocalProvider(LocalChronaTokens provides ChronaTokensValue) {
+    CompositionLocalProvider(
+        LocalChronaTokens provides ChronaTokensValue,
+        // The shell's Scaffold is transparent so the window background shows through, and
+        // Material derives a Scaffold's content colour from its container. A transparent
+        // container resolves to *unspecified*, so every `Text` that relied on the inherited
+        // colour rendered black — on a near-black ground, i.e. invisible. Pinning it here fixes
+        // every such text at once instead of patching them one screen at a time.
+        LocalContentColor provides ChronaColors.Ink,
+    ) {
         MaterialTheme(
             colorScheme = ChronaColorScheme,
             typography = ChronaTypography,

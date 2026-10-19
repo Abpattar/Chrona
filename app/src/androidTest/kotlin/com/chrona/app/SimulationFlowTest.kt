@@ -187,6 +187,7 @@ class SimulationFlowTest {
 
         // And the screen says so in its own words.
         awaitTag("simulation_instances")
+        composeRule.onNodeWithTag("simulation_instances").assertIsDisplayed()
     }
 
     @Test
@@ -370,8 +371,10 @@ class SimulationFlowTest {
         openSimulation()
 
         // The screen must say plainly that a Gradle run happened elsewhere, not imply the phone
-        // executed instrumentation.
-        composeRule.onNodeWithTag("simulation_tests_not_run").performScrollTo().assertIsDisplayed()
+        // executed instrumentation. It sits inside a lazy list, so it has to be scrolled to
+        // before it exists in the tree at all.
+        awaitTag("simulation_tests_not_run")
+        composeRule.onNodeWithTag("simulation_tests_not_run").assertIsDisplayed()
     }
 
     @Test

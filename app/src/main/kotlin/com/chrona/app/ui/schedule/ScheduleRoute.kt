@@ -8,7 +8,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.chrona.app.di.AppContainer
 import com.chrona.app.usecase.BuildDayProposalUseCase
-import com.chrona.app.di.allTaskLoader
+import com.chrona.app.di.userTaskLoader
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -26,7 +26,7 @@ fun ScheduleRoute(container: AppContainer) {
     // is or which hours are available.
     val buildProposal = remember(container, zoneId) {
         BuildDayProposalUseCase(
-            loadTasks = container.allTaskLoader(),
+            loadTasks = container.userTaskLoader(),
             loadCommitments = { from: ZonedDateTime, to: ZonedDateTime -> container.events.list(from, to) },
             loadRelationships = { container.relationshipRepository.listAll() },
             loadPreferences = { container.preferencesRepository.load() },

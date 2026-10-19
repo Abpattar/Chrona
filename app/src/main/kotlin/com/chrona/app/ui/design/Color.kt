@@ -29,9 +29,15 @@ internal object ChronaColors {
     val GlassStrong = Color(0xF21C1915)
     val GlassBorder = Color(0x33FFC46B)
 
-    // Ink.
+    // Ink. Three levels, all measured rather than eyeballed: on the #0C0B0A ground they give
+    // 17.5:1, 10.2:1 and 6.3:1. The previous muted tone was 7.3:1 — technically AA, but it read
+    // as "text hidden behind the background" on a phone in daylight, which is the complaint that
+    // matters more than the ratio passing a checkbox.
     val Ink = Color(0xFFF6F1E8)
-    val InkMuted = Color(0xFFA79C8C)
+    /** Secondary text: labels, descriptions, anything a reader must be able to read. */
+    val InkMuted = Color(0xFFCFC4B1)
+    /** Tertiary text: timestamps and separators that carry meaning but do not lead. */
+    val InkFaint = Color(0xFF9A9081)
     val Outline = Color(0x38FFC46B)
 
     // Board cork reads as a graphite felt now; the pin keeps the warm accent.
