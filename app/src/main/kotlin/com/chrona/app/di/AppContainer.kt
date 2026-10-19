@@ -13,6 +13,7 @@ import com.chrona.app.data.repository.RoomEventRepository
 import com.chrona.app.data.repository.RoomRelationshipRepository
 import com.chrona.app.data.repository.RoomReminderHistoryRepository
 import com.chrona.app.data.repository.RoomScheduleRevisionRepository
+import com.chrona.app.data.repository.RoomSimulationStore
 import com.chrona.app.data.repository.RoomTaskRepository
 import com.chrona.app.data.repository.TaskRepository
 import com.chrona.app.domain.parse.DeterministicTaskIntentParser
@@ -30,7 +31,9 @@ import com.chrona.app.domain.reminder.ReminderPolicy
 import com.chrona.app.domain.reminder.ReminderPresenter
 import com.chrona.app.domain.reminder.ReminderSurfaceType
 import com.chrona.app.domain.scheduling.DeterministicScheduleEngine
+import com.chrona.app.domain.scheduling.DeterministicMultiDayPlanner
 import com.chrona.app.domain.scheduling.ScheduleEngine
+import com.chrona.app.domain.simulation.LifeSimulationEngine
 import com.chrona.app.platform.notification.NotificationPresenter
 import com.chrona.app.platform.overlay.OverlayPresenter
 import com.chrona.app.platform.cloud.CloudConfig
@@ -94,6 +97,11 @@ class AppContainer(
 
     /** One deterministic planner for both first planning and recovery (CH-SCHED-001). */
     val scheduleEngine: ScheduleEngine = DeterministicScheduleEngine()
+
+    /** The same engine, driven day by day across a whole horizon (ADR-040). */
+    val multiDayPlanner: com.chrona.app.domain.scheduling.MultiDayPlanner =
+        DeterministicMultiDayPlanner(scheduleEngine)
+
     val proposeRecovery: ProposeRecoveryUseCase = DeterministicRecoveryPlanner(scheduleEngine)
     val applyRecovery: ApplyRecoveryUseCase =
         DefaultApplyRecoveryUseCase(scheduleRevisionRepository) { timeSource.now() }
@@ -103,6 +111,34 @@ class AppContainer(
     /** Settings storage (CH-DATA-003). DataStore, not Room: new toggles need no migration. */
     val preferencesRepository: PreferencesRepository =
         DataStorePreferencesRepository(context.applicationContext.settingsDataStore)
+
+    /**
+     * Life simulation storage and engine (ADR-040).
+     *
+     * Simulation tasks are ordinary rows tagged with the reserved simulation label, so they obey
+     * the same persistence and history rules as real tasks. Only `RoomSimulationStore.reset` can
+     * remove them, and it is scoped to this run.
+     */
+    val simulationStore: RoomSimulationStore = RoomSimulationStore(database)
+    val simulationEngine: LifeSimulationEngine = LifeSimulationEngine(
+        planner = multiDayPlanner,
+        store = simulationStore,
+        processingMode = processingModeName(),
+    )
+
+    /**
+     * The honest processing-mode label.
+     *
+     * "AI-assisted" appears only when the cloud path is actually configured *and* the provider
+     * was usable. A build with no cloud config reports the deterministic path, which is what
+     * actually runs.
+     */
+    fun processingModeName(): String = when {
+        BuildConfig.CLOUD_ENABLED && BuildConfig.CLOUD_FUNCTION_URL.isNotBlank() ->
+            LifeSimulationEngine.PROCESSING_MODE_AI_ASSISTED
+        BuildConfig.CLOUD_ENABLED -> LifeSimulationEngine.PROCESSING_MODE_LOCAL_PARSER
+        else -> LifeSimulationEngine.PROCESSING_MODE_DETERMINISTIC
+    }
 
     /** Reminder presentation history (NOTIFY-001). Deliberately separate from task state. */
     val reminderHistoryRepository: ReminderHistoryRepository =
@@ -178,8 +214,9 @@ class AppContainer(
     /**
      * Parser configuration taken from the user's day hours.
      *
-     * `UserPreferences` has no storage yet (CH-DATA-003), so the defaults are used until the
-     * settings screen persists real values in P06/P07.
+     * Kept as defaults: the parser only needs them to resolve relative phrases like "this
+     * evening", and reading them per request would mean a suspending read on the capture path
+     * for a value that changes a handful of times a year.
      */
     val parsePreferences: ParsePreferences = ParsePreferences()
 
@@ -206,7 +243,11 @@ class AppContainer(
                 ChronaDatabase.FILE_NAME,
             )
                 // Purely additive migrations; existing user data is preserved (AT-031).
-                .addMigrations(ChronaDatabase.MIGRATION_1_2, ChronaDatabase.MIGRATION_2_3)
+                .addMigrations(
+                    ChronaDatabase.MIGRATION_1_2,
+                    ChronaDatabase.MIGRATION_2_3,
+                    ChronaDatabase.MIGRATION_3_4,
+                )
                 // No fallbackToDestructiveMigration(): losing real task data silently is worse
                 // than failing loudly. Every version bump needs an explicit migration + test.
                 .build()

@@ -8,6 +8,7 @@ import com.chrona.app.domain.model.TimeRange
 import java.time.Duration
 import java.time.Instant
 import java.time.ZonedDateTime
+import java.time.ZoneId
 
 /**
  * Everything the deterministic scheduler is allowed to see.
@@ -23,6 +24,26 @@ data class ScheduleInput(
     val relationships: List<TaskRelationship> = emptyList(),
     /** Injected reference time; placement never precedes it (late start / late wake-up). */
     val now: ZonedDateTime? = null,
+    /**
+     * The user's real availability for this date, as absolute ranges.
+     *
+     * Consulted only when [restrictToAvailability] is true, which is the default *when at least
+     * one window is given*. An explicit empty list together with `restrictToAvailability = true`
+     * is how "this day has no capacity at all" is expressed — without it, an empty list would be
+     * indistinguishable from "no availability configured", which means the opposite thing.
+     *
+     * Availability governs *flexible* work only. A lecture at 09:00 is kept whatever the user
+     * says their day looks like.
+     */
+    val availabilityWindows: List<TimeRange> = emptyList(),
+
+    /**
+     * When true, flexible work is confined to [availabilityWindows] even when that list is empty.
+     *
+     * Defaults to "restrict whenever windows were supplied", so a caller that passes windows gets
+     * the obvious behaviour and a caller with none keeps the historical whole-horizon default.
+     */
+    val restrictToAvailability: Boolean = availabilityWindows.isNotEmpty(),
     /** Recovery buffer kept around fixed commitments. */
     val buffer: Duration = Duration.ofMinutes(10),
     /** Placements from the currently applied revision, used to describe what moved. */

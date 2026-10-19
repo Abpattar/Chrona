@@ -20,14 +20,21 @@ This repository is the implementation of the approved product in
 | P05 | Board and relationships | **DONE (automated)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run NOT RUN |
 | P06 | Quest Cards and notifications | **DONE (automated)** — deterministic reminder policy, Room v3 history, DataStore settings, four Quest Card actions, notification + optional overlay + in-app surfaces, hourly reconciliation; notification/overlay/worker device checks NOT RUN |
 | Cloud interpreter | Optional hosted task understanding | **DONE (automated, mocked)** — Supabase Edge Function with Groq → Gemini → OpenRouter failover; app client (off by default) falls back to the deterministic parser on any failure; live provider exercised locally with a real key via the app's own client; hosted Supabase deploy NOT RUN |
+| Simulation | Multi-day planning and a reproducible 14-day life | **DONE** — `DeterministicMultiDayPlanner` over the existing engine; 142 task instances, 52 definitions, 58 distinct titles; load/reset/advance/run controls; Room v4 with reset isolated from user data; 40 scenario checks green; report generated from a real run |
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
 
 **What works today (verified by automated tests):**
 
 - The app builds, lints clean, and launches into Today.
-- All five top-level destinations — Today, Schedule, Board, History, Settings — open with
-  empty states that explain themselves.
+- All six top-level destinations — Today, Schedule, Tasks, Board, History, Settings — open and
+  show real state rather than placeholders.
+- **Planning respects the user's configured hours**, keeps fixed commitments where they are,
+  reports what it could not place and why, and applies a plan only when explicitly asked.
+- **History is real**: applied schedule revisions and task status changes, read from the same
+  tables production writes to.
+- **A reproducible 14-day life simulation** with load, reset, advance-a-day and run-to-end, whose
+  every number is counted from persisted state (see "Life simulation" below).
 - **A real end-to-end slice:** type a task → it is validated in the domain layer → persisted in
   Room/SQLite → shown on Today → started, completed, postponed, skipped or archived → every
   change written to an audit trail. Everything works offline; there is no account and no
@@ -133,6 +140,34 @@ Ubuntu and Windows setup.
 .\scripts\verify.ps1 -WithInstrumentation
 ```
 
+### Physical device (Android Debug Bridge)
+
+Any attached device or emulator works; `ANDROID_SERIAL` picks one when several are connected.
+
+```bash
+adb devices -l                      # confirm the device is visible and authorised
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Whole suite on the device
+ANDROID_SERIAL=<serial> ./gradlew connectedDebugAndroidTest
+
+# One class, or one method, while iterating
+ANDROID_SERIAL=<serial> ./gradlew connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.chrona.app.SimulationFlowTest
+
+# Launch and look at it
+adb shell am start -n com.chrona.app/.MainActivity
+adb exec-out screencap -p > screen.png
+
+adb shell pm clear com.chrona.app   # wipes the local database; ask the user first
+```
+
+The instrumentation suite writes its results to
+`app/build/reports/androidTests/connected/debug/index.html` and its XML to
+`app/build/outputs/androidTest-results/connected/`.
+
+Last verified on a **moto g54 5G, Android 15 (API 35)**: 30 tests, 0 failures.
+
 ### Raw Gradle commands
 
 ```bash
@@ -177,6 +212,43 @@ real drafts from such a local function with a live Gemini key. A **hosted** Supa
 **NOT RUN** (no credentials or project in this environment) — see `RISKS_AND_OPEN_ITEMS.md` and
 `PROGRESS.md`.
 
+## Life simulation
+
+Chrona ships a reproducible 14-day simulated life so the planner can be exercised against an
+evolving world rather than a single day. It is built from **52 task definitions expanding to 142
+task instances** (58 distinct titles) across college, flute practice, daily routines, family life
+and personal work, with deadlines, dependencies, fixed commitments, mid-run arrivals, missed
+sessions, unexpected interruptions, reduced-availability days and deliberately overloaded days.
+
+The rules that matter:
+
+- The clock is **injected**. Nothing reads the device time, so the same inputs always produce the
+  same plan. Replay is exact.
+- Simulation tasks are **ordinary task rows** marked `TaskOrigin.SIMULATION`. They obey the same
+  validation, persistence and history rules as real work, which is what makes them worth testing.
+  They are excluded from Today, the schedule and reminders by default; the **Tasks** browser shows
+  them and marks every row as simulated.
+- **Reset only ever deletes simulation records**, filtered by the run id and the reserved label.
+  User tasks are untouched.
+- Nothing is silently dropped. After every day the task pool is reconciled against the plan: each
+  open task is either placed or reported with a reason, and a step that cannot satisfy that fails
+  loudly.
+
+Use it in the app: **Today → Simulation**. Load the scenario, then Advance day (or Run to end), and
+watch the counts, the unplaceable work and the change history update. The screen states the
+processing mode it actually used, and it deliberately reports **no** host test run until one is
+imported — it cannot execute Gradle instrumentation on the phone, and does not pretend otherwise.
+
+Regenerate the report (runs every scenario for real and writes the results):
+
+```bash
+./gradlew testDebugUnitTest --tests '*SimulationReportGenerator*'
+# -> docs/SIMULATION_REPORT.md and docs/SIMULATION_REPORT.json
+```
+
+See [`docs/SIMULATION_REPORT.md`](docs/SIMULATION_REPORT.md) for the latest generated results and
+[`DECISIONS.md`](DECISIONS.md) ADR-040 for the design and the alternatives rejected.
+
 ## Repository layout
 
 ```text
@@ -218,20 +290,28 @@ the domain core imports no Android, Room or network code.
 - **Windows host not verified.** The cross-OS gate needs a clean clone build on the Windows
   machine. `scripts/verify.ps1` is written but has never been executed. Marked BLOCKED, not
   passed.
-- **Instrumentation runs on a real device (2026-10-18).** `./gradlew :app:connectedDebugAndroidTest`
-  passes all 15 tests on the attached `moto g54 5G` (Android 15, API 35). The first run found 9
-  real device-only defects — most seriously the Board was unusable on a phone, because its
-  selection panel, link editor and Refresh button were laid out at 0×0 and could never be reached
-  — all fixed; see `PROGRESS.md` → "Device verification on real hardware". An API 36 AVD also boots
-  on this host through a filesystem ACL on `/dev/kvm`, but the phone is the primary target.
+- **Instrumentation runs on a real device (2026-10-19).** `./gradlew :app:connectedDebugAndroidTest`
+  passes **30 tests, 0 failures** on the attached `moto g54 5G` (Android 15, API 35). Two device
+  runs have now happened (2026-10-18 and 2026-10-19); each found real defects that host tests
+  could not — a header that collapsed to one word per line on a 393dp screen, two screens that
+  never loaded because they had no initial refresh, and a database key that silently deleted every
+  previous simulated day. See `CHANGELOG.md` and `PROGRESS.md`. An API 36 AVD also boots on this
+  host through a filesystem ACL on `/dev/kvm`, but the phone is the primary target.
 - **Physical device (moto g54, Android 15) — partially checked.** Speech capability is measured:
   the on-device recogniser is present and the app's adapter reports `Available`, but this handset
   has no `en-US` on-device language pack, so a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`
   and the app offers typing (OPEN-007). A successful voice capture end to end is still NOT
   measured. Notification posting, Quest Card actions and the overlay are still NOT RUN
   (OPEN-011), and large-font/TalkBack passes are still by construction only.
-- **Schema migration** — v1→v2 is now tested (`MigrationTest1To2Test`) against a real SQLite v1
-  database; both `1.json` and `2.json` are exported. Future versions must extend this test.
+- **Schema migration** — v1→v2 and v2→v3 are tested against real SQLite databases, and v3→v4
+  (`MigrationTest3To4Test`) likewise: it seeds a v3 database with real task, reminder and revision
+  rows and asserts every one survives the upgrade. All four schema JSONs are exported. Future
+  versions must extend this test.
+- **Live AI provider NOT re-tested (2026-10-19).** No Groq or Gemini credentials are configured in
+  this environment, so the cloud path was **not** exercised against a live provider during this
+  work. The gateway tests, the wire-mapper tests and the deterministic-fallback tests all pass,
+  and the app runs fully offline; what remains unverified is the hosted Supabase deploy and a live
+  provider round trip (OPEN-018).
 - **Offline is true by construction, not measured.** The app declares `INTERNET` only because the
   optional cloud interpreter can be enabled at build time; with it off (the default) no code path
   opens a socket. No networking dependency exists. The airplane-mode acceptance test has not been

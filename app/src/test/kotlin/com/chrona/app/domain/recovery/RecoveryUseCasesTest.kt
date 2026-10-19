@@ -32,6 +32,9 @@ private class FakeRevisionRepository : ScheduleRevisionRepository {
 
     override suspend fun current(): Outcome<ScheduleRevision?> = Outcome.Success(revision)
 
+    override suspend fun history(limit: Int): Outcome<List<ScheduleRevision>> =
+        Outcome.Success(listOfNotNull(revision))
+
     override suspend fun apply(
         proposal: ScheduleProposal,
         expectedRevision: RevisionId?,

@@ -58,6 +58,19 @@ interface TaskDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(task: TaskEntity)
 
+    /**
+     * Insert, or do nothing if the id already exists.
+     *
+     * Used by the life simulation so replaying a day cannot duplicate a task, reset its status,
+     * or bump its version. Deliberately *not* an upsert: an upsert would silently overwrite an
+     * edit made since the row was first written.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnoringConflict(task: TaskEntity)
+
+    @Query("DELETE FROM tasks WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
     @Update
     suspend fun update(task: TaskEntity)
 
@@ -179,6 +192,21 @@ interface TaskRelationshipDao {
     @Query("DELETE FROM task_relationships WHERE source_task_id = :sourceTaskId")
     suspend fun deleteForSource(sourceTaskId: String)
 
+    /**
+     * Removes every relationship touching any of [taskIds].
+     *
+     * The simulation's reset path needs both columns because a relationship owned by a run may
+     * point at a task from another run; filtering only the source column would leave those edges
+     * behind once their target is deleted.
+     */
+    @Query(
+        """
+        DELETE FROM task_relationships
+        WHERE source_task_id IN (:taskIds) OR target_task_id IN (:taskIds)
+        """,
+    )
+    suspend fun deleteForTasks(taskIds: List<String>)
+
     @Query("SELECT COUNT(*) FROM task_relationships")
     suspend fun count(): Int
 }
@@ -187,12 +215,41 @@ interface TaskRelationshipDao {
 interface TaskStatusLogDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entry: TaskStatusLogEntity)
-
     @Query("SELECT * FROM task_status_log WHERE task_id = :taskId ORDER BY changed_at_epoch_millis ASC, rowid_local ASC")
     suspend fun findForTask(taskId: String): List<TaskStatusLogEntity>
 
     @Query("SELECT * FROM task_status_log ORDER BY changed_at_epoch_millis DESC, rowid_local DESC LIMIT :limit")
     suspend fun findRecent(limit: Int): List<TaskStatusLogEntity>
+
+    /**
+     * Clears history for the given tasks.
+     *
+     * Status rows cascade when their task is deleted, so this only matters for a reset that has
+     * already removed the tasks; keeping it makes the reset explicit rather than relying on
+     * foreign-key timing.
+     */
+    @Query("DELETE FROM task_status_log WHERE task_id IN (:taskIds)")
+    suspend fun deleteForTasks(taskIds: List<String>)
+
+    /**
+     * Recent status history joined to the task's current title.
+     *
+     * The join is what lets History say "DBMS revision was completed" rather than showing a bare
+     * task id. A log row outlives its subject only while the task exists, and the cascade means
+     * a deleted task takes its history with it, so an inner join loses nothing.
+     */
+    @Query(
+        """
+        SELECT l.task_id AS task_id, t.title AS task_title, l.from_status AS from_status,
+               l.to_status AS to_status, l.reason_code AS reason_code,
+               l.changed_at_epoch_millis AS changed_at_epoch_millis
+        FROM task_status_log l
+        INNER JOIN tasks t ON t.id = l.task_id
+        ORDER BY l.changed_at_epoch_millis DESC, l.rowid_local DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun findRecentWithTitles(limit: Int): List<TaskStatusLogWithTitle>
 
     @Query("SELECT COUNT(*) FROM task_status_log")
     suspend fun count(): Int
@@ -204,6 +261,19 @@ interface ScheduleRevisionDao {
     /** The current plan is the most recently applied revision. */
     @Query("SELECT * FROM schedule_revisions ORDER BY applied_at_epoch_millis DESC, id DESC LIMIT 1")
     suspend fun latest(): ScheduleRevisionEntity?
+
+    /**
+     * Revision history, newest first.
+     *
+     * History is the record of what the planner did and why, so it needs the whole chain rather
+     * than only the current head: a user asking "why did my evening change?" needs the revision
+     * that changed it, not just the one in force now.
+     */
+    @Query("SELECT * FROM schedule_revisions ORDER BY applied_at_epoch_millis DESC, id DESC LIMIT :limit")
+    suspend fun recent(limit: Int): List<ScheduleRevisionEntity>
+
+    @Query("SELECT COUNT(*) FROM schedule_placements WHERE revision_id = :revisionId")
+    suspend fun placementCountFor(revisionId: String): Int
 
     @Query("SELECT * FROM schedule_revisions WHERE id = :id")
     suspend fun findById(id: String): ScheduleRevisionEntity?

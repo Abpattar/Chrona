@@ -48,10 +48,12 @@ import com.chrona.app.di.AppContainer
 import com.chrona.app.ui.board.BoardRoute
 import com.chrona.app.ui.design.ChronaTheme
 import com.chrona.app.ui.design.glassSurface
-import com.chrona.app.ui.history.HistoryScreen
+import com.chrona.app.ui.history.HistoryRoute
 import com.chrona.app.ui.questcard.QuestCardRoute
+import com.chrona.app.ui.simulation.SimulationRoute
 import com.chrona.app.ui.schedule.ScheduleRoute
 import com.chrona.app.ui.settings.SettingsRoute
+import com.chrona.app.ui.taskbrowser.TaskBrowserRoute
 import com.chrona.app.ui.today.TodayRoute
 import com.chrona.app.ui.voice.VoiceCaptureViewModel
 import com.chrona.app.ui.voice.VoiceMicButton
@@ -148,13 +150,17 @@ fun ChronaNavHost(
                         requests = requests,
                         onTextEntryHandled = { requests = requests.copy(textPrefill = null) },
                         onOpenQuestCards = { navController.navigate(QUEST_CARD_ROUTE) },
+                        onOpenSimulation = { navController.navigate(ChronaDestination.SIMULATION.route) },
                     )
                 }
                 composable(ChronaDestination.SCHEDULE.route) { ScheduleRoute(container) }
+                composable(ChronaDestination.TASKS.route) { TaskBrowserRoute(container) }
                 composable(ChronaDestination.BOARD.route) { BoardRoute(container) }
-                composable(ChronaDestination.HISTORY.route) { HistoryScreen() }
+                composable(ChronaDestination.HISTORY.route) { HistoryRoute(container) }
                 composable(ChronaDestination.SETTINGS.route) { SettingsRoute(container) }
-                // Quest Cards are a detail surface reached from Today, not a sixth bottom-bar tab.
+                // Detail surfaces reached from a peer, not bottom-bar tabs: the simulation report
+                // and the quest cards both need more room than a tab can give.
+                composable(ChronaDestination.SIMULATION.route) { SimulationRoute(container) }
                 composable(QUEST_CARD_ROUTE) { QuestCardRoute(container) }
             }
 
@@ -205,7 +211,7 @@ private fun ChronaNavBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChronaDestination.entries.forEach { destination ->
+            ChronaDestination.topLevel.forEach { destination ->
                 NavBarItem(
                     destination = destination,
                     selected = currentRoute == destination.route,

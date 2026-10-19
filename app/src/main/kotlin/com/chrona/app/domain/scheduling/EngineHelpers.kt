@@ -65,6 +65,43 @@ enum class HorizonMembership {
 /** The local date the engine plans. Single source of truth for the horizon's date. */
 fun ScheduleInput.horizonDate(): LocalDate = dayStart.toLocalDate()
 
+/**
+ * The absolute ranges in which *flexible* work may be placed.
+ *
+ * Availability is intersected with the horizon and with [from] (the injected `now`, which may be
+ * later than midnight for a late start), then clipped to `dayEnd`. The result is sorted and
+ * merged so the intervals are disjoint, which is what `consume` relies on when it carves a
+ * placement out of one interval.
+ *
+ * An empty [ScheduleInput.availabilityWindows] means the whole horizon is available, so a caller
+ * that has not configured availability keeps working exactly as before.
+ */
+fun ScheduleInput.flexibleCapacity(from: ZonedDateTime): List<TimeRange> {
+    if (!restrictToAvailability) return listOf(TimeRange(maxOf(dayStart, from), dayEnd))
+        .filter { it.end.isAfter(it.start) }
+    val clipped = availabilityWindows.mapNotNull { window ->
+        val start = maxOf(window.start, dayStart, from)
+        val end = minOf(window.end, dayEnd)
+        if (end.isAfter(start)) TimeRange(start, end) else null
+    }
+    return mergeRanges(clipped)
+}
+
+/** Sorts and merges overlapping or touching ranges, so the output is disjoint and ordered. */
+fun mergeRanges(ranges: List<TimeRange>): List<TimeRange> {
+    if (ranges.size < 2) return ranges
+    val merged = mutableListOf<TimeRange>()
+    for (range in ranges.sortedBy { it.start }) {
+        val last = merged.lastOrNull()
+        if (last != null && !range.start.isAfter(last.end)) {
+            if (range.end.isAfter(last.end)) merged[merged.lastIndex] = TimeRange(last.start, range.end)
+        } else {
+            merged += range
+        }
+    }
+    return merged
+}
+
 fun Task.horizonMembership(horizon: LocalDate): HorizonMembership {
     val requested = requestedDate ?: return HorizonMembership.BELONGS
     return when {

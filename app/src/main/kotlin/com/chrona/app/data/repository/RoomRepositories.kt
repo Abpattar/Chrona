@@ -44,7 +44,13 @@ class RoomTaskRepository(
     }
 
     override suspend fun list(query: TaskQuery): Outcome<List<Task>> = storage {
-        val rows = taskDao.findByStatuses(query.includeStatuses.map { it.name }).map { it.toDomain() }
+        val rows = taskDao.findByStatuses(query.includeStatuses.map { it.name })
+            .asSequence()
+            // Filtering happens here rather than in SQL so the rule is one line and applies to
+            // every caller, including ones that add a project label.
+            .filter { query.includeSimulated || it.origin != com.chrona.app.domain.model.TaskOrigin.SIMULATION.name }
+            .map { it.toDomain() }
+            .toList()
         query.limit?.let { rows.take(it) } ?: rows
     }
 
@@ -334,6 +340,17 @@ class RoomScheduleRevisionRepository(
             header.toDomain(revisionDao.placements(header.id))
         }
     }
+
+    /**
+     * Newest first. Each row's placements are read with it, because a revision without its
+     * blocks cannot tell the user how many things it moved.
+     */
+    override suspend fun history(limit: Int): Outcome<List<com.chrona.app.domain.scheduling.ScheduleRevision>> =
+        storage {
+            revisionDao.recent(limit).map { header ->
+                header.toDomain(revisionDao.placements(header.id))
+            }
+        }
 
     override suspend fun apply(
         proposal: com.chrona.app.domain.scheduling.ScheduleProposal,

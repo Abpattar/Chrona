@@ -3,27 +3,23 @@ package com.chrona.app.ui.schedule
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.chrona.app.domain.model.CalendarEvent
-import com.chrona.app.domain.model.Failure
 import com.chrona.app.domain.model.Outcome
+import com.chrona.app.domain.model.Priority
 import com.chrona.app.domain.model.RevisionId
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
-import com.chrona.app.domain.model.TaskRelationship
 import com.chrona.app.domain.recovery.ApplyRecoveryResult
 import com.chrona.app.domain.recovery.ScheduleRevisionReason
 import com.chrona.app.domain.recovery.UndoResult
-import com.chrona.app.domain.scheduling.ScheduleInput
+import com.chrona.app.domain.scheduling.DayHorizon
 import com.chrona.app.domain.scheduling.ScheduleProposal
-import com.chrona.app.domain.scheduling.ScheduleRevision
-import com.chrona.app.domain.scheduling.FixedCommitment
+import com.chrona.app.usecase.BuildDayProposalUseCase
+import com.chrona.app.usecase.describe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.Duration
-import java.time.ZonedDateTime
 
 /** Everything the Schedule surface renders. A preview is data until the user applies it. */
 data class ScheduleUiState(
@@ -34,24 +30,27 @@ data class ScheduleUiState(
     val currentRevisionId: RevisionId? = null,
     /** Plain-language message; never a stack trace. */
     val message: String? = null,
+    /** The day being planned and the hours the user said they have. Drives the header. */
+    val horizon: DayHorizon? = null,
+    /** Every open task, so the screen can report what exists rather than only what fitted. */
+    val allTasks: List<Task> = emptyList(),
+    /** Priority per task, so a block can be labelled without a second lookup. */
+    val priorities: Map<TaskId, Priority> = emptyMap(),
+    /** Tasks with a hard time, so a fixed block is marked without relying on colour. */
+    val fixedTaskIds: Set<TaskId> = emptySet(),
 )
 
 /**
  * State holder for Schedule (UI-001, SCHED-001..003).
  *
- * It loads the current world, asks the deterministic engine for a preview, and shows it before
- * anything is written. Applying and undoing are the only mutations, and both go through the
- * revision repository so a stale plan can never overwrite newer work.
+ * It asks [BuildDayProposalUseCase] for a preview and shows it before anything is written.
+ * Applying and undoing are the only mutations, and both go through the revision repository so a
+ * stale plan can never overwrite newer work.
  */
 class ScheduleViewModel(
-    private val loadTasks: suspend () -> Outcome<List<Task>>,
-    private val loadCommitments: suspend (ZonedDateTime, ZonedDateTime) -> Outcome<List<CalendarEvent>>,
-    private val loadRelationships: suspend () -> Outcome<List<TaskRelationship>>,
-    private val currentRevision: suspend () -> Outcome<ScheduleRevision?>,
-    private val plan: suspend (ScheduleInput) -> ScheduleProposal,
+    private val buildProposal: suspend () -> Outcome<com.chrona.app.usecase.DayProposalResult>,
     private val apply: suspend (ScheduleProposal, RevisionId?, String) -> ApplyRecoveryResult,
     private val undo: suspend (RevisionId) -> UndoResult,
-    private val now: () -> ZonedDateTime,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ScheduleUiState())
@@ -76,50 +75,33 @@ class ScheduleViewModel(
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            val reference = now()
-            val dayStart = reference.toLocalDate().atStartOfDay(reference.zone)
-            val dayEnd = dayStart.plusDays(1)
+            reload()
+        }
+    }
 
-            val tasks = when (val result = loadTasks()) {
-                is Outcome.Success -> result.value
-                is Outcome.Failed -> return@launch fail(result.failure)
-            }
-            val commitments = when (val result = loadCommitments(dayStart, dayEnd)) {
-                is Outcome.Success -> result.value
-                is Outcome.Failed -> return@launch fail(result.failure)
-            }
-            val relationships = when (val result = loadRelationships()) {
-                is Outcome.Success -> result.value
-                is Outcome.Failed -> return@launch fail(result.failure)
-            }
-            val revision = when (val result = currentRevision()) {
-                is Outcome.Success -> result.value
-                is Outcome.Failed -> return@launch fail(result.failure)
-            }
-
-            val input = ScheduleInput(
-                tasks = tasks,
-                fixedCommitments = commitments.map {
-                    FixedCommitment(it.id.value, it.title, it.range)
-                },
-                dayStart = dayStart,
-                dayEnd = dayEnd,
-                relationships = relationships,
-                now = reference,
-                buffer = Duration.ofMinutes(10),
-                previousPlacements = revision?.placements ?: emptyList(),
-                basedOnRevisionId = revision?.id,
+    /**
+     * Re-reads the world and replaces the plan, keeping any existing message.
+     *
+     * Split from [refresh] so apply and undo can refresh *and then* explain themselves. Doing it
+     * the other way round silently discarded the one sentence the user needed.
+     */
+    private suspend fun reload() {
+        val result = when (val built = buildProposal()) {
+            is Outcome.Success -> built.value
+            is Outcome.Failed -> return fail(built.failure)
+        }
+        val tasks = result.tasks
+        _state.update {
+            it.copy(
+                isLoading = false,
+                proposal = result.proposal,
+                titles = tasks.associate { task -> task.id to task.title },
+                currentRevisionId = result.currentRevisionId,
+                horizon = result.horizon,
+                allTasks = tasks,
+                priorities = tasks.associate { task -> task.id to task.priority },
+                fixedTaskIds = tasks.filter { task -> task.fixedRange != null }.map { task -> task.id }.toSet(),
             )
-            val proposal = plan(input)
-            _state.update {
-                it.copy(
-                    isLoading = false,
-                    proposal = proposal,
-                    titles = tasks.associate { task -> task.id to task.title },
-                    currentRevisionId = revision?.id,
-                    message = null,
-                )
-            }
         }
     }
 
@@ -128,8 +110,11 @@ class ScheduleViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isWorking = true) }
             val result = apply(proposal, _state.value.currentRevisionId, ScheduleRevisionReason.APPLIED)
+            // Refresh first, then report. The other order wiped the explanation the moment the
+            // screen reloaded, so a rejected apply — the one case where the user most needs to
+            // read why — flashed and vanished.
+            reload()
             _state.update { it.copy(isWorking = false, message = result.reason) }
-            refresh()
         }
     }
 
@@ -138,38 +123,26 @@ class ScheduleViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isWorking = true) }
             val result = undo(revisionId)
+            reload()
             _state.update { it.copy(isWorking = false, message = result.reason) }
-            refresh()
         }
     }
 
     fun clearMessage() = _state.update { it.copy(message = null) }
 
-    private fun fail(failure: Failure) {
+    private fun fail(failure: com.chrona.app.domain.model.Failure) {
         _state.update { it.copy(isLoading = false, message = describe(failure)) }
     }
 
-    private fun describe(failure: Failure): String = when (failure) {
-        is Failure.Validation -> failure.reasons.joinToString("\n")
-        Failure.NotFound -> "That no longer exists."
-        is Failure.Conflict -> failure.message
-        is Failure.StorageFailure -> "Chrona could not read local storage. Try again."
-        else -> "Something went wrong. Try again."
-    }
 
     class Factory(
-        private val loadTasks: suspend () -> Outcome<List<Task>>,
-        private val loadCommitments: suspend (ZonedDateTime, ZonedDateTime) -> Outcome<List<CalendarEvent>>,
-        private val loadRelationships: suspend () -> Outcome<List<TaskRelationship>>,
-        private val currentRevision: suspend () -> Outcome<ScheduleRevision?>,
-        private val plan: suspend (ScheduleInput) -> ScheduleProposal,
+        private val buildProposal: suspend () -> Outcome<com.chrona.app.usecase.DayProposalResult>,
         private val apply: suspend (ScheduleProposal, RevisionId?, String) -> ApplyRecoveryResult,
         private val undo: suspend (RevisionId) -> UndoResult,
-        private val now: () -> ZonedDateTime,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T = ScheduleViewModel(
-            loadTasks, loadCommitments, loadRelationships, currentRevision, plan, apply, undo, now,
+            buildProposal, apply, undo,
         ) as T
     }
 }

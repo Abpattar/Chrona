@@ -21,6 +21,7 @@
 | OPEN-015 | application licence has not been chosen | owner before any public distribution | no licence file; repository is not published as licensed work |
 | OPEN-016 | "Chrona" trademark/domain availability unchecked; no approved reverse-DNS application ID | owner | `com.chrona.app` used as a documented provisional identity (ADR-025) |
 | OPEN-017 | reminder batching groups by the task's `projectLabel` rather than the P05 relationship graph | revisit only if richer grouping is needed (P07+) | deliberate simplification; deterministic and unit-tested |
+| OPEN-021 | simulation tasks polluting the user's own surfaces | measured 2026-10-19 on moto g54 | **CLOSED.** A 142-task simulation shares the `tasks` table with real work, and the first device run showed it burying the user's day (a lifecycle test counting 62 tasks where it expected 1). `TaskQuery.includeSimulated` now defaults to false, so Today, the schedule and reminders ignore simulation rows; the Tasks browser opts in and marks every row. Reset stays scoped by run id and reserved label | none; if a future surface needs simulation rows it must opt in explicitly |
 | OPEN-018 | cloud task understanding is **partly verified**: on 2026-10-17 the app's own client (`CloudTaskUnderstandingProvider` + `UrlConnectionHttpTransport` + `TaskIntentWire`) parsed real drafts from a **local** Deno Edge Function with a live Gemini key (2 of 3 phrases; the third fell back on a transient provider error). Remaining gap: **no hosted Supabase deploy** — no Supabase CLI/project/credentials here, and hosted `verify_jwt` behavior is untested. The live provider also returned transient `429`/timeouts | owner supplies a Supabase project + at least one provider key, then runs a real deploy and one live capture | feature stays off by default; never report the **hosted** path as live-working until exercised |
 | OPEN-019 | provider keys were pasted in plaintext during development and should be rotated; the observed Gemini key format (`AQ.…`) is non-standard (`AIza…` expected) | owner rotates keys and confirms credential format | keys are never committed (git-ignored `supabase/.env.local`); invalid credentials must not be treated as transient |
 
@@ -104,6 +105,9 @@
 
 ### Post-P06 — Cloud task understanding (ADR-037)
 
+- **Live provider NOT re-exercised on 2026-10-19.** The scheduling, multi-day and simulation work
+  touched no provider code and no credentials were available in that environment, so nothing new
+  may be claimed about a live Groq/Gemini round trip. The evidence below remains the whole of it.
 - **Local live integration RUN; hosted deploy NOT RUN (OPEN-018).** On 2026-10-17 a Deno runtime
   was installed and the Edge Function run locally with a live Gemini key; the app's **own** client
   (`CloudTaskUnderstandingProvider` + `UrlConnectionHttpTransport` + `TaskIntentWire`) parsed real

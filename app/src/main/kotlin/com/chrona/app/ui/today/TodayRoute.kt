@@ -31,6 +31,7 @@ fun TodayRoute(
     requests: TaskEntryRequests = TaskEntryRequests(),
     onTextEntryHandled: () -> Unit = {},
     onOpenQuestCards: () -> Unit = {},
+    onOpenSimulation: () -> Unit = {},
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val viewModel: TodayViewModel = viewModel(
@@ -75,5 +76,6 @@ fun TodayRoute(
         onEditorOpen = { viewModel.openEditor() },
         onEditorClose = viewModel::closeEditor,
         onOpenQuestCards = onOpenQuestCards,
+        onOpenSimulation = onOpenSimulation,
     )
 }

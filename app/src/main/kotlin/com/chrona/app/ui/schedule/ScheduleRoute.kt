@@ -7,7 +7,8 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.chrona.app.di.AppContainer
-import com.chrona.app.domain.model.TaskQuery
+import com.chrona.app.usecase.BuildDayProposalUseCase
+import com.chrona.app.di.allTaskLoader
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -20,16 +21,27 @@ import java.time.ZonedDateTime
 @Composable
 fun ScheduleRoute(container: AppContainer) {
     val zoneId = remember { ZoneId.systemDefault() }
-    val viewModel: ScheduleViewModel = viewModel(
-        factory = ScheduleViewModel.Factory(
-            loadTasks = { container.listTasks(TaskQuery.ACTIVE) },
+
+    // One builder, shared with the task browser, so the two can never disagree about what day it
+    // is or which hours are available.
+    val buildProposal = remember(container, zoneId) {
+        BuildDayProposalUseCase(
+            loadTasks = container.allTaskLoader(),
             loadCommitments = { from: ZonedDateTime, to: ZonedDateTime -> container.events.list(from, to) },
             loadRelationships = { container.relationshipRepository.listAll() },
-            currentRevision = { container.scheduleRevisionRepository.current() },
-            plan = { input -> container.scheduleEngine.propose(input) },
+            loadPreferences = { container.preferencesRepository.load() },
+            loadRevision = { container.scheduleRevisionRepository.current() },
+            engine = container.scheduleEngine,
+            now = { ZonedDateTime.now(zoneId) },
+            zone = zoneId,
+        )
+    }
+
+    val viewModel: ScheduleViewModel = viewModel(
+        factory = ScheduleViewModel.Factory(
+            buildProposal = { buildProposal() },
             apply = { proposal, expected, reason -> container.applyRecovery(proposal, expected, reason) },
             undo = { id -> container.undoSchedule(id) },
-            now = { ZonedDateTime.now(zoneId) },
         ),
     )
 

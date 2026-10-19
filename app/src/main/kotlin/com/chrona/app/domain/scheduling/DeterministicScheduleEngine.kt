@@ -61,6 +61,12 @@ class DeterministicScheduleEngine : ScheduleEngine {
 
         val considered = eligible.filter { it.id !in deferredIds }
 
+        if (input.availabilityWindows.isNotEmpty()) {
+            assumptions += ScheduleAssumption(
+                "Flexible work was kept inside your available hours for this day.",
+            )
+        }
+
         graph.findHardDependencyCycle()?.let { cycle ->
             val path = cycle.joinToString(" -> ") { it.value }
             assumptions += ScheduleAssumption(
@@ -106,11 +112,12 @@ class DeterministicScheduleEngine : ScheduleEngine {
         }
 
         val busy = busyRanges(input.fixedCommitments, fixedTasks.filter { completion.containsKey(it.id) })
-        val free = freeIntervals(
-            com.chrona.app.domain.model.TimeRange(effectiveStart, input.dayEnd),
-            busy,
-            input.buffer,
-        ).toMutableList()
+        // Flexible work is placed inside the user's real availability, not merely wherever the
+        // clock is free between midnight and midnight. With no availability configured the
+        // capacity is the whole horizon, which is the historical behaviour.
+        val free = input.flexibleCapacity(effectiveStart)
+            .flatMap { freeIntervals(it, busy, input.buffer) }
+            .toMutableList()
 
         val ordered = dependencyOrder(flexible, graph)
         val flexibleIds = flexible.map { it.id }.toSet()

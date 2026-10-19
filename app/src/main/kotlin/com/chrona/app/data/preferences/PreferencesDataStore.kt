@@ -13,6 +13,7 @@ import com.chrona.app.data.repository.PreferencesRepository
 import com.chrona.app.domain.model.Failure
 import com.chrona.app.domain.model.Outcome
 import com.chrona.app.domain.model.ReminderStyle
+import com.chrona.app.domain.model.TimeWindow
 import com.chrona.app.domain.model.UserPreferences
 import com.chrona.app.domain.model.VoiceRecognitionMode
 import kotlinx.coroutines.flow.first
@@ -44,6 +45,7 @@ class DataStorePreferencesRepository(
             UserPreferences(
                 dayStart = p[KEY_DAY_START]?.let(::parseTime),
                 dayEnd = p[KEY_DAY_END]?.let(::parseTime),
+                availabilityWindows = parseWindows(p[KEY_AVAILABILITY_WINDOWS]),
                 reminderStyle = p[KEY_REMINDER_STYLE]?.let(::parseReminderStyle)
                     ?: ReminderStyle.QUIET,
                 nonUrgentDailyCap = p[KEY_NON_URGENT_CAP] ?: UserPreferences.DEFAULT_NON_URGENT_DAILY_CAP,
@@ -67,6 +69,13 @@ class DataStorePreferencesRepository(
         dataStore.edit { p ->
             writeNullable(p, KEY_DAY_START, preferences.dayStart?.toString())
             writeNullable(p, KEY_DAY_END, preferences.dayEnd?.toString())
+            writeNullable(
+                p,
+                KEY_AVAILABILITY_WINDOWS,
+                preferences.availabilityWindows
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString(";") { "${it.start}-${it.end}" },
+            )
             p[KEY_REMINDER_STYLE] = preferences.reminderStyle.name
             p[KEY_NON_URGENT_CAP] = preferences.nonUrgentDailyCap
             writeNullable(p, KEY_QUIET_START, preferences.quietHoursStart?.toString())
@@ -102,6 +111,24 @@ class DataStorePreferencesRepository(
 
     private fun parseTime(raw: String): LocalTime? = runCatching { LocalTime.parse(raw) }.getOrNull()
 
+    /**
+     * Reads `HH:mm-HH:mm;HH:mm-HH:mm` availability.
+     *
+     * A window that cannot be read, or whose end is not after its start, is dropped rather than
+     * repaired: a hand-edited file must never turn into an impossible day, and one bad entry
+     * must not cost the user the rest of their availability.
+     */
+    private fun parseWindows(raw: String?): List<TimeWindow> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.split(';').mapNotNull { entry ->
+            val parts = entry.split('-')
+            if (parts.size != 2) return@mapNotNull null
+            val start = runCatching { LocalTime.parse(parts[0].trim()) }.getOrNull() ?: return@mapNotNull null
+            val end = runCatching { LocalTime.parse(parts[1].trim()) }.getOrNull() ?: return@mapNotNull null
+            runCatching { TimeWindow(start, end) }.getOrNull()
+        }
+    }
+
     private fun parseReminderStyle(raw: String): ReminderStyle? =
         runCatching { ReminderStyle.valueOf(raw) }.getOrNull()
 
@@ -111,6 +138,7 @@ class DataStorePreferencesRepository(
     private companion object {
         val KEY_DAY_START = stringPreferencesKey("day_start")
         val KEY_DAY_END = stringPreferencesKey("day_end")
+        val KEY_AVAILABILITY_WINDOWS = stringPreferencesKey("availability_windows")
         val KEY_REMINDER_STYLE = stringPreferencesKey("reminder_style")
         val KEY_NON_URGENT_CAP = intPreferencesKey("non_urgent_daily_cap")
         val KEY_QUIET_START = stringPreferencesKey("quiet_hours_start")

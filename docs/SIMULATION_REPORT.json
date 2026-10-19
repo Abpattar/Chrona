@@ -1,0 +1,318 @@
+{
+  "runId": "life-2026-01-05",
+  "generatedAt": "2026-10-19T04:53:49.772929755Z",
+  "processingMode": "Deterministic (no AI)",
+  "environment": "JVM (Gradle testDebugUnitTest)",
+  "result": "PASSED",
+  "passed": 40,
+  "failed": 0,
+  "totalRuntimeMillis": 403,
+  "scenarios": [
+    {
+      "id": "full-life",
+      "name": "Full 14-day life",
+      "days": 14,
+      "poolSize": 142,
+      "distinctTitles": 58,
+      "runtimeMillis": 135,
+      "totals": {
+        "completed": 55,
+        "missed": 1,
+        "unscheduled": 349,
+        "overdue": 108,
+        "atRisk": 4,
+        "moved": 200
+      }
+    },
+    {
+      "id": "normal-college-day",
+      "name": "Normal college day",
+      "days": 1,
+      "poolSize": 136,
+      "distinctTitles": 52,
+      "runtimeMillis": 3,
+      "totals": {
+        "completed": 6,
+        "missed": 0,
+        "unscheduled": 131,
+        "overdue": 0,
+        "atRisk": 21,
+        "moved": 0
+      }
+    },
+    {
+      "id": "overloaded-day",
+      "name": "Overloaded day",
+      "days": 1,
+      "poolSize": 136,
+      "distinctTitles": 52,
+      "runtimeMillis": 18,
+      "totals": {
+        "completed": 0,
+        "missed": 0,
+        "unscheduled": 136,
+        "overdue": 0,
+        "atRisk": 21,
+        "moved": 0
+      }
+    },
+    {
+      "id": "provider-outage",
+      "name": "Provider outage",
+      "days": 14,
+      "poolSize": 142,
+      "distinctTitles": 58,
+      "runtimeMillis": 247,
+      "totals": {
+        "completed": 0,
+        "missed": 0,
+        "unscheduled": 519,
+        "overdue": 126,
+        "atRisk": 3,
+        "moved": 215
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "one report per simulated day",
+      "detail": "expected 14 day reports, got 14"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "every active task is placed or explained",
+      "detail": "no day reported fewer accounted-for tasks than exist in the pool (tightest day 14)"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "no task is silently dropped over the whole run",
+      "detail": "the run ended with an empty task pool, so nothing was actually exercised"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "the final day accounts for every task still open",
+      "detail": "17 scheduled + 71 unplaced vs 88 still open"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "no overlapping placements in the final plan",
+      "detail": "none"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "every placement sits inside a day the clock offered",
+      "detail": "a placement fell outside the simulated horizon"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "a completed task never returns to the plan",
+      "detail": "tasks finished before the last day were placed again: []"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "scripted completions actually happened",
+      "detail": "the scenario scripted 71 completions but 55 were recorded"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "the same inputs reproduce the same plan",
+      "detail": "replaying the scenario produced a different set of placements"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "full-life",
+      "name": "reset removes the run and keeps user tasks",
+      "detail": "after reset the store held 1 task(s): [user-task]"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "one report per simulated day",
+      "detail": "expected 1 day reports, got 1"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "every active task is placed or explained",
+      "detail": "no day reported fewer accounted-for tasks than exist in the pool (tightest day 1)"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "no task is silently dropped over the whole run",
+      "detail": "the run ended with an empty task pool, so nothing was actually exercised"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "the final day accounts for every task still open",
+      "detail": "5 scheduled + 131 unplaced vs 136 still open"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "no overlapping placements in the final plan",
+      "detail": "none"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "every placement sits inside a day the clock offered",
+      "detail": "a placement fell outside the simulated horizon"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "a completed task never returns to the plan",
+      "detail": "tasks finished before the last day were placed again: []"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "scripted completions actually happened",
+      "detail": "the scenario scripted 6 completions but 6 were recorded"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "the same inputs reproduce the same plan",
+      "detail": "replaying the scenario produced a different set of placements"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "normal-college-day",
+      "name": "reset removes the run and keeps user tasks",
+      "detail": "after reset the store held 1 task(s): [user-task]"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "one report per simulated day",
+      "detail": "expected 1 day reports, got 1"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "every active task is placed or explained",
+      "detail": "no day reported fewer accounted-for tasks than exist in the pool (tightest day 1)"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "no task is silently dropped over the whole run",
+      "detail": "the run ended with an empty task pool, so nothing was actually exercised"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "the final day accounts for every task still open",
+      "detail": "0 scheduled + 136 unplaced vs 136 still open"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "no overlapping placements in the final plan",
+      "detail": "none"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "every placement sits inside a day the clock offered",
+      "detail": "a placement fell outside the simulated horizon"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "a completed task never returns to the plan",
+      "detail": "tasks finished before the last day were placed again: []"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "scripted completions actually happened",
+      "detail": "the scenario scripted 0 completions but 0 were recorded"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "the same inputs reproduce the same plan",
+      "detail": "replaying the scenario produced a different set of placements"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "overloaded-day",
+      "name": "reset removes the run and keeps user tasks",
+      "detail": "after reset the store held 1 task(s): [user-task]"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "one report per simulated day",
+      "detail": "expected 14 day reports, got 14"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "every active task is placed or explained",
+      "detail": "no day reported fewer accounted-for tasks than exist in the pool (tightest day 1)"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "no task is silently dropped over the whole run",
+      "detail": "the run ended with an empty task pool, so nothing was actually exercised"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "the final day accounts for every task still open",
+      "detail": "21 scheduled + 121 unplaced vs 142 still open"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "no overlapping placements in the final plan",
+      "detail": "none"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "every placement sits inside a day the clock offered",
+      "detail": "a placement fell outside the simulated horizon"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "a completed task never returns to the plan",
+      "detail": "tasks finished before the last day were placed again: []"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "scripted completions actually happened",
+      "detail": "the scenario scripted 0 completions but 0 were recorded"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "the same inputs reproduce the same plan",
+      "detail": "replaying the scenario produced a different set of placements"
+    },
+    {
+      "status": "PASSED",
+      "scenario": "provider-outage",
+      "name": "reset removes the run and keeps user tasks",
+      "detail": "after reset the store held 1 task(s): [user-task]"
+    }
+  ]
+}

@@ -18,6 +18,15 @@ data class TaskQuery(
     val projectLabel: String? = null,
     val dueOnOrBefore: LocalDate? = null,
     val limit: Int? = null,
+    /**
+     * Whether rows created by the in-app life simulation are in scope.
+     *
+     * Defaults to false because simulation tasks live in the same table as real ones: without
+     * this, loading a 142-task simulation would bury the user's own day under invented work in
+     * Today, the schedule and reminders. Surfaces that genuinely show both — the task browser —
+     * opt in, and the rows stay clearly marked either way.
+     */
+    val includeSimulated: Boolean = false,
 ) {
     companion object {
         /** Everything the user has not closed, in stable creation order. */
@@ -26,6 +35,12 @@ data class TaskQuery(
         /** Closed work, for History. */
         val CLOSED = TaskQuery(
             includeStatuses = setOf(TaskStatus.COMPLETED, TaskStatus.SKIPPED, TaskStatus.ARCHIVED),
+        )
+
+        /** Real and simulated work together, for the task browser. */
+        val EVERYTHING = TaskQuery(
+            includeStatuses = TaskStatus.entries.toSet(),
+            includeSimulated = true,
         )
     }
 }

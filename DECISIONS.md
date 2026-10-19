@@ -221,6 +221,65 @@ Date: 15 October 2026. `APPROVED` refers to product direction confirmed by the o
   Supabase deploy is still NOT RUN** (no Supabase CLI/project/credentials) — see OPEN-018. The
   hosted path must not be represented as live-working until a real deploy is exercised.
 
+
+## ADR-040 — Multi-day planning as an orchestrator, and a simulated life as real tasks
+
+**Date:** 2026-10-19. **Status:** accepted.
+
+**Context.** `DeterministicScheduleEngine` plans exactly one local day: it takes `dayStart`/`dayEnd`
+and filters tasks by `requestedDate`. That is the right shape for a daily plan, but it cannot answer
+"if I cannot do this today, can I do it on Tuesday?", so a fortnight of life could not be planned
+without dropping work. Separately, there was no way to exercise the planner against an evolving
+multi-day world at all.
+
+**Decision.**
+
+1. **Availability is a first-class input, and the daily horizon comes from user preferences.**
+   `ScheduleInput` gains `availabilityWindows` (absolute ranges the user says they are actually
+   free) and `restrictToAvailability`. `DayHorizonFactory` turns `UserPreferences` into absolute
+   bounds, handling an overnight day, an equal start/end, and availability that does not overlap the
+   day. *Previous state:* `ScheduleViewModel` built `dayStart = midnight` and ignored
+   `UserPreferences` entirely, so a 09:00–20:00 person had work placed at 06:00. This was a real
+   defect, not a design choice; it is now pinned by regression tests.
+2. **`DeterministicMultiDayPlanner` orchestrates the existing engine day by day.** It does not
+   re-implement any placement rule. Each day it offers the still-unplaced pool to the *same*
+   `ScheduleEngine` for that day; whatever is placed is committed, whatever is not stays in the pool
+   and is offered again tomorrow. That is the whole idea — a second scheduler would eventually
+   disagree with the daily screen, and the explanation shown before apply would stop matching what
+   apply does.
+3. **`SimulationTaskFactory` materialises simulated tasks as ordinary `Task` rows** carrying
+   `TaskOrigin.SIMULATION` and the reserved project label `simulation`. They therefore obey exactly
+   the same validation, persistence, concurrency and history rules as real work. `TaskQuery` gains
+   `includeSimulated` (default `false`) so a 142-task simulation cannot bury the user's own day in
+   Today, the schedule or reminders, while the task browser opts in and marks every row.
+4. **Reset is scoped twice**: by run id for the run's own records, and by the reserved label for the
+   task rows. There is no code path in `RoomSimulationStore` that can delete a non-simulation task.
+5. **`simulation_days` is keyed on `(run_id, day_offset)`**, not a synthetic autoincrement id,
+   because Room's REPLACE strategy deletes the conflicting row — with a synthetic key every insert
+   silently deleted the previous day and a 14-day run retained only the last one.
+
+**Alternatives considered.** (1) *A genuinely new multi-day solver.* Rejected — it duplicates every
+scheduling rule and creates two answers to "where should this go?". (2) *A separate simulation
+database.* Rejected — the simulation would then never exercise the production persistence,
+validation or history rules it is meant to verify. (3) *Daily-only plus "carry forward tomorrow"
+in the UI.* Rejected — that is exactly the orchestrator above, minus the reconciliation.
+
+**Affected requirements/files.** `domain/scheduling/{DayHorizon,MultiDaySchedulePlanner,Scheduling,
+EngineHelpers,DeterministicScheduleEngine}.kt`, `domain/simulation/**`, `data/local/**` (schema v4,
+additive migration), `data/repository/RoomSimulationStore.kt`, `domain/model/{TaskQuery,Enums}.kt`,
+`usecase/BuildDayProposalUseCase.kt`.
+
+**Migration/compatibility.** Schema v3 → v4 is purely additive: three new tables, no existing table
+altered. Verified by `MigrationTest3To4Test`, which seeds a real v3 database and asserts every
+existing task, reminder and revision row survives.
+
+**Privacy/security.** Simulation data is fabricated. No provider secret is involved; the simulation
+is deterministic and offline. Nothing leaves the device.
+
+**Verification.** `./scripts/verify.sh --with-instrumentation` PASS on the host (430 unit tests) and
+on a physical `moto g54 5G` (Android 15 / API 35, 30 instrumentation tests). The generated
+`docs/SIMULATION_REPORT.md` is produced by a real run of all four scenarios (40 checks).
+
 ## Approval-required change categories
 Ask owner before material changes to data leaving device, cost, provider, storage/sync/account architecture, raw audio/transcript retention, task/relation/scheduler semantics, fixed commitment protection, mandatory overlay behavior, backup/deletion semantics, major dependency/hosting, or human study recruitment.
 

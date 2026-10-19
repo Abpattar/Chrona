@@ -19,6 +19,14 @@ interface ScheduleRevisionRepository {
     suspend fun current(): Outcome<ScheduleRevision?>
 
     /**
+     * Applied revisions, newest first.
+     *
+     * History needs the whole chain, not just the head: "why did my evening change?" is answered
+     * by the revision that changed it.
+     */
+    suspend fun history(limit: Int = 50): Outcome<List<ScheduleRevision>>
+
+    /**
      * Applies [proposal] if it is still valid: [expectedRevision] must equal the current
      * revision, and every task must still be at the version the proposal was built from.
      */

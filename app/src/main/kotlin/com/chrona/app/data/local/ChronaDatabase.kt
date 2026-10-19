@@ -6,7 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * Chrona's local store, schema version 3 (ADR-007, ADR-027, ADR-035).
+ * Chrona's local store, schema version 4 (ADR-007, ADR-027, ADR-035, ADR-040).
  *
  * There is deliberately **no** `fallbackToDestructiveMigration()`. Real user task data must
  * never be dropped to make a schema change succeed; every future version needs an explicit
@@ -22,8 +22,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScheduleRevisionEntity::class,
         SchedulePlacementEntity::class,
         ReminderPresentationEntity::class,
+        SimulationDayEntity::class,
+        SimulationEventEntity::class,
+        SimulationPlanEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ChronaDatabase : RoomDatabase() {
@@ -34,6 +37,7 @@ abstract class ChronaDatabase : RoomDatabase() {
     abstract fun taskStatusLogDao(): TaskStatusLogDao
     abstract fun scheduleRevisionDao(): ScheduleRevisionDao
     abstract fun reminderPresentationDao(): ReminderPresentationDao
+    abstract fun simulationDao(): SimulationDao
 
     companion object {
         const val FILE_NAME: String = "chrona.db"
@@ -121,6 +125,78 @@ abstract class ChronaDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_reminder_presentation_history_created_at_epoch_millis` " +
                         "ON `reminder_presentation_history` (`created_at_epoch_millis`)",
+                )
+            }
+        }
+
+        /**
+         * Adds the life-simulation record tables (ADR-040).
+         *
+         * Purely additive: no existing table is altered, so task, event, relationship, revision
+         * and reminder rows are untouched. Simulation *tasks* are ordinary rows in `tasks` marked
+         * by `project_label`, which is why reset can scope itself to one marker instead of
+         * touching the user's data.
+         */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `simulation_days` (
+                        `run_id` TEXT NOT NULL,
+                        `day_offset` INTEGER NOT NULL,
+                        `date_iso` TEXT NOT NULL,
+                        `reference_instant_epoch_millis` INTEGER NOT NULL,
+                        `available_windows` INTEGER NOT NULL,
+                        `lost_minutes` INTEGER NOT NULL,
+                        `active_tasks` INTEGER NOT NULL,
+                        `scheduled_tasks` INTEGER NOT NULL,
+                        `placed_blocks` INTEGER NOT NULL,
+                        `completed_tasks` INTEGER NOT NULL,
+                        `missed_tasks` INTEGER NOT NULL,
+                        `postponed_tasks` INTEGER NOT NULL,
+                        `unscheduled_tasks` INTEGER NOT NULL,
+                        `overdue_tasks` INTEGER NOT NULL,
+                        `at_risk_tasks` INTEGER NOT NULL,
+                        `fixed_commitments` INTEGER NOT NULL,
+                        `conflict_count` INTEGER NOT NULL,
+                        `moved_tasks` INTEGER NOT NULL,
+                        `newly_placed_tasks` INTEGER NOT NULL,
+                        `revision_count` INTEGER NOT NULL,
+                        `scenario_note` TEXT NOT NULL,
+                        `unplaced_reasons` TEXT NOT NULL,
+                        `runtime_millis` INTEGER NOT NULL,
+                        PRIMARY KEY(`run_id`, `day_offset`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `simulation_events` (
+                        `rowid_local` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `run_id` TEXT NOT NULL,
+                        `day_offset` INTEGER NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `task_id` TEXT,
+                        `detail` TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_simulation_events_run_id` " +
+                        "ON `simulation_events` (`run_id`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_simulation_events_day_offset` " +
+                        "ON `simulation_events` (`day_offset`)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `simulation_plans` (
+                        `run_id` TEXT NOT NULL,
+                        `placements` TEXT NOT NULL,
+                        PRIMARY KEY(`run_id`)
+                    )
+                    """.trimIndent(),
                 )
             }
         }

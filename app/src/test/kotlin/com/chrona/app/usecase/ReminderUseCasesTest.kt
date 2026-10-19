@@ -81,6 +81,8 @@ class FakePreferencesRepository(
 class StubScheduleRevisionRepository : ScheduleRevisionRepository {
     override suspend fun current(): Outcome<ScheduleRevision?> = Outcome.Success(null)
 
+    override suspend fun history(limit: Int): Outcome<List<ScheduleRevision>> = Outcome.Success(emptyList())
+
     override suspend fun apply(
         proposal: ScheduleProposal,
         expectedRevision: RevisionId?,

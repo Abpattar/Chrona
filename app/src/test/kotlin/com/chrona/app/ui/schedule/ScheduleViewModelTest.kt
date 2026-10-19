@@ -1,17 +1,19 @@
 package com.chrona.app.ui.schedule
 
+import com.chrona.app.domain.model.CalendarEvent
 import com.chrona.app.domain.model.Failure
 import com.chrona.app.domain.model.Outcome
 import com.chrona.app.domain.model.Priority
 import com.chrona.app.domain.model.RevisionId
 import com.chrona.app.domain.model.Task
 import com.chrona.app.domain.model.TaskId
-import com.chrona.app.domain.recovery.ApplyRecoveryResult
-import com.chrona.app.domain.recovery.ScheduleRevisionRepository
-import com.chrona.app.domain.recovery.UndoResult
+import com.chrona.app.domain.model.TaskRelationship
+import com.chrona.app.domain.model.UserPreferences
 import com.chrona.app.domain.scheduling.DeterministicScheduleEngine
 import com.chrona.app.domain.scheduling.ScheduleProposal
 import com.chrona.app.domain.scheduling.ScheduleRevision
+import com.chrona.app.usecase.BuildDayProposalUseCase
+import com.chrona.app.usecase.DayProposalResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -26,6 +28,7 @@ import org.junit.Before
 import org.junit.Test
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -33,7 +36,8 @@ import java.time.ZonedDateTime
  * The Schedule state holder (UI-001, SCHED-001..003).
  *
  * The claim that matters: building a preview never writes anything, and only an explicit apply
- * changes stored state.
+ * changes stored state. The horizon assertions are the regression tests for the midnight-planner
+ * defect — before the fix the screen planned midnight-to-midnight whatever the user had asked for.
  */
 class ScheduleViewModelTest {
 
@@ -43,12 +47,15 @@ class ScheduleViewModelTest {
 
     private val repo = FakeRevisionRepository()
 
-    private class FakeRevisionRepository : ScheduleRevisionRepository {
+    private class FakeRevisionRepository : com.chrona.app.domain.recovery.ScheduleRevisionRepository {
         var revision: ScheduleRevision? = null
         var applyCount = 0
         var failApply = false
 
         override suspend fun current(): Outcome<ScheduleRevision?> = Outcome.Success(revision)
+
+        override suspend fun history(limit: Int): Outcome<List<ScheduleRevision>> =
+            Outcome.Success(listOfNotNull(revision))
 
         override suspend fun apply(
             proposal: ScheduleProposal,
@@ -80,27 +87,45 @@ class ScheduleViewModelTest {
         updatedAt = now,
     )
 
+    /** The shared builder, with the same collaborators production wires. */
+    private fun builder(
+        tasks: Outcome<List<Task>> = Outcome.Success(listOf(task())),
+        preferences: UserPreferences = UserPreferences(),
+    ): suspend () -> Outcome<DayProposalResult> = {
+        BuildDayProposalUseCase(
+            loadTasks = { tasks },
+            loadCommitments = { _: ZonedDateTime, _: ZonedDateTime -> Outcome.Success(emptyList<CalendarEvent>()) },
+            loadRelationships = { Outcome.Success(emptyList<TaskRelationship>()) },
+            loadPreferences = { Outcome.Success(preferences) },
+            loadRevision = { repo.current() },
+            engine = DeterministicScheduleEngine(),
+            now = { base },
+            zone = zone,
+        ).invoke()
+    }
+
     private fun viewModel(
         tasks: Outcome<List<Task>> = Outcome.Success(listOf(task())),
+        preferences: UserPreferences = UserPreferences(),
     ) = ScheduleViewModel(
-        loadTasks = { tasks },
-        loadCommitments = { _, _ -> Outcome.Success(emptyList()) },
-        loadRelationships = { Outcome.Success(emptyList()) },
-        currentRevision = { repo.current() },
-        plan = { input -> DeterministicScheduleEngine().propose(input) },
+        buildProposal = builder(tasks, preferences),
         apply = { proposal, expected, reason ->
             when (val result = repo.apply(proposal, expected, reason, now)) {
-                is Outcome.Success -> ApplyRecoveryResult(true, result.value, "Schedule applied.")
-                is Outcome.Failed -> ApplyRecoveryResult(false, null, "The schedule could not be applied.")
+                is Outcome.Success -> com.chrona.app.domain.recovery.ApplyRecoveryResult(
+                    true, result.value, "Schedule applied.",
+                )
+
+                is Outcome.Failed -> com.chrona.app.domain.recovery.ApplyRecoveryResult(
+                    false, null, "The schedule could not be applied.",
+                )
             }
         },
         undo = { id ->
             when (repo.undo(id, now)) {
-                is Outcome.Success -> UndoResult(true, "Schedule undone.")
-                is Outcome.Failed -> UndoResult(false, "Nothing to undo.")
+                is Outcome.Success -> com.chrona.app.domain.recovery.UndoResult(true, "Schedule undone.")
+                is Outcome.Failed -> com.chrona.app.domain.recovery.UndoResult(false, "Nothing to undo.")
             }
         },
-        now = { base },
     )
 
     @Before
@@ -151,5 +176,82 @@ class ScheduleViewModelTest {
 
         assertNull(vm.state.value.proposal)
         assertTrue(vm.state.value.message?.isNotBlank() == true)
+    }
+
+    @Test
+    fun `the planning horizon follows the user's configured day hours`() {
+        val vm = viewModel(
+            preferences = UserPreferences(dayStart = LocalTime.of(9, 0), dayEnd = LocalTime.of(20, 0)),
+        )
+
+        val horizon = vm.state.value.horizon
+        assertNotNull(horizon)
+        assertEquals(LocalTime.of(9, 0), horizon!!.start.toLocalTime())
+        assertEquals(LocalTime.of(20, 0), horizon.end.toLocalTime())
+        assertEquals(1, horizon.windows.size)
+    }
+
+    @Test
+    fun `flexible work is never placed outside the configured availability`() {
+        val vm = viewModel(
+            preferences = UserPreferences(
+                availabilityWindows = listOf(
+                    com.chrona.app.domain.model.TimeWindow(LocalTime.of(12, 0), LocalTime.of(13, 0)),
+                ),
+            ),
+        )
+
+        val placement = vm.state.value.proposal!!.placements.single()
+        assertEquals(LocalTime.of(12, 0), placement.start.toLocalTime())
+        assertEquals(LocalTime.of(13, 0), placement.end.toLocalTime())
+    }
+
+    /** An overnight day is a real configuration, not a bug: it must wrap onto the next date. */
+    @Test
+    fun `a day that wraps past midnight ends on the following date`() {
+        val vm = viewModel(
+            preferences = UserPreferences(dayStart = LocalTime.of(20, 0), dayEnd = LocalTime.of(2, 0)),
+        )
+
+        val horizon = vm.state.value.horizon!!
+        assertEquals(LocalTime.of(20, 0), horizon.start.toLocalTime())
+        assertEquals(LocalTime.of(2, 0), horizon.end.toLocalTime())
+        assertEquals(horizon.start.toLocalDate().plusDays(1), horizon.end.toLocalDate())
+    }
+
+    @Test
+    fun `an empty task pool still produces a plan rather than a blank screen`() {
+        val vm = viewModel(tasks = Outcome.Success(emptyList()))
+
+        assertFalse(vm.state.value.isLoading)
+        assertNotNull(vm.state.value.proposal)
+        assertEquals(0, vm.state.value.allTasks.size)
+    }
+
+    @Test
+    fun `a rejected apply leaves the stored plan untouched and explains why`() {
+        val vm = viewModel()
+        repo.failApply = true
+
+        vm.applyProposal()
+
+        assertNull(repo.revision)
+        assertEquals(0, repo.applyCount)
+        assertTrue(vm.state.value.message?.isNotBlank() == true)
+    }
+
+    @Test
+    fun `fixed commitments are kept exactly where the user put them`() {
+        val fixedStart = base.withHour(9).withMinute(0)
+        val fixed = task("lecture").copy(
+            flexibility = com.chrona.app.domain.model.Flexibility.FIXED,
+            fixedStart = fixedStart,
+            fixedEnd = fixedStart.plusHours(1),
+        )
+        val vm = viewModel(tasks = Outcome.Success(listOf(fixed)))
+
+        val placement = vm.state.value.proposal!!.placements.single()
+        assertEquals(fixedStart.toInstant(), placement.start.toInstant())
+        assertTrue(vm.state.value.fixedTaskIds.contains(fixed.id))
     }
 }

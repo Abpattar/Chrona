@@ -12,11 +12,32 @@ import org.junit.Test
 class ChronaDestinationTest {
 
     @Test
-    fun `all five top level destinations exist`() {
+    fun `every destination has a stable route in a known order`() {
         assertEquals(
-            listOf("today", "schedule", "board", "history", "settings"),
+            listOf("today", "schedule", "tasks", "board", "history", "settings", "simulation"),
             ChronaDestination.entries.map { it.route },
         )
+    }
+
+    /**
+     * The bottom bar shows peers only.
+     *
+     * Tasks joined the bar so a user can actually reach their own list and the 140 simulated
+     * tasks; Simulation stays out of it because six labels no longer fit a phone and it is a
+     * place to inspect results rather than a daily surface.
+     */
+    @Test
+    fun `the bottom bar shows exactly the top level destinations`() {
+        assertEquals(
+            listOf("today", "schedule", "tasks", "board", "history", "settings"),
+            ChronaDestination.topLevel.map { it.route },
+        )
+    }
+
+    @Test
+    fun `simulation is reachable but is not a tab`() {
+        assertTrue(ChronaDestination.entries.contains(ChronaDestination.SIMULATION))
+        assertTrue(!ChronaDestination.topLevel.contains(ChronaDestination.SIMULATION))
     }
 
     @Test

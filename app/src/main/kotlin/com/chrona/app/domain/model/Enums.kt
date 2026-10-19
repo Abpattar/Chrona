@@ -81,6 +81,15 @@ enum class TaskOrigin {
     TYPED,
     MANUAL_EDIT,
     CALENDAR_IMPORT,
+
+    /**
+     * Created by the in-app life simulation, never by the user.
+     *
+     * Exists so simulation rows can be listed, reset and reported separately from real data. It
+     * is a storage marker, not a lifecycle state: a simulated task obeys exactly the same status
+     * rules as any other, so nothing about the domain is relaxed for the simulation's benefit.
+     */
+    SIMULATION,
 }
 
 /** Manual fixed commitments in MVP; a provider source needs an approved decision first. */

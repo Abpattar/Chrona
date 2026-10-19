@@ -19,11 +19,17 @@ class NavigationShellTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    /**
+     * Every top-level destination opens its own screen.
+     *
+     * `topLevel`, not `entries`: Simulation is a detail surface reached from Today, so there is
+     * no `nav_simulation` tab to click. Its reachability is asserted separately.
+     */
     @Test
     fun launchesOnTodayAndEveryDestinationOpens() {
         composeRule.onNodeWithTag("today_screen").assertIsDisplayed()
 
-        ChronaDestination.entries.forEach { destination ->
+        ChronaDestination.topLevel.forEach { destination ->
             composeRule.onNodeWithTag("nav_${destination.route}").performClick()
             composeRule.waitForIdle()
             composeRule.onNodeWithTag("${destination.route}_screen").assertIsDisplayed()
@@ -31,21 +37,33 @@ class NavigationShellTest {
     }
 
     @Test
+    fun theDetailSurfaceOpensFromToday() {
+        composeRule.onNodeWithTag("nav_today").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("today_open_simulation").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("simulation_screen").assertIsDisplayed()
+    }
+
+    @Test
     fun emptyStatesExplainThemselves() {
         composeRule.onNodeWithTag("today_screen").assertIsDisplayed()
         composeRule.onNodeWithText("Nothing queued yet").assertIsDisplayed()
 
-        composeRule.onNodeWithTag("nav_schedule").performClick()
+        composeRule.onNodeWithTag("nav_tasks").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("No day planned yet").assertIsDisplayed()
+        composeRule.onNodeWithTag("tasks_screen").assertIsDisplayed()
 
         composeRule.onNodeWithTag("nav_board").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Nothing to pin yet").assertIsDisplayed()
 
+        // History reads real records rather than showing a permanent placeholder, so it may or
+        // may not be empty depending on what earlier suites did. What must hold either way is
+        // that the screen exists and says something true.
         composeRule.onNodeWithTag("nav_history").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Nothing recorded yet").assertIsDisplayed()
+        composeRule.onNodeWithTag("history_screen").assertIsDisplayed()
 
         // Settings has no empty state to reach: every control is always available, so what is
         // asserted is that the privacy centre itself is there to be read.
@@ -59,7 +77,7 @@ class NavigationShellTest {
         // Guards against a screen being added outside the themed shell, which would silently
         // drop the paper palette and typography.
         composeRule.onNodeWithTag("chrona_bottom_bar").assertIsDisplayed()
-        ChronaDestination.entries.forEach { destination ->
+        ChronaDestination.topLevel.forEach { destination ->
             composeRule.onNodeWithTag("nav_${destination.route}").performClick()
             composeRule.waitForIdle()
         }

@@ -1,5 +1,7 @@
 package com.chrona.app.ui.today
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -59,6 +61,7 @@ fun TodayScreen(
     onEditorClose: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenQuestCards: () -> Unit = {},
+    onOpenSimulation: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -72,6 +75,12 @@ fun TodayScreen(
             subtitle = state.nextTask?.let { "Next: ${it.title}" } ?: "Hold the microphone to add one",
             trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Simulation lives behind a named entry rather than a hidden tab, so it is
+                    // discoverable without stealing a slot in the bottom bar.
+                    TextButton(
+                        onClick = onOpenSimulation,
+                        modifier = Modifier.semantics { testTag = "today_open_simulation" },
+                    ) { Text("Simulation") }
                     TextButton(
                         onClick = onOpenQuestCards,
                         modifier = Modifier.semantics { testTag = "today_open_quest_cards" },
@@ -223,7 +232,14 @@ private fun TaskNoteCard(
     }
 }
 
-/** Screen title with an optional trailing action, so the header stays one element. */
+/**
+ * Screen title with an optional trailing action, so the header stays one element.
+ *
+ * When a screen offers more than one trailing action the row becomes horizontally scrollable
+ * and the title keeps its width. Side by side without that, three buttons on a 393dp phone squeeze
+ * the subtitle into a one-word-per-line column — measured on a Moto G54, where the title became
+ * unreadable the moment a third action was added.
+ */
 @Composable
 internal fun ScreenHeader(
     title: String,
@@ -231,28 +247,36 @@ internal fun ScreenHeader(
     subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (subtitle != null) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
             )
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+        }
+        if (trailing != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                trailing()
             }
         }
-        trailing?.invoke()
     }
 }
 

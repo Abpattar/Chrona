@@ -65,6 +65,8 @@ chrona/
 │       │       │   ├── relation/                    (planned P02)
 │       │       │   ├── scheduling/                  (P04) deterministic engine + contract
 │       │       │   ├── recovery/                    (P04) planner, use cases, revision contract
+│       │       │   ├── simulation/                   multi-day life simulation: clock, dataset,
+│       │       │   │                                 lifecycle, scenarios, harness, report
 │       │       │   ├── reminder/                    [P06] policy, selector, reminder contracts
 │       │       │   └── parse/                       (P03) deterministic parser + contract
 │       │       ├── data/
@@ -103,7 +105,8 @@ chrona/
 │       ├── test/kotlin/com/chrona/app/
 │       │   ├── domain/                               (planned P02)
 │       │       ├── parse/                               [P03] parser/tests
-│       │       ├── scheduling/                          [P04] engine/scenario tests
+│       │       ├── scheduling/                          [P04] engine tests; availability + multi-day planner tests
+│       │       ├── simulation/                          multi-day scenario, dataset and reset-isolation tests
 │       │       ├── recovery/                            [P04] use-case tests
 │       │       └── reminder/                            [P06] policy + selector tests
 │       │   ├── data/                                    [P04] Room repo + migration tests; [P05] relationship repo tests; [P06] reminder history repo + v2→v3 migration
