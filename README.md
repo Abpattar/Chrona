@@ -16,11 +16,12 @@ This repository is the implementation of the approved product in
 | P01 | Repository foundation, pinned toolchain, navigation shell | **DONE** — builds, tests and lints clean on Ubuntu |
 | P02 | Local data + first end-to-end task slice | **DONE** — typed task → validate → Room → Today → complete |
 | P03 | Voice input and deterministic parser | **DONE (automated)** — tap-to-speak, on-device-only recogniser, parser, review/correction; device availability NOT RUN |
-| P04 | Scheduling and recovery engine | **DONE (automated)** — deterministic day preview, apply/undo, schema v2 + migration; device run NOT RUN |
-| P05 | Board and relationships | **DONE (automated)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run NOT RUN |
+| P04 | Scheduling and recovery engine | **DONE (verified on device)** — deterministic day preview honouring the user's configured hours, apply/undo, schema v2 + migration; exercised on a physical moto g54 5G |
+| P05 | Board and relationships | **DONE (verified on device)** — pinned-note board, typed red threads, filters, list alternative, link editing; Compose run and a 0x0-layout defect fix verified on a physical moto g54 5G |
 | P06 | Quest Cards and notifications | **DONE (automated)** — deterministic reminder policy, Room v3 history, DataStore settings, four Quest Card actions, notification + optional overlay + in-app surfaces, hourly reconciliation; notification/overlay/worker device checks NOT RUN |
-| Cloud interpreter | Optional hosted task understanding | **DONE (automated, mocked)** — Supabase Edge Function with Groq → Gemini → OpenRouter failover; app client (off by default) falls back to the deterministic parser on any failure; live provider exercised locally with a real key via the app's own client; hosted Supabase deploy NOT RUN |
+| Cloud interpreter | Optional hosted task understanding | **DONE (live, hosted)** — Supabase Edge Function with Groq → Gemini → OpenRouter failover; app client falls back to the deterministic parser on any failure; **hosted deploy confirmed live on 2026-10-19, returning a real Gemini draft**. Open: adding the Groq key to the hosted function (see below) |
 | Simulation | Multi-day planning and a reproducible 14-day life | **DONE** — `DeterministicMultiDayPlanner` over the existing engine; 142 task instances, 52 definitions, 58 distinct titles; load/reset/advance/run controls; Room v4 with reset isolated from user data; 40 scenario checks green; report generated from a real run |
+| Interface | Legibility and structure pass | **DONE** — root cause of invisible text fixed globally; stat tiles, section headings and grouped cards introduced; contrast re-measured; verified on a physical moto g54 5G |
 | P07 | Privacy, resilience, accessibility | Not started |
 | P08 | URE evaluation and final release | Not started |
 
@@ -71,8 +72,9 @@ This repository is the implementation of the approved product in
 
 **Nothing is complete that is not listed as complete.** [`PROGRESS.md`](PROGRESS.md) is the
 authoritative record of what was actually run and what was actually verified.
-[`CHANGELOG.md`](CHANGELOG.md) records every change. In particular, the Compose instrumentation
-suite compiles but **has not been run** — see [Known limitations](#known-limitations-and-blocked-checks).
+[`CHANGELOG.md`](CHANGELOG.md) records every change. The Compose instrumentation suite has now been
+run — twice — on a physical `moto g54 5G` (Android 15 / API 35); see
+[Known limitations](#known-limitations-and-blocked-checks) for what still has not.
 
 ## Privacy and scope boundaries
 
@@ -207,10 +209,63 @@ For local development the function can be run with Deno
 (`deno run --allow-net --allow-env --env-file=supabase/.env.local
 supabase/functions/understand-task/index.ts`) and reached from a debug build over HTTP — debug
 builds permit cleartext **only** for `localhost`/`127.0.0.1`/`10.0.2.2`
-(`app/src/debug/res/xml/network_security_config.xml`). On 2026-10-17 the app's own client parsed
-real drafts from such a local function with a live Gemini key. A **hosted** Supabase deploy has
-**NOT RUN** (no credentials or project in this environment) — see `RISKS_AND_OPEN_ITEMS.md` and
-`PROGRESS.md`.
+(`app/src/debug/res/xml/network_security_config.xml`).
+
+### What is actually verified about the AI path
+
+| Claim | Status | Evidence |
+|---|---|---|
+| Hosted Supabase Edge Function is deployed and reachable | **VERIFIED 2026-10-19** | A signed request to the configured function URL returned `{"provider":"gemini", ...}` with a real draft for `"study DBMS for two hours tomorrow"` |
+| The app reports its processing mode honestly | **VERIFIED** | The Simulation screen reads `AI-assisted` only when `BuildConfig.CLOUD_ENABLED` and a function URL are present; a default build reports `Deterministic (no AI)` |
+| Gateway logic, retry, backoff, failover | **VERIFIED** | `deno test` — 24 tests, 0 failures |
+| App-side wire mapping and validation | **VERIFIED** | `TaskIntentWireTest` + `CloudTaskUnderstandingProviderTest` |
+| Deterministic fallback on failure/offline/malformed output | **VERIFIED** | Unit tests; the whole planner runs with no network at all |
+| A Groq key is valid | **VERIFIED 2026-10-19** | The key authenticates against `api.groq.com` and completes chat requests |
+| Groq **through the hosted function** | **NOT VERIFIED** | Requires a redeploy with `GROQ_API_KEY` set as a function secret; no Supabase CLI credentials here |
+| The app never holds a provider key | **BY CONSTRUCTION** | The APK carries only the function URL and the Supabase anon key; provider keys live in the function environment |
+
+> **The Groq default model was wrong and is now fixed.** `index.ts` defaulted to
+> `llama-3.3-70b-versatile`, which Groq has retired — it returns
+> `{"code":"model_not_found"}`. The default is now `qwen/qwen3.8-27b`, confirmed working.
+> Override per deployment with the `GROQ_MODEL` secret.
+
+**Rotate any provider key that has been pasted into a chat, a commit, or an issue.** Keys are
+never committed to this repository, but a key that has been shared in the open should be treated
+as compromised.
+
+## Interface
+
+A legibility and structure pass (2026-10-19), driven by looking at the app on a real phone
+rather than by looking at previews.
+
+**The root cause of "text is invisible" was systemic, not cosmetic.** The shell's `Scaffold` uses
+a transparent container so the window background shows through, and Material derives a Scaffold's
+content colour from its container. A transparent container resolves to *unspecified*, so every
+`Text` that did not set a colour explicitly rendered **black on a near-black background** — and
+invisible on any screen, on any device. `LocalContentColor` is now pinned in the theme, which
+fixes all of them at once instead of patching them screen by screen.
+
+What changed:
+
+| Before | After |
+|---|---|
+| Un-coloured text rendered black | Inherited content colour pinned to the bright ink |
+| Muted ink at 7.3:1 — AA on paper, unreadable on a phone | 10.2:1, plus a separate 6.3:1 tertiary ink so decorative text still recedes |
+| Flat runs of `label ....... value` | Grouped cards with titles, and a wrapping grid of labelled stat tiles |
+| Values muted, labels bright — emphasis backwards | Values carry the bright ink, labels the muted one |
+| Six tiles across a 393dp screen, wrapping to `Sche / duled` | Grid that chunks into rows; nothing clips |
+| `Moved from 10:35:33.580 to 11:10:23.569999` | `Moved from 10:35 to 11:10` |
+| A full 36-character revision UUID as the plan's label | `Revision …4a9f applied` |
+| A full-day window shown as `00:00–00:00` | `All day (00:00–24:00)` |
+| Schedule loaded *every* task, so a loaded simulation put its breakfast in your own day four times | Schedule plans only the user's own work |
+
+The new components live in `ui/design/Surfaces.kt` (`ChronaCard`, `StatTile`, `StatTileGrid`,
+`StatRow`, `StatBlock`, `SectionHeading`) and every screen uses them, so they agree with each other
+instead of each inventing its own layout.
+
+**Accessibility.** Colour is never the only carrier of meaning: a fixed commitment shows a lock
+icon and the word "fixed", and every stat tile exposes `contentDescription` ("Unplaced: 3"), so a
+screen reader says the number rather than skipping over it. Contrast was measured, not eyeballed.
 
 ## Life simulation
 
@@ -290,13 +345,16 @@ the domain core imports no Android, Room or network code.
 - **Windows host not verified.** The cross-OS gate needs a clean clone build on the Windows
   machine. `scripts/verify.ps1` is written but has never been executed. Marked BLOCKED, not
   passed.
-- **Instrumentation runs on a real device (2026-10-19).** `./gradlew :app:connectedDebugAndroidTest`
-  passes **30 tests, 0 failures** on the attached `moto g54 5G` (Android 15, API 35). Two device
-  runs have now happened (2026-10-18 and 2026-10-19); each found real defects that host tests
-  could not — a header that collapsed to one word per line on a 393dp screen, two screens that
-  never loaded because they had no initial refresh, and a database key that silently deleted every
-  previous simulated day. See `CHANGELOG.md` and `PROGRESS.md`. An API 36 AVD also boots on this
-  host through a filesystem ACL on `/dev/kvm`, but the phone is the primary target.
+- **Test counts at a glance (2026-10-19).**
+
+  | Suite | Result |
+  |---|---|
+  | `./scripts/verify.sh --with-instrumentation` | PASS |
+  | `testDebugUnitTest` | 431 tests, 0 failures |
+  | `lintDebug` | 0 errors, 0 warnings (14 version-currency hints) |
+  | `connectedDebugAndroidTest` on a physical moto g54 5G | 30 tests, 0 failures |
+  | `deno test` on the Supabase gateway | 24 tests, 0 failures |
+  | Simulation harness, 4 scenarios | 40 checks, 0 failures |
 - **Physical device (moto g54, Android 15) — partially checked.** Speech capability is measured:
   the on-device recogniser is present and the app's adapter reports `Available`, but this handset
   has no `en-US` on-device language pack, so a real session ends in `ERROR_LANGUAGE_UNAVAILABLE`
@@ -307,11 +365,16 @@ the domain core imports no Android, Room or network code.
   (`MigrationTest3To4Test`) likewise: it seeds a v3 database with real task, reminder and revision
   rows and asserts every one survives the upgrade. All four schema JSONs are exported. Future
   versions must extend this test.
-- **Live AI provider NOT re-tested (2026-10-19).** No Groq or Gemini credentials are configured in
-  this environment, so the cloud path was **not** exercised against a live provider during this
-  work. The gateway tests, the wire-mapper tests and the deterministic-fallback tests all pass,
-  and the app runs fully offline; what remains unverified is the hosted Supabase deploy and a live
-  provider round trip (OPEN-018).
+- **Live AI: Gemini verified, Groq through the function not.** The hosted Supabase deploy is live
+  and returns real Gemini drafts. A Groq key authenticates and completes chat requests, but
+  `GROQ_API_KEY` is not set as a function secret, so Groq has not been exercised *through* the
+  gateway — and the function's previous default model had been retired by Groq, so Groq would
+  have failed until that was fixed (it now defaults to a model confirmed working). Redeploying with
+  the key closes this (OPEN-018).
+- **Instrumentation on a physical device (2026-10-19).** 30 tests, 0 failures on a `moto g54 5G`
+  (Android 15 / API 35), run twice. Both runs found real defects that host tests could not — a
+  database key that silently deleted every previous simulated day, two screens that never loaded,
+  and a header that collapsed to one word per line on a 393dp screen.
 - **Offline is true by construction, not measured.** The app declares `INTERNET` only because the
   optional cloud interpreter can be enabled at build time; with it off (the default) no code path
   opens a socket. No networking dependency exists. The airplane-mode acceptance test has not been

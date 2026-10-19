@@ -3,6 +3,65 @@
 All notable changes to Chrona are recorded here. Entries state what actually happened; no
 entry claims verification that did not occur (see `PROGRESS.md` for command-level evidence).
 
+## 2026-10-19 (b) — Legibility and structure pass; live AI path verified; retired Groq model fixed
+
+Follows the scheduling/multi-day/simulation work the same day. Driven by using the app on a
+physical phone rather than by looking at previews.
+
+### Fixed
+
+- **Text was rendering black on a near-black background, app-wide.** The shell's `Scaffold` uses a
+  transparent container, and Material derives a Scaffold's content colour from its container; a
+  transparent container resolves to *unspecified*, so every `Text` that did not set a colour
+  explicitly inherited black. `LocalContentColor` is now pinned in the theme. This is the root
+  cause behind "text not being visible with the background" — it was one defect, not a per-screen
+  styling problem.
+- **Muted ink measured 7.3:1**, which passes WCAG on paper while reading as hidden on a phone.
+  Raised to 10.2:1, with a separate 6.3:1 tertiary ink so genuinely decorative text still recedes.
+- **Six statistic tiles were crammed into one row** across a 393dp screen, wrapping every label
+  into unreadable fragments ("Sche / duled"). Added a grid that chunks into rows.
+- **Emphasis was backwards**: values were rendered in the muted ink and labels in the bright one.
+- **Section headings inherited an ambient colour** and rendered near-black on one screen; heading
+  colour is now explicit.
+- **Change explanations printed raw `ZonedDateTime`**, so a person read "Moved from
+  10:35:33.580 to 11:10:23.569999". Now formatted to the minute.
+- **A full 36-character revision UUID** was shown as the plan's label; now `Revision …4a9f applied`.
+- **A full-day availability window rendered as `00:00–00:00`.**
+- **The Schedule screen loaded every task including simulated ones**, so after loading the
+  simulation a user opened their own day to find the simulation's breakfast scheduled four times
+  and 119 tasks it could not place. It now plans only the user's own work.
+- **The Edge Function's default Groq model had been retired.** `llama-3.3-70b-versatile` now
+  returns `{"code":"model_not_found"}` from Groq. The default is `qwen/qwen3.8-27b`, confirmed
+  working. Groq would have failed through the gateway until this was fixed.
+
+### Added
+
+- `ui/design/Surfaces.kt` — `ChronaCard`, `StatTile`, `StatTileGrid`, `StatRow`, `StatBlock` and
+  `SectionHeading`, used by every screen so panels agree instead of each inventing its own layout.
+- `InkFaint`, a third ink level, exposed on the token set.
+
+### AI: verified rather than assumed
+
+The build was found to be cloud-enabled against a **hosted** Supabase function, and that function
+is genuinely live: a signed request returned `{"provider":"gemini", ...}` with a real draft for
+"study DBMS for two hours tomorrow". So the app's `AI-assisted` label was honest. Gemini is
+therefore verified live end to end; **Groq through the gateway is not**, because `GROQ_API_KEY` is
+not set as a function secret and no Supabase CLI credentials exist here to redeploy with it.
+
+No provider key was committed at any point; keys live in the function environment only.
+
+### Verification (all run)
+
+| Check | Result |
+|---|---|
+| `./scripts/verify.sh --with-instrumentation` | **PASS** |
+| `testDebugUnitTest` | **431 tests, 0 failures** |
+| `lintDebug` | 0 errors, 0 warnings (14 version-currency hints) |
+| `connectedDebugAndroidTest` on moto g54 5G / API 35 | **30 tests, 0 failures** |
+| `deno test` on the Supabase gateway | **24 tests, 0 failures** |
+| Live hosted function | real Gemini draft returned |
+| Live Groq API | key valid, chat completes, default model corrected |
+
 ## 2026-10-19 — Scheduling correctness, multi-day planning, and a simulated 14-day life
 
 Audit of the existing app, followed by focused work. Every claim below is backed by a command that

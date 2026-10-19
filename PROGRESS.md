@@ -8,7 +8,7 @@ revision (ADR-036: requested-date horizon handling + deadline-aware ordering, po
 is implemented and verified for automated checks. Multi-day planning and a reproducible 14-day
 life simulation were added on 2026-10-19 (ADR-040), and the full suite now passes on a physical
 `moto g54 5G` (Android 15 / API 35).
-**Last updated:** 19 October 2026
+**Last updated:** 19 October 2026 (second pass: interface legibility, live AI verification)
 
 ## 2026-10-19 — Scheduling correctness, multi-day planning, life simulation, device verification
 
@@ -64,9 +64,11 @@ added on top of the existing engine rather than beside it. The whole suite now r
 
 ### Still NOT verified
 
-- **Live Groq/Gemini:** no provider credentials are configured here, so no live provider call was
-  made in this work. The gateway, wire-mapper and deterministic-fallback tests pass; the hosted
-  Supabase deploy remains NOT RUN (OPEN-018).
+- **Live Groq/Gemini:** the hosted Supabase function turned out to be deployed and reachable, and
+  it returned a real Gemini draft, so **Gemini is verified live end to end**. A Groq key is valid
+  and completes chat requests, but `GROQ_API_KEY` is not set as a function secret and no Supabase
+  CLI credentials exist here, so **Groq through the gateway is NOT verified** (OPEN-018). The
+  function's previous default Groq model had been retired and has been corrected.
 - **Voice capture end to end** (OPEN-007), **notification / overlay runtime behaviour** (OPEN-011)
   and **TalkBack / large-font passes** are unchanged and still open.
 - **Windows host** build has never been run.
@@ -1125,7 +1127,10 @@ real hardware.
       Groq → Gemini → OpenRouter failover, and an off-by-default app client that falls back to
       the deterministic parser on any failure. 24 gateway tests (`node --test`) + 20 JVM/Robolectric
       app tests. Live provider RUN against a local Deno function with a real Gemini key via the app's
-      own client (2/3 phrases); hosted Supabase deploy NOT RUN (OPEN-018).
+      own client (2/3 phrases), and on 2026-10-19 the **hosted** deploy was confirmed reachable and
+      returned a real Gemini draft. Still open: Groq through the gateway — the key is not set as a
+      function secret and no Supabase CLI credentials exist here — and the function's previous
+      default Groq model had been retired, now corrected (OPEN-018).
 - [ ] P07 — privacy, resilience, accessibility.
 - [ ] P08 — URE evaluation and final release.
 
