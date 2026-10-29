@@ -3,11 +3,12 @@ Schedule Repair Engine
 =======================
 Proposes 3 strategies when a schedule conflict occurs:
   1. Move — shift the task to the next free slot today
-  2. Split — break the task into two shorter blocks
+  2. Split — break the task into two shorter blocks in actual free slots
   3. Defer — move to tomorrow (only if deadline allows)
 
 Every repair is scored before proposing to user.
-A repair is REJECTED if it makes urgency_score > 0.9.
+A repair is REJECTED if it makes urgency_score > 0.9 (computed from proposed time).
+Proposals must pass the independent validator.
 
 Usage:
     from scheduling.repair_engine import RepairEngine
@@ -18,9 +19,28 @@ Usage:
 
 Vercel Equivalent: N/A (repair engine runs only on Python backend)
 """
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Dict
 from .edf import Task
+from .validator import validate_plan
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware in UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _now_utc() -> datetime:
+    """Current time in UTC."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_dt(dt_str: str) -> datetime:
+    """Parse ISO string to timezone-aware datetime."""
+    dt = datetime.fromisoformat(dt_str)
+    return _ensure_utc(dt)
 
 
 class RepairEngine:
@@ -29,8 +49,10 @@ class RepairEngine:
 
     Design principles:
     - Never propose a repair that makes urgency > 0.9 (too risky)
+    - Urgency is calculated from the PROPOSED slot time, not current time
     - Always include risk level (low/medium/critical) for user decision
     - Proposals are ranked by safety (lowest risk first)
+    - Every proposal must pass validate_plan
     """
 
     URGENCY_LIMIT = 0.9   # never propose a repair that cuts it this close
@@ -62,11 +84,11 @@ class RepairEngine:
 
         if deadline_str:
             try:
-                deadline = datetime.fromisoformat(str(deadline_str).replace("Z", "+00:00").replace("+00:00", ""))
+                deadline = _parse_dt(deadline_str)
             except (ValueError, TypeError):
-                deadline = datetime.now() + timedelta(days=7)
+                deadline = _now_utc() + timedelta(days=7)
         else:
-            deadline = datetime.now() + timedelta(days=7)
+            deadline = _now_utc() + timedelta(days=7)
 
         task = Task(
             id=disrupted_task.get("id", "unknown"),
@@ -77,50 +99,89 @@ class RepairEngine:
             flexibility=disrupted_task.get("flexibility", True),
         )
 
-        # Strategy 1: Move to next free slot today
+        # Convert free_slots to TimeSlot objects
+        slot_objs = []
         for slot in free_slots:
             try:
-                slot_start = datetime.fromisoformat(str(slot["start"]).replace("Z", "+00:00").replace("+00:00", ""))
-                slot_end   = datetime.fromisoformat(str(slot["end"]).replace("Z", "+00:00").replace("+00:00", ""))
-            except (ValueError, TypeError):
+                slot_start = _parse_dt(slot["start"])
+                slot_end = _parse_dt(slot["end"])
+                if slot_end > slot_start:
+                    slot_objs.append({"start": slot_start, "end": slot_end, "minutes": (slot_end - slot_start).total_seconds() / 60})
+            except (ValueError, TypeError, KeyError):
                 continue
 
-            slot_minutes = (slot_end - slot_start).total_seconds() / 60
+        # Sort by start time
+        slot_objs.sort(key=lambda s: s["start"])
 
-            if slot_minutes >= task.duration_minutes:
-                # Check urgency after move
-                if task.urgency_score() <= self.URGENCY_LIMIT:
-                    proposals.append({
-                        "strategy": "move_today",
-                        "label": f"Move to {slot_start.strftime('%I:%M %p')} today",
-                        "new_start": slot_start.isoformat(),
-                        "new_end": (slot_start + timedelta(minutes=task.duration_minutes)).isoformat(),
-                        "urgency_after": round(task.urgency_score(), 2),
-                        "risk": "low"
-                    })
-                    break  # Only propose the first viable slot
+        # Strategy 1: Move to next valid free slot (before deadline)
+        for slot in slot_objs:
+            if slot["minutes"] >= task.duration_minutes:
+                proposed_start = slot["start"]
+                proposed_end = proposed_start + timedelta(minutes=task.duration_minutes)
+                
+                # Validate: proposed_end must be <= deadline
+                if proposed_end <= task.deadline:
+                    # Calculate urgency from PROPOSED time
+                    urgency_after = task.urgency_score(from_time=proposed_end)
+                    
+                    if urgency_after <= self.URGENCY_LIMIT:
+                        proposals.append({
+                            "strategy": "move_today",
+                            "label": f"Move to {proposed_start.strftime('%I:%M %p')} today",
+                            "new_start": proposed_start.isoformat(),
+                            "new_end": proposed_end.isoformat(),
+                            "urgency_after": round(urgency_after, 2),
+                            "risk": "low" if urgency_after < 0.5 else "medium"
+                        })
+                        break  # Only propose the first viable slot
 
-        # Strategy 2: Split task into two halves
+        # Strategy 2: Split task into blocks that fit in actual free slots
         half = task.duration_minutes // 2
-        if half >= 20 and len(free_slots) >= 2:
-            proposals.append({
-                "strategy": "split",
-                "label": f"Split into 2 x {half}-min blocks",
-                "blocks": 2,
-                "block_duration": half,
-                "urgency_after": round(task.urgency_score() * 0.6, 2),
-                "risk": "medium",
-                "note": "Cognitive load is higher with split sessions"
-            })
+        if half >= 20:
+            # Find two slots that can accommodate half-duration each
+            valid_slots_for_half = [s for s in slot_objs if s["minutes"] >= half]
+            
+            if len(valid_slots_for_half) >= 2:
+                # Assign to first two valid slots
+                block_assignments = []
+                for i, slot in enumerate(valid_slots_for_half[:2]):
+                    block_start = slot["start"]
+                    block_end = block_start + timedelta(minutes=half)
+                    block_assignments.append({
+                        "block": i + 1,
+                        "start": block_start.isoformat(),
+                        "end": block_end.isoformat(),
+                        "duration_minutes": half
+                    })
+                
+                # Validate the split plan
+                plan = [{"start": a["start"], "end": a["end"], "task_id": f"{task.id}_block_{a['block']}"} for a in block_assignments]
+                fixed_items = []  # No fixed items in repair context
+                windows = [{"start": s["start"].isoformat(), "end": s["end"].isoformat()} for s in slot_objs]
+                
+                validation = validate_plan(plan, fixed_items, windows)
+                if validation["valid"]:
+                    urgency_after = task.urgency_score(from_time=valid_slots_for_half[1]["end"])
+                    if urgency_after <= self.URGENCY_LIMIT:
+                        proposals.append({
+                            "strategy": "split",
+                            "label": f"Split into 2 x {half}-min blocks",
+                            "blocks": 2,
+                            "block_duration": half,
+                            "block_assignments": block_assignments,
+                            "urgency_after": round(urgency_after, 2),
+                            "risk": "medium",
+                            "note": "Cognitive load is higher with split sessions"
+                        })
 
-        # Strategy 3: Defer to tomorrow
-        tomorrow_9am = (datetime.now() + timedelta(days=1)).replace(
+        # Strategy 3: Defer to tomorrow morning
+        tomorrow_9am = (_now_utc() + timedelta(days=1)).replace(
             hour=9, minute=0, second=0, microsecond=0
         )
         simulated_end = tomorrow_9am + timedelta(minutes=task.duration_minutes)
 
         # Calculate urgency as if task is at tomorrow 9am
-        time_to_deadline = (deadline - tomorrow_9am).total_seconds() / 60
+        time_to_deadline = (deadline - simulated_end).total_seconds() / 60
         tomorrow_urgency = task.duration_minutes / max(time_to_deadline, 1)
 
         if tomorrow_urgency <= self.URGENCY_LIMIT:
@@ -151,9 +212,9 @@ class RepairEngine:
 # SELF-TEST
 # ============================================================
 if __name__ == "__main__":
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     task = {
         "id": "task-001",

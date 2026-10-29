@@ -74,7 +74,7 @@ def enrichment_node(state: dict, gemini_client: Any) -> dict:
         )
 
         try:
-            model = gemini_client.GenerativeModel(model_name="gemini-2.5-flash")
+            model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
             response = model.generate_content(prompt)
             raw = response.text.strip()
 

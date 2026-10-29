@@ -14,7 +14,17 @@ if (!GEMINI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
     console.warn('Missing environment variables for Gemini or Supabase.');
 }
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+
+// Timeout wrapper for Gemini API calls
+const GEMINI_TIMEOUT = 30000 // 30 seconds
+
+function withTimeout(promise, ms, errorMessage = 'Gemini API timeout') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(errorMessage)), ms)),
+    ])
+};
 
 // ==============================
 // GEMINI PROMPT
@@ -61,8 +71,8 @@ If a field is missing, return null for that field.
 // SUPABASE INSERT
 // ==============================
 
-async function insertIntoSupabase(eventData) {
-    const cleanData = {};
+async function insertIntoSupabase(eventData, userId) {
+    const cleanData = { user_id: userId };
     for (const key of ['title', 'category', 'venue', 'event_datetime']) {
         if (eventData[key] != null) {
             cleanData[key] = eventData[key];
@@ -79,7 +89,7 @@ async function insertIntoSupabase(eventData) {
             apikey: SUPABASE_ANON_KEY,
             Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
             'Content-Type': 'application/json',
-            Prefer: 'return=minimal',
+            Prefer: 'return=representation',
         },
         body: JSON.stringify(cleanData),
     });
@@ -97,38 +107,46 @@ async function insertIntoSupabase(eventData) {
 // ==============================
 
 async function extractFromText(text) {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const prompt = `${getExtractionPrompt()}\n\nText to analyze:\n${text}`;
-    const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-    });
-    return JSON.parse(result.response.text());
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+    const prompt = `${getExtractionPrompt()}\n\nText to analyze:\n${text}`
+    const result = await withTimeout(
+        model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json' },
+        }),
+        GEMINI_TIMEOUT,
+        'Gemini text extraction timeout'
+    )
+    return JSON.parse(result.response.text())
 }
 
 async function extractFromFile(filePath, mimeType) {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const fileBuffer = fs.readFileSync(filePath);
-    const base64Data = fileBuffer.toString('base64');
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+    const fileBuffer = fs.readFileSync(filePath)
+    const base64Data = fileBuffer.toString('base64')
 
-    const result = await model.generateContent({
-        contents: [
-            {
-                role: 'user',
-                parts: [
-                    { text: getExtractionPrompt() },
-                    {
-                        inlineData: {
-                            mimeType: mimeType,
-                            data: base64Data,
+    const result = await withTimeout(
+        model.generateContent({
+            contents: [
+                {
+                    role: 'user',
+                    parts: [
+                        { text: getExtractionPrompt() },
+                        {
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Data,
+                            },
                         },
-                    },
-                ],
-            },
-        ],
-        generationConfig: { responseMimeType: 'application/json' },
-    });
-    return JSON.parse(result.response.text());
+                    ],
+                },
+            ],
+            generationConfig: { responseMimeType: 'application/json' },
+        }),
+        GEMINI_TIMEOUT,
+        'Gemini file extraction timeout'
+    )
+    return JSON.parse(result.response.text())
 }
 
 // ==============================
@@ -215,7 +233,8 @@ export default async function handler(req, res) {
         }
 
         // Insert into Supabase
-        await insertIntoSupabase(extractedData);
+        const userId = req.headers['x-user-id'] || '00000000-0000-0000-0000-000000000001';
+        await insertIntoSupabase(extractedData, userId);
 
         return res.status(200).json({
             success: true,

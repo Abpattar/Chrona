@@ -60,12 +60,13 @@ def parser_node(state: dict, gemini_client) -> dict:
 
     try:
         if state["input_type"] == "text":
-            model = gemini_client.GenerativeModel(model_name="gemini-2.5-flash")
+            model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
             full_prompt = f"{prompt_with_date}\n\nText to analyze:\n{state['raw_input']}"
 
             response = model.generate_content(
                 full_prompt,
                 generation_config={"response_mime_type": "application/json"},
+                request_options={"timeout": 10}
             )
             raw_text = response.text
             parsed = json.loads(raw_text)
@@ -77,19 +78,44 @@ def parser_node(state: dict, gemini_client) -> dict:
                 state["extracted_events"].append(parsed)
 
         elif state["input_type"] in ("image", "pdf", "file"):
-            # Write bytes to temp file and upload to Gemini
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as tmp:
+            # Write bytes to temp file and upload to Gemini with proper MIME type
+            mime_map = {
+                "image": "image/png",  # default for images
+                "pdf": "application/pdf",
+                "file": "application/octet-stream",
+            }
+            suffix_map = {
+                "image": ".png",
+                "pdf": ".pdf",
+                "file": ".tmp",
+            }
+            mime_type = mime_map.get(state["input_type"], "application/octet-stream")
+            suffix = suffix_map.get(state["input_type"], ".tmp")
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(state["input_bytes"])
                 tmp_path = tmp.name
 
             try:
                 import google.generativeai as genai
-                uploaded = genai.upload_file(path=tmp_path)
-                model = gemini_client.GenerativeModel(model_name="gemini-2.5-flash")
+                import base64
+                
+                # Read file and encode as base64 for inline data (more reliable than upload_file)
+                with open(tmp_path, "rb") as f:
+                    file_data = f.read()
+                
+                # Use inline data instead of upload_file to avoid connection timeouts
+                inline_data = {
+                    "mime_type": mime_type,
+                    "data": base64.b64encode(file_data).decode('utf-8')
+                }
+                
+                model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
 
                 response = model.generate_content(
-                    [prompt_with_date, uploaded],
+                    [prompt_with_date, inline_data],
                     generation_config={"response_mime_type": "application/json"},
+                    request_options={"timeout": 10}
                 )
                 raw_text = response.text
                 parsed = json.loads(raw_text)

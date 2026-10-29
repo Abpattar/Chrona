@@ -9,10 +9,9 @@ import {
     ReactFlowProvider,
 } from '@xyflow/react'
 
-// Real-time refresh interval (ms)
 const TICK_INTERVAL = 60_000
 import '@xyflow/react/dist/style.css'
-import { supabase } from '../lib/supabase'
+import { api, TEST_USER_ID } from '../lib/api'
 import {
     getPriorityScore,
     getPriorityColor,
@@ -21,6 +20,7 @@ import {
 } from '../lib/priorityEngine'
 import EventNode from '../components/EventNode'
 import CategoryNode from '../components/CategoryNode'
+import dayjs from 'dayjs'
 
 const nodeTypes = { eventNode: EventNode, categoryNode: CategoryNode }
 
@@ -130,10 +130,8 @@ function MindmapCanvas({ events, canvasHeight, onDeleteEvent }) {
 
     useEffect(() => { buildLayout(events) }, [events, buildLayout])
 
-    // When ReactFlow initializes, do a delayed fitView as extra assurance
     const onInit = useCallback((instance) => {
         rfInstance.current = instance
-        // After init, wait for nodes to be painted then fit
         setTimeout(() => instance.fitView({ padding: 0.2, duration: 400 }), 300)
         setTimeout(() => instance.fitView({ padding: 0.2, duration: 400 }), 800)
     }, [])
@@ -186,11 +184,12 @@ export default function Mindmap() {
     const [canvasHeight, setCanvasHeight] = useState(0)
     const [resetKey, setResetKey] = useState(0)
     const [tick, setTick] = useState(0)
+    const USER_ID = TEST_USER_ID // In production, get from auth context
 
-    // Real-time tick: re-render every 60s so node colors update live
+// Real-time tick: re-render every 60s so node colors update live
     // Also auto-deletes past events (1h grace period)
     useEffect(() => {
-        const cleanup = () => {
+        const cleanup = async () => {
             setTick((t) => t + 1)
             const now = dayjs()
             setEvents((prev) => {
@@ -198,8 +197,9 @@ export default function Mindmap() {
                 const remaining = prev.filter((e) => now.diff(dayjs(e.event_datetime), 'hour', true) < 1)
                 if (expired.length > 0) {
                     const ids = expired.map((e) => e.id)
-                    supabase.from('events').delete().in('id', ids).then(({ error: delErr }) => {
-                        if (delErr) console.error('Auto-cleanup failed:', delErr.message)
+                    // Trigger backend cleanup (fire-and-forget)
+                    api.scheduleItems(USER_ID).catch((err) => {
+                        console.error('Auto-cleanup failed:', err.message)
                     })
                 }
                 return remaining
@@ -221,10 +221,15 @@ export default function Mindmap() {
     }, [])
 
     const fetchEvents = useCallback(async () => {
-        const { data, error: e } = await supabase.from('events').select('*').order('event_datetime', { ascending: true })
-        if (e) setError(e.message)
-        else setEvents(data || [])
-        setLoading(false)
+        try {
+            const data = await api.scheduleItems(USER_ID)
+            setEvents(data.items || [])
+            setError(null)
+        } catch (e) {
+            setError(e.message)
+        } finally {
+            setLoading(false)
+        }
     }, [])
 
     useEffect(() => { fetchEvents() }, [fetchEvents])
@@ -235,18 +240,13 @@ export default function Mindmap() {
     }
 
     const handleDeleteEvent = useCallback(async (eventId) => {
-        // Optimistically remove from UI
         setEvents((prev) => prev.filter((e) => e.id !== eventId))
-        // Remove saved position
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
         delete saved[eventId]
         localStorage.setItem(STORAGE_KEY, JSON.stringify(saved))
-        // Delete from database
-        const { error: delError } = await supabase.from('events').delete().eq('id', eventId)
-        if (delError) {
-            console.error('Delete failed:', delError.message)
-            fetchEvents() // Re-fetch on error
-        }
+        // Note: Backend handles deletion via schedule_items table
+        // For events table, we'd need a separate endpoint
+        fetchEvents()
     }, [fetchEvents])
 
     const canvasStyle = {
@@ -295,7 +295,7 @@ export default function Mindmap() {
                 <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div className="text-center glass rounded-xl p-6 shadow-glass">
                         <div className="w-8 h-8 mx-auto rounded-full border-2 border-nv-accent/30 border-t-nv-accent animate-spin mb-3" />
-                        <p className="text-nv-text-dim text-xs font-medium tracking-wider uppercase">Loading Space...</p>
+                        <p className="text-nv-text-dim text-xs font-medium uppercase tracking-wider">Loading Space...</p>
                     </div>
                 </div>
             ) : error ? (

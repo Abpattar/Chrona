@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { api, TEST_USER_ID } from '../lib/api'
 import {
     sortByPriority,
     getPriorityScore,
@@ -12,8 +12,8 @@ import {
 import PriorityCard from '../components/PriorityCard'
 import dayjs from 'dayjs'
 
-// Real-time refresh interval (ms)
 const TICK_INTERVAL = 60_000
+const USER_ID = TEST_USER_ID
 
 export default function Priority() {
     const [events, setEvents] = useState([])
@@ -24,9 +24,9 @@ export default function Priority() {
 
     const fetchEvents = useCallback(async () => {
         try {
-            const { data, error: fetchError } = await supabase.from('events').select('*')
-            if (fetchError) throw fetchError
-            setEvents(data || [])
+            const data = await api.scheduleItems(USER_ID)
+            setEvents(data.items || [])
+            setError(null)
         } catch (err) {
             setError(err.message)
         } finally {
@@ -45,13 +45,7 @@ export default function Priority() {
             setEvents((prev) => {
                 const expired = prev.filter((e) => now.diff(dayjs(e.event_datetime), 'hour', true) >= 1)
                 const remaining = prev.filter((e) => now.diff(dayjs(e.event_datetime), 'hour', true) < 1)
-                // Delete expired events from database in background
-                if (expired.length > 0) {
-                    const ids = expired.map((e) => e.id)
-                    supabase.from('events').delete().in('id', ids).then(({ error: delErr }) => {
-                        if (delErr) console.error('Auto-cleanup failed:', delErr.message)
-                    })
-                }
+                // Note: Backend handles cleanup via schedule_items
                 return remaining
             })
         }
@@ -61,11 +55,8 @@ export default function Priority() {
 
     const handleDeleteEvent = useCallback(async (eventId) => {
         setEvents((prev) => prev.filter((e) => e.id !== eventId))
-        const { error: delError } = await supabase.from('events').delete().eq('id', eventId)
-        if (delError) {
-            console.error('Delete failed:', delError.message)
-            fetchEvents()
-        }
+        // Note: Backend handles deletion via schedule_items table
+        fetchEvents()
     }, [fetchEvents])
 
     // These re-compute every tick because dayjs() inside returns fresh values
@@ -184,10 +175,10 @@ export default function Priority() {
                                 ? 'text-white'
                                 : 'text-nv-text-dim hover:text-nv-text'
                                 }`}
-                            style={view === tab.id ? {
-                                background: 'linear-gradient(135deg, #4da3ff, #6366f1)',
-                                boxShadow: '0 2px 12px rgba(77, 163, 255, 0.3)',
-                            } : {}}
+                        style={view === tab.id ? {
+                            background: 'linear-gradient(135deg, #4da3ff, #6366f1)',
+                            boxShadow: '0 2px 12px rgba(77, 163, 255, 0.3)',
+                        } : {}}
                         >
                             {tab.label}
                         </button>

@@ -60,7 +60,7 @@ def explanation_node(state: dict, gemini_client: Any = None) -> dict:
             prompt = EXPLANATION_PROMPT.format(
                 context_json=json.dumps(context, indent=2)
             )
-            model = gemini_client.GenerativeModel(model_name="gemini-2.5-flash")
+            model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
             response = model.generate_content(prompt)
             state["explanation"] = response.text.strip()
         except Exception as e:
