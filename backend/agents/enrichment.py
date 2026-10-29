@@ -44,7 +44,7 @@ Return format (JSON array only):
 """
 
 
-def enrichment_node(state: dict, gemini_client: Any) -> dict:
+def enrichment_node(state: dict, gemini_client: Any, groq_client=None) -> dict:
     """
     Enrich extracted events by generating study blocks from key_topics.
 
@@ -55,12 +55,36 @@ def enrichment_node(state: dict, gemini_client: Any) -> dict:
     Args:
         state: ChronaState dict
         gemini_client: google.generativeai configured client
+        groq_client: optional Groq client for fallback
 
     Updates state with:
         - enriched_tasks: list of study block dicts
     """
     enriched_tasks = []
     state["errors"] = state.get("errors", [])
+
+    def _enrich_with_gemini(prompt_text):
+        model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
+        response = model.generate_content(prompt_text)
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip())
+
+    def _enrich_with_groq(prompt_text):
+        if not groq_client:
+            raise Exception("Groq client not available")
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt_text}],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        return json.loads(response.choices[0].message.content)
 
     for event in state.get("extracted_events", []):
         # Only enrich events with prep work needed
@@ -74,20 +98,18 @@ def enrichment_node(state: dict, gemini_client: Any) -> dict:
         )
 
         try:
-            model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
-            response = model.generate_content(prompt)
-            raw = response.text.strip()
+            if gemini_client:
+                try:
+                    tasks = _enrich_with_gemini(prompt)
+                except Exception as e:
+                    print(f"⚠️ Enrichment Gemini failed: {e}, trying Groq...")
+                    if groq_client:
+                        tasks = _enrich_with_groq(prompt)
+                    else:
+                        raise
+            else:
+                tasks = _enrich_with_groq(prompt)
 
-            # Clean JSON (strip markdown fences if present)
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                # Remove first and last lines (``` markers)
-                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            raw = raw.strip()
-
-            tasks = json.loads(raw)
             for task in tasks:
                 task["event_id"] = event.get("id")
                 task["user_id"]  = state.get("user_id")

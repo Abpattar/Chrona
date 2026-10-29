@@ -35,7 +35,7 @@ from .repair import repair_node
 from .explanation import explanation_node
 
 
-def build_chrona_graph(gemini_client, supabase_client, redis_client=None):
+def build_chrona_graph(gemini_client, supabase_client, redis_client=None, groq_client=None):
     """
     Build the LangGraph state machine for Chrona.
 
@@ -43,6 +43,7 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None):
         gemini_client: google.generativeai module (configured)
         supabase_client: Supabase client instance
         redis_client: optional Redis client for caching
+        groq_client: optional Groq client for fallback
 
     Returns:
         Compiled LangGraph graph, or None if langgraph not available.
@@ -150,8 +151,8 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None):
         # Build graph
         graph = StateGraph(ChronaState)
         graph.add_node("ingestion",      lambda s: ingestion_node(s))
-        graph.add_node("parser",         lambda s: parser_node(s, gemini_client))
-        graph.add_node("enrichment",     lambda s: enrichment_node(s, gemini_client))
+        graph.add_node("parser",         lambda s: parser_node(s, gemini_client, groq_client))
+        graph.add_node("enrichment",     lambda s: enrichment_node(s, gemini_client, groq_client))
         graph.add_node("scheduling",     scheduling_node)
         graph.add_node("conflict_check", conflict_check_node)
         graph.add_node("repair",         lambda s: repair_node(s, gemini_client, redis_client))
@@ -176,7 +177,7 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None):
         return None
 
 
-def run_pipeline(state: dict, gemini_client, supabase_client, redis_client=None) -> dict:
+def run_pipeline(state: dict, gemini_client, supabase_client, redis_client=None, groq_client=None) -> dict:
     """
     Sequential fallback when LangGraph is not available.
     Runs the same nodes in order without the graph framework.
@@ -196,10 +197,10 @@ def run_pipeline(state: dict, gemini_client, supabase_client, redis_client=None)
     state = ingestion_node(state)
 
     # 2. Parser
-    state = parser_node(state, gemini_client)
+    state = parser_node(state, gemini_client, groq_client)
 
     # 3. Enrichment
-    state = enrichment_node(state, gemini_client)
+    state = enrichment_node(state, gemini_client, groq_client)
 
     # 4. Scheduling (behavior weights)
     from behavior.profile import BehaviorProfile

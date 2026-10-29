@@ -23,19 +23,28 @@ from dotenv import load_dotenv
 load_dotenv('/home/neo/Codes/neuravex/.env')
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
-if not all([GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]):
+if not all([SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]):
     print("⚠️ WARNING: Missing necessary environment variables (.env)")
+
+if not GEMINI_API_KEY and not GROQ_API_KEY:
+    print("⚠️ WARNING: No AI API keys configured (GEMINI_API_KEY or GROQ_API_KEY)")
 
 # Use available Gemini model (2.5-flash is deprecated)
 GEMINI_MODEL = "gemini-flash-latest"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
-genai.configure(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+groq_client = None
+if GROQ_API_KEY:
+    from groq import Groq
+    groq_client = Groq(api_key=GROQ_API_KEY)
 
 # ==============================
 # FASTAPI APP
@@ -307,13 +316,36 @@ Rules:
 """ % datetime.now().strftime("%Y-%m-%d")
 
 def extract_with_gemini(text: str) -> list:
-    model = genai.GenerativeModel(model_name=GEMINI_MODEL)
-    prompt = f"{CHRONA_EXTRACTION_PROMPT}\n\nInput:\n{text}"
-    response = model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json"},
-    )
-    return json.loads(response.text)
+    """Extract events using Gemini with Groq fallback."""
+    # Try Gemini first
+    if GEMINI_API_KEY:
+        try:
+            model = genai.GenerativeModel(model_name=GEMINI_MODEL)
+            prompt = f"{CHRONA_EXTRACTION_PROMPT}\n\nInput:\n{text}"
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"⚠️ Gemini extraction failed: {e}, trying Groq...")
+    
+    # Fallback to Groq
+    if groq_client:
+        try:
+            prompt = f"{CHRONA_EXTRACTION_PROMPT}\n\nInput:\n{text}"
+            response = groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_tokens=4096,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"⚠️ Groq extraction failed: {e}")
+    
+    raise Exception("Both Gemini and Groq extraction failed")
 
 # ==============================
 # AGENT PIPELINE (handles text, images, PDFs)
