@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import {
   ReactFlow,
   Background,
@@ -9,6 +9,7 @@ import {
   Handle,
   Position,
   MarkerType,
+  ReactFlowProvider,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dayjs from 'dayjs'
@@ -26,9 +27,9 @@ export function getNodeTheme(item) {
   if (isCompleted) {
     return {
       border: '#10b981',
-      bg: 'rgba(16, 185, 129, 0.12)',
+      bg: 'rgba(16, 185, 129, 0.14)',
       glow: '0 0 16px rgba(16, 185, 129, 0.35)',
-      badgeBg: 'rgba(16, 185, 129, 0.2)',
+      badgeBg: 'rgba(16, 185, 129, 0.22)',
       badgeText: '#34d399',
       label: '✓ COMPLETED',
       textStyle: 'line-through text-slate-400',
@@ -38,9 +39,9 @@ export function getNodeTheme(item) {
   if (isPending) {
     return {
       border: '#f59e0b',
-      bg: 'rgba(245, 158, 11, 0.14)',
+      bg: 'rgba(245, 158, 11, 0.16)',
       glow: '0 0 18px rgba(245, 158, 11, 0.4)',
-      badgeBg: 'rgba(245, 158, 11, 0.22)',
+      badgeBg: 'rgba(245, 158, 11, 0.25)',
       badgeText: '#fbbf24',
       label: '⏳ PENDING',
       textStyle: 'text-amber-100 font-semibold',
@@ -64,7 +65,7 @@ export function getNodeTheme(item) {
     case 1:
       return {
         border: '#ef4444',
-        bg: 'rgba(239, 68, 68, 0.16)',
+        bg: 'rgba(239, 68, 68, 0.18)',
         glow: '0 0 22px rgba(239, 68, 68, 0.45)',
         badgeBg: 'rgba(239, 68, 68, 0.25)',
         badgeText: '#f87171',
@@ -74,9 +75,9 @@ export function getNodeTheme(item) {
     case 2:
       return {
         border: '#f97316',
-        bg: 'rgba(249, 115, 22, 0.14)',
+        bg: 'rgba(249, 115, 22, 0.16)',
         glow: '0 0 18px rgba(249, 115, 22, 0.35)',
-        badgeBg: 'rgba(249, 115, 22, 0.22)',
+        badgeBg: 'rgba(249, 115, 22, 0.24)',
         badgeText: '#fb923c',
         label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : '★ HIGH PRIORITY',
         textStyle: 'text-orange-100 font-semibold',
@@ -84,9 +85,9 @@ export function getNodeTheme(item) {
     case 3:
       return {
         border: '#06b6d4',
-        bg: 'rgba(6, 182, 212, 0.12)',
+        bg: 'rgba(6, 182, 212, 0.14)',
         glow: '0 0 16px rgba(6, 182, 212, 0.3)',
-        badgeBg: 'rgba(6, 182, 212, 0.2)',
+        badgeBg: 'rgba(6, 182, 212, 0.22)',
         badgeText: '#38bdf8',
         label: isRescheduled ? '↻ AUTO-RESCHEDULED' : '● NORMAL',
         textStyle: 'text-cyan-100 font-semibold',
@@ -94,9 +95,9 @@ export function getNodeTheme(item) {
     default:
       return {
         border: '#8b5cf6',
-        bg: 'rgba(139, 92, 246, 0.1)',
+        bg: 'rgba(139, 92, 246, 0.12)',
         glow: '0 0 12px rgba(139, 92, 246, 0.25)',
-        badgeBg: 'rgba(139, 92, 246, 0.18)',
+        badgeBg: 'rgba(139, 92, 246, 0.2)',
         badgeText: '#a78bfa',
         label: isRescheduled ? '↻ RESCHEDULED' : '○ LOW',
         textStyle: 'text-slate-200',
@@ -117,7 +118,7 @@ function ScheduleTaskNode({ data }) {
     <div
       className="relative px-3.5 py-3 min-w-[210px] max-w-[260px] rounded-xl transition-all duration-200 group"
       style={{
-        background: 'rgba(12, 19, 42, 0.92)',
+        background: 'rgba(12, 19, 42, 0.94)',
         backdropFilter: 'blur(10px)',
         border: `1.5px solid ${theme.border}`,
         boxShadow: `${theme.glow}, 0 8px 24px rgba(0,0,0,0.5)`,
@@ -221,7 +222,6 @@ function ScheduleTaskNode({ data }) {
 // ── Custom Node: Date Branch (Day Hub) ────────────────────────────────────────
 function DateBranchNode({ data }) {
   const { dateLabel, dayName, count, totalDuration, isToday, isPending } = data
-
   const accentColor = isToday ? '#38bdf8' : isPending ? '#f59e0b' : '#a78bfa'
 
   return (
@@ -254,11 +254,11 @@ function DateBranchNode({ data }) {
 
 // ── Custom Node: Center Timeline Core ─────────────────────────────────────────
 function CenterTimelineNode({ data }) {
-  const { total, completed, pending, onAutoRescheduleAll } = data
+  const { total, completed, pending, onAutoRescheduleAll, onLoadSamples } = data
 
   return (
     <div
-      className="relative px-6 py-4 rounded-3xl min-w-[200px] text-center transition-all select-none"
+      className="relative px-6 py-4 rounded-3xl min-w-[210px] text-center transition-all select-none"
       style={{
         background: 'radial-gradient(circle, #1e3a6a, #0b132b)',
         border: '2px solid rgba(77, 163, 255, 0.7)',
@@ -288,6 +288,18 @@ function CenterTimelineNode({ data }) {
         </span>
       </div>
 
+      {total === 0 && onLoadSamples && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onLoadSamples()
+          }}
+          className="mt-3 text-[10px] font-bold px-3 py-1.5 rounded-xl transition-all shadow-glow text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110"
+        >
+          ✦ Load Sample Student Schedule
+        </button>
+      )}
+
       {pending > 0 && onAutoRescheduleAll && (
         <button
           onClick={(e) => {
@@ -314,7 +326,7 @@ const nodeTypes = {
 }
 
 // ── Layout Generator ─────────────────────────────────────────────────────────
-function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll }) {
+function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll, onLoadSamples }) {
   const nodes = []
   const edges = []
 
@@ -332,6 +344,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
       completed: completedCount,
       pending: pendingCount,
       onAutoRescheduleAll,
+      onLoadSamples,
     },
     draggable: true,
   })
@@ -340,14 +353,14 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
   const groups = {}
   items.forEach(item => {
     let key = 'pending'
-    if (item.start_time) {
-      key = dayjs(item.start_time).format('YYYY-MM-DD')
+    const sTime = item.start_time || item.event_datetime
+    if (sTime) {
+      key = dayjs(sTime).format('YYYY-MM-DD')
     }
     if (!groups[key]) groups[key] = []
     groups[key].push(item)
   })
 
-  // Sort dates chronologically, pending at top or end
   const dateKeys = Object.keys(groups).filter(k => k !== 'pending').sort()
   if (groups['pending']?.length) {
     dateKeys.unshift('pending')
@@ -379,7 +392,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
       type: 'dateBranchNode',
       position: { x: dateX, y: dateY },
       data: {
-        dateLabel: isPending ? 'Unscheduled items' : branchDate.format('MMM D, YYYY'),
+        dateLabel: isPending ? 'Flexible Tasks' : branchDate.format('MMM D, YYYY'),
         dayName: isPending ? 'Pending Tasks' : (isToday ? 'Today' : branchDate.format('dddd')),
         count: branchItems.length,
         totalDuration: totalDur,
@@ -403,14 +416,16 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
 
     // Sort items on this date by start_time
     const sortedBranchItems = branchItems.slice().sort((a, b) => {
-      if (!a.start_time) return 1
-      if (!b.start_time) return -1
-      return dayjs(a.start_time).diff(dayjs(b.start_time))
+      const aTime = a.start_time || a.event_datetime
+      const bTime = b.start_time || b.event_datetime
+      if (!aTime) return 1
+      if (!bTime) return -1
+      return dayjs(aTime).diff(dayjs(bTime))
     })
 
     // Arrange task nodes horizontally / stacked out from the date node
     sortedBranchItems.forEach((task, taskIdx) => {
-      const taskId = `task-${task.id}`
+      const taskId = `task-${task.id || taskIdx}`
       const theme = getNodeTheme(task)
       const taskX = dateX + 260 + (taskIdx * 280)
       const taskY = dateY + (taskIdx % 2 === 0 ? 0 : 30) - 20
@@ -429,7 +444,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
       })
 
       // Link first task to Date Branch, subsequent tasks linked in sequential timeline order!
-      const sourceId = taskIdx === 0 ? dateNodeId : `task-${sortedBranchItems[taskIdx - 1].id}`
+      const sourceId = taskIdx === 0 ? dateNodeId : `task-${sortedBranchItems[taskIdx - 1].id || (taskIdx - 1)}`
       edges.push({
         id: `edge-${sourceId}-${taskId}`,
         source: sourceId,
@@ -452,43 +467,37 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
   return { nodes, edges }
 }
 
-// ── Main Calendar Mindmap Component ──────────────────────────────────────────
-export default function CalendarMindmap({ onOpenRepair }) {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all') // 'all' | 'pending' | 'critical' | 'completed' | 'today'
+// ── Inner Flow Canvas Component ───────────────────────────────────────────────
+function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
+  const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [canvasHeight, setCanvasHeight] = useState(0)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const rfInstance = useRef(null)
 
-  // Fetch schedule items
-  const loadSchedule = useCallback(async () => {
-    try {
-      setLoading(true)
-      const res = await api.scheduleItems()
-      const raw = res.items || []
-      setItems(raw)
-    } catch (e) {
-      console.error('Failed to load schedule items:', e)
-    } finally {
-      setLoading(false)
+  // Measure parent container height dynamically so ReactFlow never collapses
+  useLayoutEffect(() => {
+    function measure() {
+      const navEl = document.querySelector('nav')
+      const navH = navEl ? navEl.getBoundingClientRect().height : 48
+      const calculated = window.innerHeight - navH - 52
+      setCanvasHeight(Math.max(calculated, 500))
     }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
   }, [])
-
-  useEffect(() => {
-    loadSchedule()
-  }, [loadSchedule])
 
   // Actions
   const handleComplete = useCallback(async (taskId) => {
     try {
       await api.completeTask(taskId)
-      setItems(prev => prev.map(item => item.id === taskId ? { ...item, status: 'completed' } : item))
+      loadSchedule()
     } catch (e) {
       alert(`Error completing task: ${e.message}`)
     }
-  }, [])
+  }, [loadSchedule])
 
   const handleReschedule = useCallback(async (taskId) => {
     try {
@@ -504,11 +513,11 @@ export default function CalendarMindmap({ onOpenRepair }) {
     if (!window.confirm('Remove this commitment from your schedule?')) return
     try {
       await api.updateScheduleItem(taskId, { status: 'cancelled' })
-      setItems(prev => prev.filter(i => i.id !== taskId))
+      loadSchedule()
     } catch (e) {
       alert(`Error: ${e.message}`)
     }
-  }, [])
+  }, [loadSchedule])
 
   const handleAutoRescheduleAll = useCallback(async () => {
     try {
@@ -520,7 +529,7 @@ export default function CalendarMindmap({ onOpenRepair }) {
     }
   }, [loadSchedule])
 
-  // Filter items based on user selection & search
+  // Filter items
   const filteredItems = useMemo(() => {
     let result = items
     if (filter === 'pending') {
@@ -531,7 +540,10 @@ export default function CalendarMindmap({ onOpenRepair }) {
       result = result.filter(i => i.status === 'completed')
     } else if (filter === 'today') {
       const today = dayjs().format('YYYY-MM-DD')
-      result = result.filter(i => i.start_time && dayjs(i.start_time).format('YYYY-MM-DD') === today)
+      result = result.filter(i => {
+        const sTime = i.start_time || i.event_datetime
+        return sTime && dayjs(sTime).format('YYYY-MM-DD') === today
+      })
     }
 
     if (search.trim()) {
@@ -541,21 +553,22 @@ export default function CalendarMindmap({ onOpenRepair }) {
     return result
   }, [items, filter, search])
 
-  // Re-build layout whenever filtered items update
+  // Re-build layout
   useEffect(() => {
     const { nodes: newNodes, edges: newEdges } = buildMindmapLayout(filteredItems, {
       onComplete: handleComplete,
       onReschedule: handleReschedule,
       onDelete: handleDelete,
       onAutoRescheduleAll: handleAutoRescheduleAll,
+      onLoadSamples,
     })
     setNodes(newNodes)
     setEdges(newEdges)
 
     setTimeout(() => {
       rfInstance.current?.fitView({ padding: 0.25, duration: 400 })
-    }, 150)
-  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, setNodes, setEdges])
+    }, 200)
+  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, onLoadSamples, setNodes, setEdges])
 
   const onInit = useCallback((instance) => {
     rfInstance.current = instance
@@ -563,9 +576,9 @@ export default function CalendarMindmap({ onOpenRepair }) {
   }, [])
 
   return (
-    <div className="flex-1 flex flex-col h-full w-full overflow-hidden relative">
-      {/* ── Mind Map Header & Filter Toolbar ────────────────────────────── */}
-      <div className="flex-none px-4 py-3 glass-strong border-b border-white/5 flex flex-wrap items-center justify-between gap-3 z-20">
+    <div className="flex-1 flex flex-col w-full overflow-hidden relative">
+      {/* ── Toolbar ────────────────────────────────────────────────────── */}
+      <div className="flex-none px-4 py-2.5 glass-strong border-b border-white/5 flex flex-wrap items-center justify-between gap-2.5 z-20">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-glow" />
           <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
@@ -597,7 +610,6 @@ export default function CalendarMindmap({ onOpenRepair }) {
             </button>
           ))}
 
-          {/* Search */}
           <input
             type="text"
             placeholder="Search tasks..."
@@ -605,6 +617,15 @@ export default function CalendarMindmap({ onOpenRepair }) {
             onChange={(e) => setSearch(e.target.value)}
             className="text-xs px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 w-28 sm:w-36"
           />
+
+          {items.length === 0 && (
+            <button
+              onClick={onLoadSamples}
+              className="text-xs px-3 py-1 rounded-lg bg-cyan-500 text-white font-bold hover:brightness-110 shadow-glow"
+            >
+              ✦ Load Sample Plan
+            </button>
+          )}
 
           <button
             onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400 })}
@@ -639,21 +660,12 @@ export default function CalendarMindmap({ onOpenRepair }) {
           </span>
         </div>
         <div className="hidden sm:inline text-slate-500">
-          Tip: Drag nodes · Double-click to expand · Use Done / Reschedule
+          Tip: Drag nodes · Use Done or Reschedule directly on cards
         </div>
       </div>
 
-      {/* ── Interactive Mind Map Canvas ─────────────────────────────────── */}
-      <div className="flex-1 w-full h-full relative">
-        {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-30">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-cyan-300 font-mono">Building timeline mind map...</p>
-            </div>
-          </div>
-        ) : null}
-
+      {/* ── Canvas with Guaranteed Pixel Height ─────────────────────────── */}
+      <div style={{ width: '100%', height: canvasHeight ? `${canvasHeight}px` : 'calc(100vh - 110px)' }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -685,5 +697,126 @@ export default function CalendarMindmap({ onOpenRepair }) {
         </ReactFlow>
       </div>
     </div>
+  )
+}
+
+// ── Export Wrapped in ReactFlowProvider ───────────────────────────────────────
+export default function CalendarMindmap({ onOpenRepair }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const loadSchedule = useCallback(async () => {
+    try {
+      setLoading(true)
+      // Fetch from both schedule_items and events to ensure nothing is missed!
+      const [resSched, resEvt] = await Promise.all([
+        api.scheduleItems().catch(() => ({ items: [] })),
+        api.events().catch(() => ({ events: [] })),
+      ])
+
+      const schedItems = resSched.items || []
+      const evtItems = (resEvt.events || []).map(e => ({
+        id: e.id,
+        title: e.title,
+        task_type: e.task_type || e.category || 'task',
+        priority: e.priority || 3,
+        duration_minutes: e.duration_minutes || (e.prep_hours ? e.prep_hours * 60 : 60),
+        start_time: e.event_datetime || e.fixed_start,
+        end_time: e.fixed_end,
+        deadline: e.deadline,
+        status: e.status || 'scheduled',
+      }))
+
+      // Deduplicate by title/id
+      const combined = [...schedItems]
+      const existingTitles = new Set(schedItems.map(s => (s.title || '').toLowerCase().trim()))
+      for (const ev of evtItems) {
+        if (!existingTitles.has((ev.title || '').toLowerCase().trim())) {
+          combined.push(ev)
+        }
+      }
+
+      setItems(combined)
+    } catch (e) {
+      console.error('Failed to load schedule items:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadSchedule()
+  }, [loadSchedule])
+
+  const handleLoadSamples = useCallback(async () => {
+    const today = dayjs()
+    const samples = [
+      {
+        title: 'College Lectures (Mon-Fri)',
+        start_time: today.hour(9).minute(0).second(0).toISOString(),
+        end_time: today.hour(16).minute(0).second(0).toISOString(),
+        task_type: 'fixed',
+        priority: 1,
+        flexibility: false,
+      },
+      {
+        title: 'Operating Systems Midterm Prep',
+        start_time: today.add(1, 'day').hour(17).minute(0).toISOString(),
+        end_time: today.add(1, 'day').hour(19).minute(0).toISOString(),
+        task_type: 'study',
+        priority: 1,
+        duration_minutes: 120,
+      },
+      {
+        title: 'Flute Practice Session',
+        start_time: today.add(2, 'day').hour(17).minute(0).toISOString(),
+        end_time: today.add(2, 'day').hour(18).minute(0).toISOString(),
+        task_type: 'practice',
+        priority: 3,
+        duration_minutes: 60,
+      },
+      {
+        title: 'Gym & Fitness Workout',
+        start_time: today.hour(18).minute(30).toISOString(),
+        end_time: today.hour(19).minute(30).toISOString(),
+        task_type: 'workout',
+        priority: 2,
+        duration_minutes: 60,
+      },
+      {
+        title: 'Finish E-Commerce Project Module',
+        deadline: today.add(3, 'day').hour(23).minute(59).toISOString(),
+        task_type: 'task',
+        priority: 2,
+        status: 'pending',
+        duration_minutes: 90,
+      },
+    ]
+
+    for (const s of samples) {
+      await api.scheduleFixedCreate(s).catch(() => {})
+    }
+    loadSchedule()
+  }, [loadSchedule])
+
+  if (loading && items.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-cyan-300 font-mono">Loading schedule mind map...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <ReactFlowProvider>
+      <MindmapFlow
+        items={items}
+        onLoadSamples={handleLoadSamples}
+        loadSchedule={loadSchedule}
+      />
+    </ReactFlowProvider>
   )
 }

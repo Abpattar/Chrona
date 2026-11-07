@@ -227,7 +227,9 @@ async def cache_get(key: str) -> Optional[str]:
                 timeout=3
             )
             if resp.status_code == 200:
-                return resp.json().get("result")
+                res = resp.json().get("result")
+                if res is not None:
+                    return res
         except Exception:
             pass
     return _mem_cache.get(key)
@@ -236,9 +238,9 @@ async def cache_set(key: str, value: str, ex: int = 86400) -> None:
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             requests.post(
-                f"{UPSTASH_REDIS_URL}/set/{key}/ex/{ex}",
-                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}", "Content-Type": "text/plain"},
-                data=value,
+                UPSTASH_REDIS_URL,
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}", "Content-Type": "application/json"},
+                json=["SET", key, str(value), "EX", ex],
                 timeout=3
             )
         except Exception:
@@ -248,14 +250,34 @@ async def cache_set(key: str, value: str, ex: int = 86400) -> None:
 async def cache_del(key: str) -> None:
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
-            requests.get(
-                f"{UPSTASH_REDIS_URL}/del/{key}",
-                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+            requests.post(
+                UPSTASH_REDIS_URL,
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}", "Content-Type": "application/json"},
+                json=["DEL", key],
                 timeout=3
             )
         except Exception:
             pass
     _mem_cache.pop(key, None)
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """Extract human-readable text from PDF streams using Python standard library zlib."""
+    import zlib
+    import re
+    chunks = []
+    for m in re.finditer(rb"stream[\r\n]+(.*?)[\r\n]+endstream", pdf_bytes, re.DOTALL):
+        try:
+            decomp = zlib.decompress(m.group(1))
+            for s in re.findall(rb"\((.*?)\)", decomp):
+                decoded = s.decode("latin1", errors="ignore").strip()
+                if len(decoded) > 1 and not re.match(r"^[\x00-\x1F]+$", decoded):
+                    chunks.append(decoded)
+        except Exception:
+            pass
+    if not chunks:
+        raw_strings = re.findall(rb"[\x20-\x7E]{4,}", pdf_bytes)
+        chunks = [s.decode("latin1", errors="ignore") for s in raw_strings if not s.startswith(b"/")]
+    return " ".join(chunks)
 
 # ==============================
 # GEMINI AI HELPERS (google-genai SDK)
@@ -328,6 +350,12 @@ class AutoRescheduleRequest(BaseModel):
     user_id: str
     task_id: Optional[str] = None
     all_unplaced: bool = False
+
+class AgentExecuteRequest(BaseModel):
+    user_id: str
+    task_id: str
+    action: str = "study_guide"  # "research" | "study_guide" | "summary" | "checklist"
+    instructions: Optional[str] = None
 
 class OnboardingRequest(BaseModel):
     user_id: str
@@ -659,29 +687,40 @@ Break this down into realistic, actionable subtasks.
 # CHRONA CHAT ENGINE
 # ==============================
 
-CHRONA_SYSTEM = """You are Chrona, an intelligent personal time-management assistant.
+CHRONA_SYSTEM = """You are Chrona, an intelligent personal time-management and AI scheduling assistant.
 
-You understand natural language about schedules, tasks, goals, and time. You help users plan their time intelligently.
+Today's date is {today}.
 
-You have access to the user's current schedule and can:
-1. Add tasks, events, fixed commitments
-2. Generate schedules for projects/goals
-3. Reschedule when plans change
-4. Explain scheduling decisions
-5. Answer questions about time management
+You understand natural language about schedules, tasks, goals, classes, exams, workouts, and personal commitments.
+You help users plan their time intelligently.
 
-IMPORTANT RULES:
-- Never invent dates or times the user didn't specify
-- Ask for missing information (deadline, duration, recurrence)
-- Be concise and friendly
-- When extracting tasks, always return structured JSON alongside your message
-- Distinguish between fixed commitments (can't move) and flexible tasks (can be rescheduled)
-- Today's date is {today}
+CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
+1. MULTI-TURN MEMORY & TASK UPDATES:
+   - Always connect the user's latest message with the previous messages in the conversation!
+   - If the user provides durations, adjustments, or prep time for a task mentioned in the recent dialogue (e.g., "it will be 45 minutes long", "I need 2 hours of prep beforehand", "change duration to 30 mins", "move it to 4 PM"):
+     * DO NOT ASK FOR THE TITLE, DATE, OR EVENT NAME AGAIN! The title and date are already in the conversation history!
+     * Update the existing task with the new duration/time, and extract any requested prep blocks (e.g. prep task before the presentation).
+     * Return the updated tasks in the "tasks" array immediately.
+2. SENSIBLE DEFAULTS OVER BLOCKING:
+   - If a duration is not explicitly specified, USE INTELLIGENT DEFAULTS:
+     * Exams: 120 minutes (2 hours)
+     * Classes / Lectures: 60 minutes
+     * Quizzes / Tests: 30 minutes
+     * Assignments / Project work: 120 minutes (2 hours)
+     * Workouts / Exercise / Practice: 60 minutes
+     * General tasks: 60 minutes
+   - NEVER leave duration_minutes as null! Always provide a realistic integer (minutes) so the task can be placed on the schedule.
+   - If fixed_start is given (e.g. 2 PM) but fixed_end is missing, compute fixed_end = fixed_start + duration_minutes.
+   - You can inform the user in your message: "I've set this for [X] hours based on typical defaults — feel free to adjust it anytime!"
+3. ACTIONABLE EXTRACTIONS:
+   - Extract tasks into the "tasks" array.
+   - Only set clarification_needed if a truly essential detail is missing (e.g. user says "I have an exam" with no subject, date, or timeframe).
+   - If user says "My exam is next Friday at 2 PM", that is completely sufficient! Extract it immediately with duration=120 min.
 
-When the user describes tasks/events, extract them as JSON in this format:
+When extracting tasks/events, return valid JSON in this exact structure:
 {
   "action": "add_tasks|add_fixed|generate_schedule|query|reschedule|decompose_project|mark_complete",
-  "message": "Your friendly response to the user",
+  "message": "Your friendly, conversational response explaining what you did or scheduled",
   "tasks": [
     {
       "title": "string",
@@ -689,7 +728,7 @@ When the user describes tasks/events, extract them as JSON in this format:
       "deadline": "ISO string or null",
       "priority": 1-4,
       "flexibility": true/false,
-      "task_type": "task|fixed|study|workout|practice|meeting|class|exam|assignment",
+      "task_type": "task|fixed|study|workout|practice|meeting|class|exam|assignment|quiz",
       "recurrence": "daily|weekdays|weekly|null",
       "recurrence_days": [0,1,2,3,4] or null,
       "fixed_start": "ISO string or null",
@@ -698,17 +737,49 @@ When the user describes tasks/events, extract them as JSON in this format:
       "project_description": null
     }
   ],
-  "clarification_needed": null or "What information is missing?",
+  "clarification_needed": null,
   "schedule_trigger": false
 }
 """
 
 async def process_chat_message(user_id: str, message: str, session_id: str = None, context: dict = None) -> dict:
     """
-    Process a natural language message from the user.
-    Returns structured response with extracted tasks and AI message.
+    Process a natural language message with persistent multi-turn memory and context merging.
     """
     today = _now_utc().strftime("%Y-%m-%d %A")
+
+    # Multi-turn conversation history cache keys
+    session_key = session_id or "default"
+    history_cache_key = f"chrona:history:{user_id}:{session_key}"
+    draft_cache_key = f"chrona:draft:{user_id}:{session_key}"
+    recent_tasks_cache_key = f"chrona:recent_tasks:{user_id}:{session_key}"
+
+    # Load recent conversation history
+    history_json = await cache_get(history_cache_key)
+    history_turns = []
+    if history_json:
+        try:
+            history_turns = json.loads(history_json)
+        except Exception:
+            history_turns = []
+
+    # Load recent active tasks discussed in this session
+    recent_tasks_json = await cache_get(recent_tasks_cache_key)
+    recent_tasks = []
+    if recent_tasks_json:
+        try:
+            recent_tasks = json.loads(recent_tasks_json)
+        except Exception:
+            recent_tasks = []
+
+    # Load any pending/draft task from previous turn
+    pending_draft_json = await cache_get(draft_cache_key)
+    pending_draft = None
+    if pending_draft_json:
+        try:
+            pending_draft = json.loads(pending_draft_json)
+        except Exception:
+            pending_draft = None
 
     # Get user's existing schedule context
     week_start = _now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -718,23 +789,82 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
     if existing[:5]:
         schedule_summary += " Recent: " + ", ".join([f"{e['title']} at {e.get('start_time','?')[:16]}" for e in existing[:5]])
 
+    # Build dialogue history string
+    history_str = ""
+    if history_turns:
+        history_str = "Recent Conversation History:\n"
+        for turn in history_turns[-6:]:
+            role_label = turn.get("role", "user").capitalize()
+            history_str += f"{role_label}: {turn.get('content', '')}\n"
+
+    recent_tasks_str = ""
+    if recent_tasks:
+        recent_tasks_str = "ACTIVE TASKS CURRENTLY IN DISCUSSION:\n"
+        for rt in recent_tasks[-4:]:
+            recent_tasks_str += f"- Title: \"{rt.get('title')}\", Scheduled: {rt.get('fixed_start') or rt.get('start_time')}, Duration: {rt.get('duration_minutes')}m, Deadline: {rt.get('deadline')}\n"
+        recent_tasks_str += "\nCRITICAL RULE: If the user provides durations, prep time, or adjustments (e.g. 'it will be 45 minutes long', '2 hours prep beforehand', 'make it 30 mins'), they are modifying the active task above! DO NOT ASK FOR TITLE OR DATE AGAIN! Update the active task and/or add the prep block immediately in the 'tasks' array!\n"
+
+    pending_draft_str = ""
+    if pending_draft:
+        pending_draft_str = (
+            f"\nUnfinished / Pending Task from previous message: {json.dumps(pending_draft)}\n"
+            f"Note: If the user's latest message provides details answering this pending task, "
+            f"MERGE them to finalize and extract the task now!"
+        )
+
     system = CHRONA_SYSTEM.replace("{today}", today)
     prompt = f"""
+{history_str}
+{recent_tasks_str}
+{pending_draft_str}
+
 User's current schedule context: {schedule_summary}
-User message: "{message}"
+User's latest message: "{message}"
 
 Extract any tasks/commitments and respond helpfully. Return valid JSON.
 """
 
     result = _ai_json(prompt, system=system)
 
-    # Store conversation turn
-    if session_id:
-        await cache_set(f"chrona:chat:{user_id}:{session_id}:last", json.dumps({
-            "user": message,
-            "assistant": result.get("message", ""),
-            "timestamp": _now_utc().isoformat()
+    # Post-process extracted tasks to guarantee no null duration
+    extracted_tasks = result.get("tasks") or []
+    for t in extracted_tasks:
+        if not t.get("duration_minutes"):
+            ttype = (t.get("task_type") or "").lower()
+            if "exam" in ttype or "exam" in t.get("title", "").lower():
+                t["duration_minutes"] = 120
+            elif "quiz" in ttype or "test" in ttype:
+                t["duration_minutes"] = 30
+            elif "project" in ttype or "assignment" in ttype:
+                t["duration_minutes"] = 120
+            else:
+                t["duration_minutes"] = 60
+
+        if t.get("fixed_start") and not t.get("fixed_end"):
+            s_dt = _parse_dt(t["fixed_start"])
+            if s_dt:
+                t["fixed_end"] = (s_dt + timedelta(minutes=int(t["duration_minutes"]))).isoformat()
+
+    result["tasks"] = extracted_tasks
+
+    # Memory update: Track active recent tasks
+    if extracted_tasks:
+        await cache_del(draft_cache_key)
+        # Update recent tasks
+        recent_tasks.extend(extracted_tasks)
+        await cache_set(recent_tasks_cache_key, json.dumps(recent_tasks[-6:]), ex=7200)
+    elif result.get("clarification_needed"):
+        # Save pending draft
+        await cache_set(draft_cache_key, json.dumps({
+            "user_prompt": message,
+            "clarification_needed": result.get("clarification_needed"),
+            "assistant_response": result.get("message", "")
         }), ex=3600)
+
+    # Save to conversation history
+    history_turns.append({"role": "user", "content": message})
+    history_turns.append({"role": "assistant", "content": result.get("message", "")})
+    await cache_set(history_cache_key, json.dumps(history_turns[-10:]), ex=7200)
 
     return result
 
@@ -922,7 +1052,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 except Exception as e:
                     print(f"⚠️ Decomposition error: {e}")
             else:
-                # Save as schedule item or pending task
+                # Deduplication & Context Modification: Check for existing commitment
                 dur = task_data.get("duration_minutes", 60)
                 item = {
                     "user_id": user_id,
@@ -941,12 +1071,28 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 if task_data.get("deadline"):
                     item["deadline"] = task_data["deadline"]
 
-                resp = sb_post("schedule_items", item)
-                if resp.status_code in [200, 201]:
-                    try:
-                        inserted_tasks.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
-                    except Exception:
-                        pass
+                # Check if this commitment already exists to update instead of duplicate
+                existing_resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
+                existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
+                match = None
+                t_lower = (task_data.get("title") or "").strip().lower()
+                for ex in existing_list:
+                    ex_title = (ex.get("title") or "").strip().lower()
+                    if ex_title == t_lower or (t_lower and (t_lower in ex_title or ex_title in t_lower)):
+                        match = ex
+                        break
+
+                if match:
+                    sb_patch("schedule_items", item, params={"id": f"eq.{match['id']}", "user_id": f"eq.{user_id}"})
+                    match.update(item)
+                    inserted_tasks.append(match)
+                else:
+                    resp = sb_post("schedule_items", item)
+                    if resp.status_code in [200, 201]:
+                        try:
+                            inserted_tasks.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
+                        except Exception:
+                            pass
 
     return {
         "message": result.get("message", "I understand. Let me help you with that."),
@@ -976,19 +1122,20 @@ async def chat_upload(
         file_name = file.filename or "uploaded_file"
         try:
             content = await file.read()
-            try:
-                file_text = content.decode("utf-8")
-            except UnicodeDecodeError:
-                import re
-                strings = re.findall(b"[\x20-\x7E]{4,}", content)
-                file_text = " ".join([s.decode('latin1', errors='ignore') for s in strings[:150]])
+            if file_name.lower().endswith(".pdf") or content.startswith(b"%PDF"):
+                file_text = extract_text_from_pdf(content)
+            else:
+                try:
+                    file_text = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    file_text = extract_text_from_pdf(content)
         except Exception as e:
             print(f"⚠️ Error reading file: {e}")
 
     full_user_input = message.strip() if message else ""
     if file_name:
-        attachment_context = f"\n[Attached file: {file_name}]\n{file_text[:3500]}"
-        full_user_input = f"{full_user_input}{attachment_context}".strip()
+        attachment_context = f"\n[Document Extracted Content ({file_name})]:\n{file_text[:4000]}"
+        full_user_input = f"{full_user_input}\n{attachment_context}".strip()
 
     if not full_user_input:
         full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
@@ -998,7 +1145,7 @@ async def chat_upload(
     inserted_tasks = []
     if result.get("tasks"):
         for task_data in result["tasks"]:
-            dur = task_data.get("duration_minutes", 60)
+            dur = int(task_data.get("duration_minutes") or 60)
             item = {
                 "user_id": user_id,
                 "title": task_data.get("title", "Untitled"),
@@ -1008,11 +1155,17 @@ async def chat_upload(
                 "flexibility": task_data.get("flexibility", True),
                 "status": "pending",
             }
-            if task_data.get("fixed_start") and task_data.get("fixed_end"):
+            if task_data.get("fixed_start"):
                 item["start_time"] = task_data["fixed_start"]
-                item["end_time"] = task_data["fixed_end"]
+                if task_data.get("fixed_end"):
+                    item["end_time"] = task_data["fixed_end"]
+                else:
+                    s_dt = _parse_dt(task_data["fixed_start"])
+                    if s_dt:
+                        item["end_time"] = (s_dt + timedelta(minutes=dur)).isoformat()
                 item["flexibility"] = False
                 item["status"] = "scheduled"
+
             if task_data.get("deadline"):
                 item["deadline"] = task_data["deadline"]
 
@@ -1060,7 +1213,6 @@ async def process_event(request: Request, user_id: str = Depends(get_user_id)):
             file_bytes = await file.read()
             file_name = getattr(file, "filename", "")
     else:
-        # Try reading as JSON anyway
         try:
             body = await request.json()
             text = body.get("text", "").strip()
@@ -1070,21 +1222,28 @@ async def process_event(request: Request, user_id: str = Depends(get_user_id)):
     if not text and not file_bytes:
         raise HTTPException(400, "No text or file provided")
 
-    # Build extraction prompt
     today = _now_utc().strftime("%Y-%m-%d")
     if file_bytes:
-        # For now, treat file as context hint (Gemini vision would need files API)
-        text = f"File: {file_name}\n{text}" if text else f"File upload: {file_name}"
+        extracted_doc_text = ""
+        if file_name.lower().endswith(".pdf") or file_bytes.startswith(b"%PDF"):
+            extracted_doc_text = extract_text_from_pdf(file_bytes)
+        else:
+            try:
+                extracted_doc_text = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                extracted_doc_text = extract_text_from_pdf(file_bytes)
 
-    system = f"""You are an event extraction engine. Today is {today}.
+        text = f"Document content ({file_name}):\n{extracted_doc_text[:4000]}\n\nUser Notes: {text}".strip()
 
-Extract ALL tasks/events from the input. Return a JSON ARRAY of objects:
+    system = f"""You are an expert event extraction engine for Chrona. Today is {today}.
+
+Extract ALL tasks/events/classes/exams from the input text. Return a JSON ARRAY of objects:
 [{{
   "title": "string",
   "category": "exam|assignment|meeting|class|workout|study|personal|other",
   "task_type": "task|fixed|study|exam|assignment|class|workout",
   "event_datetime": "ISO datetime or null",
-  "duration_minutes": number,
+  "duration_minutes": number (default 60, exams default 120),
   "priority": 1-4,
   "flexibility": true/false,
   "is_fixed": false,
@@ -1099,10 +1258,10 @@ Extract ALL tasks/events from the input. Return a JSON ARRAY of objects:
 }}]
 
 RULES:
-- flexibility=false for classes, meetings with specific times
+- Always assign a sensible integer duration_minutes (default 60, exams default 120, quizzes 30)
+- flexibility=false for classes, exams, meetings with specific times
 - flexibility=true for study sessions, workouts, assignments
-- Use actual ISO dates (not relative). Today={today}
-- If recurrence mentioned (daily, every weekday), set recurrence field
+- Use actual ISO dates. Today={today}
 - Return ONLY a valid JSON array, no markdown
 """
     try:
@@ -1112,7 +1271,7 @@ RULES:
     except Exception as e:
         raise HTTPException(500, f"Extraction failed: {e}")
 
-    # Save to events table
+    # Save to events table AND schedule_items table
     results = []
     for item in extracted:
         item["user_id"] = user_id
@@ -1125,6 +1284,28 @@ RULES:
                 results.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
             except Exception:
                 pass
+
+        # Also populate schedule_items so Mind Map displays it immediately!
+        dur = int(item.get("duration_minutes") or 60)
+        s_item = {
+            "user_id": user_id,
+            "title": item.get("title", "Untitled"),
+            "task_type": item.get("task_type", "task"),
+            "duration_minutes": dur,
+            "priority": item.get("priority", 3),
+            "flexibility": item.get("flexibility", True),
+            "status": "scheduled" if (item.get("fixed_start") or item.get("event_datetime")) else "pending",
+        }
+        start_val = item.get("fixed_start") or item.get("event_datetime")
+        if start_val:
+            s_item["start_time"] = start_val
+            s_dt = _parse_dt(start_val)
+            if s_dt:
+                s_item["end_time"] = (s_dt + timedelta(minutes=dur)).isoformat()
+        if item.get("deadline"):
+            s_item["deadline"] = item.get("deadline")
+
+        sb_post("schedule_items", s_item)
 
     return {"success": True, "events": results, "count": len(results)}
 
