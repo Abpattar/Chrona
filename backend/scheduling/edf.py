@@ -49,6 +49,10 @@ class Task:
     fixed_end: Optional[datetime] = None
 
     def __post_init__(self):
+        if self.duration_minutes is None:
+            self.duration_minutes = 60
+        else:
+            self.duration_minutes = int(self.duration_minutes)
         self.deadline = _ensure_utc(self.deadline)
         if self.fixed_start:
             self.fixed_start = _ensure_utc(self.fixed_start)

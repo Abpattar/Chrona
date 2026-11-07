@@ -856,9 +856,7 @@ async def onboarding(request: OnboardingRequest, user_id: str = Depends(get_user
     }
 
     # Upsert profile
-    headers = _sb_headers(service=True)
-    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
-    requests.post(f"{SUPABASE_URL}/rest/v1/behavior_profiles", headers=headers, json=profile)
+    sb_post("behavior_profiles", profile)
 
     # Save onboarding response
     onb_data = {
@@ -868,9 +866,7 @@ async def onboarding(request: OnboardingRequest, user_id: str = Depends(get_user
         "task_preference": request.task_preference,
         "study_hours": request.study_hours,
     }
-    headers2 = _sb_headers(service=True)
-    headers2["Prefer"] = "resolution=merge-duplicates,return=representation"
-    requests.post(f"{SUPABASE_URL}/rest/v1/onboarding_responses", headers=headers2, json=onb_data)
+    sb_post("onboarding_responses", onb_data)
 
     await cache_set(f"chrona:profile:{user_id}", json.dumps(profile))
     return {"success": True, "profile": profile}
@@ -1156,9 +1152,9 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
             edf_tasks.append(Task(
                 id=t["id"],
                 title=t["title"],
-                duration_minutes=t.get("duration_minutes", 60),
+                duration_minutes=int(t.get("duration_minutes") or 60),
                 deadline=deadline,
-                priority=t.get("priority", 3),
+                priority=int(t.get("priority") or 3),
                 flexibility=True,
                 task_type=t.get("task_type", "task"),
             ))
