@@ -6,6 +6,22 @@
 // Default user ID for single-user mode (no auth yet)
 export const TEST_USER_ID = '00000000-0000-0000-0000-000000000001'
 
+export function getClientTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata'
+  } catch {
+    return 'Asia/Kolkata'
+  }
+}
+
+export function getClientTimezoneOffset() {
+  try {
+    return String(-new Date().getTimezoneOffset()) // in minutes, e.g. "330" for IST
+  } catch {
+    return '330'
+  }
+}
+
 const API_BASE = import.meta.env.VITE_API_URL ||
   (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
 
@@ -20,6 +36,8 @@ async function request(endpoint, options = {}) {
       headers: {
         'Content-Type': 'application/json',
         'X-User-ID': TEST_USER_ID,
+        'X-Timezone': getClientTimezone(),
+        'X-Timezone-Offset': getClientTimezoneOffset(),
         ...options.headers,
       },
       signal: controller.signal,
@@ -49,7 +67,11 @@ async function uploadRequest(endpoint, formData) {
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'POST',
-      headers: { 'X-User-ID': TEST_USER_ID },
+      headers: {
+        'X-User-ID': TEST_USER_ID,
+        'X-Timezone': getClientTimezone(),
+        'X-Timezone-Offset': getClientTimezoneOffset(),
+      },
       body: formData,
       signal: controller.signal,
     })
@@ -83,6 +105,9 @@ export const api = {
       user_id: TEST_USER_ID,
       message,
       session_id: sessionId,
+      timezone: getClientTimezone(),
+      timezone_offset: getClientTimezoneOffset(),
+      client_time: new Date().toISOString(),
       context,
     }),
   }),

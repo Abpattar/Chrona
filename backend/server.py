@@ -190,25 +190,79 @@ def sb_delete(table: str, params: dict, service: bool = True) -> Any:
     return MockResponse([], 200)
 
 # ==============================
-# TIME HELPERS
+# TIME & TIMEZONE HELPERS
 # ==============================
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
-def _ensure_utc(dt: datetime) -> datetime:
+def _get_default_tz() -> timezone:
+    try:
+        sys_tz = datetime.now().astimezone().tzinfo
+        if sys_tz:
+            return sys_tz
+    except Exception:
+        pass
+    return timezone.utc
+
+def get_user_timezone(req: Optional[Request] = None, context: Optional[dict] = None) -> timezone:
+    """
+    Extract user's timezone from HTTP headers, request context, or default to system local tz.
+    """
+    if req:
+        tz_name = req.headers.get("x-timezone")
+        if tz_name and ZoneInfo:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        offset_val = req.headers.get("x-timezone-offset")
+        if offset_val:
+            try:
+                return timezone(timedelta(minutes=int(offset_val)))
+            except Exception:
+                pass
+
+    if context and isinstance(context, dict):
+        tz_name = context.get("timezone")
+        if tz_name and ZoneInfo:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        offset_val = context.get("timezone_offset")
+        if offset_val is not None:
+            try:
+                return timezone(timedelta(minutes=int(offset_val)))
+            except Exception:
+                pass
+
+    return _get_default_tz()
+
+def _ensure_utc(dt: Optional[datetime], user_tz: Optional[timezone] = None) -> Optional[datetime]:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        tz = user_tz or _get_default_tz()
+        dt = dt.replace(tzinfo=tz)
     return dt.astimezone(timezone.utc)
 
-def _parse_dt(s: str) -> Optional[datetime]:
+def _parse_dt(s: Any, user_tz: Optional[timezone] = None) -> Optional[datetime]:
     if not s:
         return None
+    if isinstance(s, datetime):
+        return _ensure_utc(s, user_tz)
     try:
-        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-        return _ensure_utc(dt)
+        s_clean = str(s).strip()
+        if s_clean.endswith("Z"):
+            s_clean = s_clean[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s_clean)
+        return _ensure_utc(dt, user_tz)
     except (ValueError, TypeError):
         return None
 
@@ -372,6 +426,9 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     context: Optional[dict] = None
+    timezone: Optional[str] = None
+    timezone_offset: Optional[str] = None
+    client_time: Optional[str] = None
 
 class ScheduleGenerateRequest(BaseModel):
     user_id: str
@@ -798,22 +855,23 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
 
     return False, None, None, 0
 
-def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "23:00") -> tuple:
+def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "23:00", user_tz: Optional[timezone] = None) -> tuple:
     """
     Find optimal slot for to_reschedule enforcing dynamic cognitive buffers based on task exertion.
     If strict time was requested, places immediately adjacent to anchor with zero decompression wait.
     If target day is packed, searches subsequent days (day + 1, weekend, next week).
+    All calendar calculations and bedtime/wake-up hours are evaluated in the user's local timezone.
     Returns (start_dt, end_dt, reason_note).
     """
+    tz = user_tz or _get_default_tz()
     dur = int(to_reschedule.get("duration_minutes") or 60)
-    anchor_start = _parse_dt(anchor.get("start_time"))
-    anchor_end = _parse_dt(anchor.get("end_time"))
+    anchor_start = _parse_dt(anchor.get("start_time"), user_tz)
+    anchor_end = _parse_dt(anchor.get("end_time"), user_tz)
     if not anchor_start or not anchor_end:
-        now = _now_utc()
-        c_s = now.replace(hour=19, minute=0, second=0, microsecond=0)
+        now_local = datetime.now(tz)
+        c_s_local = now_local.replace(hour=19, minute=0, second=0, microsecond=0)
+        c_s = c_s_local.astimezone(timezone.utc)
         return c_s, c_s + timedelta(minutes=dur), "fallback"
-
-    tz = anchor_start.tzinfo or timezone.utc
 
     # Calculate dynamic recovery buffers
     post_anchor_buffer = calculate_recovery_buffer_minutes(anchor, to_reschedule)
@@ -826,8 +884,8 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             if (it.get("title") or "").strip().lower() == (to_reschedule.get("title") or "").strip().lower():
                 continue
 
-            it_s = _parse_dt(it.get("start_time"))
-            it_e = _parse_dt(it.get("end_time"))
+            it_s = _parse_dt(it.get("start_time"), user_tz)
+            it_e = _parse_dt(it.get("end_time"), user_tz)
             if it_s and it_e:
                 # If checking against the anchor task itself, do not apply the generic 10-minute buffer
                 # because the anchor spacing is explicitly handled by the scheduling strategies
@@ -848,9 +906,11 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
                         return False
         return True
 
-    target_date = anchor_start.date()
+    anchor_local = anchor_start.astimezone(tz)
+    target_date = anchor_local.date()
     sh, sm = [int(x) for x in sleep_time.split(":")]
-    sleep_dt = datetime(target_date.year, target_date.month, target_date.day, sh, sm, tzinfo=tz)
+    sleep_local = datetime(target_date.year, target_date.month, target_date.day, sh, sm, tzinfo=tz)
+    sleep_dt = sleep_local.astimezone(timezone.utc)
 
     # Strict Time Override: Place immediately after anchor without decompression break
     skip_recovery = (
@@ -862,7 +922,8 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
         post_start = anchor_end
         post_end = post_start + timedelta(minutes=dur)
         if is_slot_free(post_start, post_end):
-            note = f"Placed strictly at {post_start.strftime('%I:%M %p')} right after '{anchor.get('title')}' as requested (decompression break skipped)."
+            time_display = post_start.astimezone(tz).strftime('%I:%M %p')
+            note = f"Placed strictly at {time_display} right after '{anchor.get('title')}' as requested (decompression break skipped)."
             return post_start, post_end, note
 
     # Strategy 1: Post-anchor slot on the same day with stress recovery buffer
@@ -886,7 +947,8 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
         pre_end = pre_start + timedelta(minutes=dur)
 
     wh, wm = [int(x) for x in wake_time.split(":")]
-    wake_dt = datetime(target_date.year, target_date.month, target_date.day, wh, wm, tzinfo=tz)
+    wake_local = datetime(target_date.year, target_date.month, target_date.day, wh, wm, tzinfo=tz)
+    wake_dt = wake_local.astimezone(timezone.utc)
 
     if pre_start >= wake_dt and (pre_end + timedelta(minutes=pre_anchor_buffer)) <= anchor_start and is_slot_free(pre_start, pre_end):
         note = f"Scheduled before '{anchor.get('title')}' with a {pre_anchor_buffer}-minute transition buffer."
@@ -894,27 +956,31 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
 
     # Strategy 3: Scan other optimal focus/social windows on the same day
     for hour in [19, 18, 17, 13, 12, 14, 15, 16, 20]:
-        c_s = datetime(target_date.year, target_date.month, target_date.day, hour, 0, tzinfo=tz)
+        c_s_local = datetime(target_date.year, target_date.month, target_date.day, hour, 0, tzinfo=tz)
+        c_s = c_s_local.astimezone(timezone.utc)
         c_e = c_s + timedelta(minutes=dur)
         if is_slot_free(c_s, c_e):
-            note = f"Placed in an open focus window on {c_s.strftime('%A')} with plenty of breathing room."
+            note = f"Placed in an open focus window on {c_s_local.strftime('%A')} with plenty of breathing room."
             return c_s, c_e, note
 
     # Strategy 4: If target day is packed, spillover to subsequent days (Day + 1 to Day + 14)
-    preferred_hour = 19 if "dinner" in to_reschedule.get("title", "").lower() else 14
+    preferred_hour = 19 if "dinner" in to_reschedule.get("title", "").lower() else (13 if "lunch" in to_reschedule.get("title", "").lower() else 14)
     for day_offset in range(1, 15):
         next_day = target_date + timedelta(days=day_offset)
         for h in [preferred_hour, preferred_hour + 1, preferred_hour - 1, 18, 20, 13]:
-            c_s = datetime(next_day.year, next_day.month, next_day.day, h, 0, tzinfo=tz)
+            c_s_local = datetime(next_day.year, next_day.month, next_day.day, h, 0, tzinfo=tz)
+            c_s = c_s_local.astimezone(timezone.utc)
             c_e = c_s + timedelta(minutes=dur)
             if is_slot_free(c_s, c_e):
-                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {c_s.strftime('%A, %b %d at %I:%M %p')} to prevent overload."
+                time_str = c_s_local.strftime('%A, %b %d at %I:%M %p')
+                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {time_str} to prevent overload."
                 return c_s, c_e, note
 
-    fallback_s = _ensure_utc(anchor_start + timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0)
+    fallback_s_local = datetime(target_date.year, target_date.month, target_date.day, 19, 0, 0, tzinfo=tz) + timedelta(days=1)
+    fallback_s = fallback_s_local.astimezone(timezone.utc)
     return fallback_s, fallback_s + timedelta(minutes=dur), "Rescheduled to next day."
 
-def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list, user_text: str = "") -> tuple:
+def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list, user_text: str = "", user_tz: Optional[timezone] = None) -> tuple:
     """
     Save or update a task item while automatically detecting collisions
     and insufficient recovery gaps, rescheduling flexible tasks to optimal non-overlapping slots.
@@ -941,13 +1007,14 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
     raw_start = task_data.get("fixed_start") or task_data.get("start_time")
     if raw_start:
-        s_dt = _parse_dt(raw_start)
+        s_dt = _parse_dt(raw_start, user_tz)
         if s_dt:
             item["start_time"] = s_dt.isoformat()
-            if task_data.get("fixed_end") or task_data.get("end_time"):
-                item["end_time"] = task_data.get("fixed_end") or task_data.get("end_time")
-            else:
-                item["end_time"] = (s_dt + timedelta(minutes=dur)).isoformat()
+            raw_end = task_data.get("fixed_end") or task_data.get("end_time")
+            e_dt = _parse_dt(raw_end, user_tz) if raw_end else None
+            if not e_dt or e_dt <= s_dt:
+                e_dt = s_dt + timedelta(minutes=dur)
+            item["end_time"] = e_dt.isoformat()
             item["status"] = "scheduled"
 
     reschedule_note = None
@@ -967,10 +1034,11 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
             has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other)
             if has_conflict:
-                orig_s_fmt = _parse_dt(loser.get("start_time")).strftime("%I:%M %p")
-                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined)
-                new_s_fmt = new_s.strftime("%I:%M %p")
-                new_e_fmt = new_e.strftime("%I:%M %p")
+                tz = user_tz or _get_default_tz()
+                orig_s_fmt = _parse_dt(loser.get("start_time"), user_tz).astimezone(tz).strftime("%I:%M %p")
+                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined, user_tz=user_tz)
+                new_s_fmt = new_s.astimezone(tz).strftime("%I:%M %p")
+                new_e_fmt = new_e.astimezone(tz).strftime("%I:%M %p")
 
                 reason = f"Auto-rescheduled from {orig_s_fmt} to {new_s_fmt}: {slot_note}"
 
@@ -1036,11 +1104,12 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
     return saved, reschedule_note
 
-def auto_repair_existing_conflicts(user_id: str) -> list:
+def auto_repair_existing_conflicts(user_id: str, user_tz: Optional[timezone] = None) -> list:
     """
     Scan all active scheduled items for the user, detect any time overlaps or zero-minute gaps,
-    and automatically reschedule lower-priority/flexible items with recovery buffers.
+    sanitize corrupted timestamps, and automatically reschedule lower-priority/flexible items with recovery buffers.
     """
+    tz = user_tz or _get_default_tz()
     resp = sb_get("schedule_items", {
         "user_id": f"eq.{user_id}",
         "status": "neq.cancelled",
@@ -1049,7 +1118,29 @@ def auto_repair_existing_conflicts(user_id: str) -> list:
     if resp.status_code != 200 or not resp.json():
         return []
 
-    scheduled_items = [it for it in resp.json() if it.get("start_time") and it.get("end_time")]
+    scheduled_items = [it for it in resp.json() if it.get("start_time")]
+
+    # 1. Sanitize naive, missing, or inverted timestamps
+    for it in scheduled_items:
+        s_dt = _parse_dt(it.get("start_time"), user_tz)
+        dur = int(it.get("duration_minutes") or 60)
+        e_dt = _parse_dt(it.get("end_time"), user_tz)
+        needs_patch = False
+        patch = {}
+        if s_dt and (not e_dt or e_dt <= s_dt):
+            e_dt = s_dt + timedelta(minutes=dur)
+            patch["end_time"] = e_dt.isoformat()
+            needs_patch = True
+        if s_dt and it.get("start_time") != s_dt.isoformat():
+            patch["start_time"] = s_dt.isoformat()
+            needs_patch = True
+        if e_dt and it.get("end_time") != e_dt.isoformat():
+            patch["end_time"] = e_dt.isoformat()
+            needs_patch = True
+        if needs_patch and it.get("id"):
+            sb_patch("schedule_items", patch, params={"id": f"eq.{it['id']}", "user_id": f"eq.{user_id}"})
+            it.update(patch)
+
     repaired = []
 
     for i in range(len(scheduled_items)):
@@ -1060,10 +1151,10 @@ def auto_repair_existing_conflicts(user_id: str) -> list:
             has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(it1, it2)
             if has_conflict:
                 loser_prop = infer_task_properties(loser)
-                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, scheduled_items)
-                orig_str = _parse_dt(loser.get("start_time")).strftime("%I:%M %p")
-                new_s_str = new_s.strftime("%I:%M %p")
-                new_e_str = new_e.strftime("%I:%M %p")
+                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, scheduled_items, user_tz=user_tz)
+                orig_str = _parse_dt(loser.get("start_time"), user_tz).astimezone(tz).strftime("%I:%M %p")
+                new_s_str = new_s.astimezone(tz).strftime("%I:%M %p")
+                new_e_str = new_e.astimezone(tz).strftime("%I:%M %p")
 
                 reason = f"Auto-rescheduled from {orig_str} to {new_s_str}: {slot_note}"
 
@@ -1175,11 +1266,12 @@ def extract_context_hints(text: str) -> dict:
 
     return hints
 
-def compute_datetime_from_day_and_time(day_str: str, time_str: str) -> datetime:
-    """Compute offset-aware UTC datetime given day name and time string (e.g. 'Sunday', '9 PM')."""
+def compute_datetime_from_day_and_time(day_str: str, time_str: str, user_tz: Optional[timezone] = None) -> datetime:
+    """Compute offset-aware UTC datetime given day name and time string in user's timezone (e.g. 'Sunday', '6 PM')."""
     import re
-    now = _now_utc()
-    hr, mn = 21, 0
+    tz = user_tz or _get_default_tz()
+    now_local = datetime.now(tz)
+    hr, mn = 18, 0  # default 6 PM
     if time_str:
         m = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', time_str.lower())
         if m:
@@ -1192,18 +1284,19 @@ def compute_datetime_from_day_and_time(day_str: str, time_str: str) -> datetime:
                 hr = 0
 
     days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-    target_date = now.date()
+    target_date = now_local.date()
     if day_str and day_str.lower() in days:
         target_idx = days.index(day_str.lower())
-        current_idx = now.weekday()
+        current_idx = now_local.weekday()
         diff = (target_idx - current_idx) % 7
-        if diff == 0 and hr < now.hour:
+        if diff == 0 and hr < now_local.hour:
             diff = 7
-        target_date = now.date() + timedelta(days=diff)
+        target_date = now_local.date() + timedelta(days=diff)
     elif day_str and day_str.lower() == 'tomorrow':
-        target_date = now.date() + timedelta(days=1)
+        target_date = now_local.date() + timedelta(days=1)
 
-    return datetime(target_date.year, target_date.month, target_date.day, hr, mn, 0, tzinfo=timezone.utc)
+    local_dt = datetime(target_date.year, target_date.month, target_date.day, hr, mn, 0, tzinfo=tz)
+    return local_dt.astimezone(timezone.utc)
 
 CHRONA_SYSTEM = """You are Chrona, an intelligent personal time-management and AI scheduling assistant.
 
@@ -1270,11 +1363,15 @@ When extracting tasks/events, return valid JSON in this exact structure:
 }
 """
 
-async def process_chat_message(user_id: str, message: str, session_id: str = None, context: dict = None) -> dict:
+async def process_chat_message(user_id: str, message: str, session_id: str = None, context: dict = None, user_tz: Optional[timezone] = None) -> dict:
     """
     Process a natural language message with persistent multi-turn memory and context merging.
+    All date and time calculations are grounded in the user's local timezone.
     """
-    today = _now_utc().strftime("%Y-%m-%d %A")
+    tz = user_tz or _get_default_tz()
+    now_local = datetime.now(tz)
+    today = now_local.strftime("%Y-%m-%d %A")
+    user_current_time = now_local.strftime("%I:%M %p")
 
     # Multi-turn conversation history cache keys
     session_key = session_id or "default"
@@ -1370,6 +1467,8 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
         )
 
     system = CHRONA_SYSTEM.replace("{today}", today)
+    system += f"\nUser's current local time: {user_current_time} ({today}, Timezone: {tz})."
+    system += "\nCRITICAL: Interpret all relative times (e.g. '6 PM', '5 PM', 'noon', 'tonight') in the user's local timezone. Provide ISO strings (e.g. YYYY-MM-DDTHH:MM:SS) representing the requested local time!"
     prompt = f"""
 {history_str}
 {recent_tasks_str}
@@ -1397,17 +1496,23 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
             else:
                 t["duration_minutes"] = 60
 
-        if t.get("fixed_start") and not t.get("fixed_end"):
-            s_dt = _parse_dt(t["fixed_start"])
+        if t.get("fixed_start"):
+            s_dt = _parse_dt(t["fixed_start"], user_tz)
             if s_dt:
-                t["fixed_end"] = (s_dt + timedelta(minutes=int(t["duration_minutes"]))).isoformat()
+                t["fixed_start"] = s_dt.isoformat()
+                dur_m = int(t.get("duration_minutes") or 60)
+                raw_e = t.get("fixed_end")
+                e_dt = _parse_dt(raw_e, user_tz) if raw_e else None
+                if not e_dt or e_dt <= s_dt:
+                    e_dt = s_dt + timedelta(minutes=dur_m)
+                t["fixed_end"] = e_dt.isoformat()
 
     # Deterministic fallback: If user provided title & time across turns but LLM hesitated
     if not extracted_tasks and draft_dict.get("title") and (draft_dict.get("time_str") or current_hints.get("time_str")):
         t_title = draft_dict["title"]
         t_time = draft_dict.get("time_str") or current_hints.get("time_str")
         t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Sunday"
-        dt_start = compute_datetime_from_day_and_time(t_day, t_time)
+        dt_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
         dur = int(draft_dict.get("duration_minutes") or 60)
 
         synth_task = {
@@ -1596,7 +1701,7 @@ async def onboarding(request: OnboardingRequest, user_id: str = Depends(get_user
 # ---- CHAT / NATURAL LANGUAGE ----
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
+async def chat(request: ChatRequest, req: Request, user_id: str = Depends(get_user_id)):
     """
     Main Chrona conversational endpoint.
     Processes natural language and returns structured response + extracted tasks.
@@ -1604,8 +1709,10 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
     if request.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
+    user_tz = get_user_timezone(req=req, context=request.context or {"timezone": request.timezone, "timezone_offset": request.timezone_offset})
+
     result = await process_chat_message(
-        user_id, request.message, request.session_id, request.context
+        user_id, request.message, request.session_id, request.context, user_tz=user_tz
     )
 
     # Auto-process extracted tasks if present
@@ -1640,7 +1747,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 except Exception as e:
                     print(f"⚠️ Decomposition error: {e}")
             else:
-                saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=request.message)
+                saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=request.message, user_tz=user_tz)
                 if saved_item:
                     inserted_tasks.append(saved_item)
                 if conflict_note:
@@ -1654,7 +1761,8 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
     quick_actions = []
     for t in inserted_tasks:
         if t.get("auto_rescheduled") and "decompression" in (t.get("completion_note") or "").lower():
-            s_dt = _parse_dt(t.get("start_time"))
+            s_dt = _parse_dt(t.get("start_time"), user_tz)
+            time_display = s_dt.astimezone(user_tz).strftime('%I:%M %p') if s_dt else ''
             quick_actions.append({
                 "label": f"⚡ Keep '{t.get('title')}' strictly (Skip break)",
                 "task_id": t.get("id"),
@@ -1665,7 +1773,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 "variant": "warning"
             })
             quick_actions.append({
-                "label": f"🧘 Keep 35m Decompression Break ({s_dt.strftime('%I:%M %p') if s_dt else ''})",
+                "label": f"🧘 Keep 35m Decompression Break ({time_display})",
                 "action": "dismiss",
                 "variant": "primary"
             })
@@ -1697,12 +1805,14 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
 
 @app.post("/api/chat/upload")
 async def chat_upload(
+    req: Request,
     message: Optional[str] = Form(""),
     file: Optional[UploadFile] = File(None),
     extracted_text: Optional[str] = Form(None),
     user_id: str = Depends(get_user_id),
     session_id: Optional[str] = Form(None)
 ):
+    user_tz = get_user_timezone(req)
     """
     Unified Chat + Upload endpoint.
     Accepts text message, uploaded timetable/syllabus/document, or OCR extracted text.
@@ -1760,13 +1870,13 @@ async def chat_upload(
     if not full_user_input:
         full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
 
-    result = await process_chat_message(user_id, full_user_input, session_id=session_id)
+    result = await process_chat_message(user_id, full_user_input, session_id=session_id, user_tz=user_tz)
 
     inserted_tasks = []
     reschedule_notes = []
     if result.get("tasks"):
         for task_data in result["tasks"]:
-            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=full_user_input)
+            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=full_user_input, user_tz=user_tz)
             if saved_item:
                 inserted_tasks.append(saved_item)
             if conflict_note:
@@ -1786,7 +1896,8 @@ async def chat_upload(
     quick_actions = []
     for t in inserted_tasks:
         if t.get("auto_rescheduled") and "decompression" in (t.get("completion_note") or "").lower():
-            s_dt = _parse_dt(t.get("start_time"))
+            s_dt = _parse_dt(t.get("start_time"), user_tz)
+            time_display = s_dt.astimezone(user_tz).strftime('%I:%M %p') if s_dt else ''
             quick_actions.append({
                 "label": f"⚡ Keep '{t.get('title')}' strictly (Skip break)",
                 "task_id": t.get("id"),
@@ -1797,7 +1908,7 @@ async def chat_upload(
                 "variant": "warning"
             })
             quick_actions.append({
-                "label": f"🧘 Keep 35m Decompression Break ({s_dt.strftime('%I:%M %p') if s_dt else ''})",
+                "label": f"🧘 Keep 35m Decompression Break ({time_display})",
                 "action": "dismiss",
                 "variant": "primary"
             })
@@ -2306,14 +2417,16 @@ async def schedule_accept(request: ScheduleAcceptRequest, user_id: str = Depends
 
 @app.get("/api/schedule/items")
 async def schedule_items(
+    req: Request,
     user_id: str = Depends(get_user_id),
     start: Optional[str] = None,
     end: Optional[str] = None,
     status: Optional[str] = None,
 ):
     """Get schedule items for the user with automatic conflict detection and repair."""
+    user_tz = get_user_timezone(req)
     try:
-        auto_repair_existing_conflicts(user_id)
+        auto_repair_existing_conflicts(user_id, user_tz=user_tz)
     except Exception as e:
         print(f"⚠️ Conflict auto-repair warning: {e}")
 
@@ -2333,9 +2446,10 @@ async def schedule_items(
     raise HTTPException(500, resp.text)
 
 @app.post("/api/schedule/resolve-conflicts")
-async def schedule_resolve_conflicts(user_id: str = Depends(get_user_id)):
+async def schedule_resolve_conflicts(req: Request, user_id: str = Depends(get_user_id)):
     """Detect and auto-reschedule all conflicting overlapping tasks for user."""
-    repaired = auto_repair_existing_conflicts(user_id)
+    user_tz = get_user_timezone(req)
+    repaired = auto_repair_existing_conflicts(user_id, user_tz=user_tz)
     return {
         "success": True,
         "repaired_count": len(repaired),
@@ -2351,12 +2465,15 @@ class OverrideBreakRequest(BaseModel):
     skip_break: bool = True
 
 @app.post("/api/schedule/override-break")
-async def schedule_override_break(req: OverrideBreakRequest, user_id: str = Depends(get_user_id)):
+async def schedule_override_break(req: OverrideBreakRequest, request: Request, user_id: str = Depends(get_user_id)):
     """
     Override or restore decompression break for a specific task.
     If skip_break=True: places task strictly at target_time without decompression buffer.
     If skip_break=False: restores decompression break after preceding stressful task.
     """
+    user_tz = get_user_timezone(request)
+    tz = user_tz or _get_default_tz()
+
     target_item = None
     resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
     items = resp.json() if resp.status_code == 200 else []
@@ -2381,53 +2498,49 @@ async def schedule_override_break(req: OverrideBreakRequest, user_id: str = Depe
     dur = int(target_item.get("duration_minutes") or 60)
 
     if req.skip_break:
-        new_start = _parse_dt(req.target_time) if req.target_time else _parse_dt(target_item.get("start_time"))
+        new_start = _parse_dt(req.target_time, user_tz) if req.target_time else _parse_dt(target_item.get("start_time"), user_tz)
         if not new_start:
-            new_start = _now_utc().replace(hour=21, minute=0, second=0, microsecond=0)
+            now_local = datetime.now(tz)
+            new_start = now_local.replace(hour=21, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
         new_end = new_start + timedelta(minutes=dur)
+        time_display = new_start.astimezone(tz).strftime('%I:%M %p')
         patch_data = {
             "start_time": new_start.isoformat(),
             "end_time": new_end.isoformat(),
             "strict_time": True,
             "skip_recovery_buffer": True,
             "status": "scheduled",
-            "completion_note": f"Strict placement by user request: Decompression break skipped (scheduled at {new_start.strftime('%I:%M %p')})."
+            "completion_note": f"Strict placement by user request: Decompression break skipped (scheduled at {time_display})."
         }
         sb_patch("schedule_items", patch_data, params={"id": f"eq.{target_item['id']}", "user_id": f"eq.{user_id}"})
         target_item.update(patch_data)
         return {
             "success": True,
             "item": target_item,
-            "message": f"Updated! '{target_item['title']}' is now scheduled strictly at {new_start.strftime('%I:%M %p')} with no decompression break."
+            "message": f"Updated! '{target_item['title']}' is now scheduled strictly at {time_display} with no decompression break."
         }
     else:
         # Restore decompression break
         anchor = None
-        t_start = _parse_dt(target_item.get("start_time"))
+        t_start = _parse_dt(target_item.get("start_time"), user_tz)
         for other in items:
             if other.get("id") == target_item.get("id"):
                 continue
-            o_end = _parse_dt(other.get("end_time"))
+            o_end = _parse_dt(other.get("end_time"), user_tz)
             if o_end and t_start and (t_start - o_end).total_seconds() >= -1800 and (t_start - o_end).total_seconds() <= 7200:
                 anchor = other
                 break
 
         if anchor:
-            req_buf = calculate_recovery_buffer_minutes(anchor, target_item)
-            a_end = _parse_dt(anchor.get("end_time"))
-            new_start = a_end + timedelta(minutes=req_buf)
-            rem = new_start.minute % 5
-            if rem != 0:
-                new_start += timedelta(minutes=(5 - rem))
-            new_start = new_start.replace(second=0, microsecond=0)
-            new_end = new_start + timedelta(minutes=dur)
-            note = f"Decompression break of {req_buf}m restored after '{anchor.get('title')}'."
+            new_start, new_end, note = find_optimal_reschedule_slot(target_item, anchor, items, user_tz=user_tz)
         else:
             new_start = t_start + timedelta(minutes=35) if t_start else _now_utc()
             new_end = new_start + timedelta(minutes=dur)
             note = "Decompression break of 35m restored."
 
+        start_str = new_start.astimezone(tz).strftime('%I:%M %p')
+        end_str = new_end.astimezone(tz).strftime('%I:%M %p')
         patch_data = {
             "start_time": new_start.isoformat(),
             "end_time": new_end.isoformat(),
@@ -2441,15 +2554,16 @@ async def schedule_override_break(req: OverrideBreakRequest, user_id: str = Depe
         return {
             "success": True,
             "item": target_item,
-            "message": f"Decompression break restored! '{target_item['title']}' moved to {new_start.strftime('%I:%M %p')} – {new_end.strftime('%I:%M %p')}."
+            "message": f"Decompression break restored! '{target_item['title']}' moved to {start_str} – {end_str}."
         }
 
 @app.post("/api/schedule/fixed")
-async def schedule_fixed_create(item: FixedCommitmentCreate, user_id: str = Depends(get_user_id)):
+async def schedule_fixed_create(item: FixedCommitmentCreate, req: Request, user_id: str = Depends(get_user_id)):
     """Create a commitment with intelligent inference and conflict resolution."""
     if item.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
+    user_tz = get_user_timezone(req)
     dur = int((item.end_time - item.start_time).total_seconds() / 60)
     task_data = {
         "title": item.title,
@@ -2460,7 +2574,7 @@ async def schedule_fixed_create(item: FixedCommitmentCreate, user_id: str = Depe
         "duration_minutes": dur,
         "recurrence": item.recurrence,
     }
-    saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, [], user_text=item.title)
+    saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, [], user_text=item.title, user_tz=user_tz)
     return {
         "success": True,
         "item": saved_item,

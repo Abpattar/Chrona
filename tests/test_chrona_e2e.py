@@ -567,6 +567,68 @@ class TestChronaScenarios:
         assert data["item"]["strict_time"] is True
         assert "21:00" in data["item"]["start_time"]
 
+    def test_user_timezone_exam_at_6pm_and_lunch_reschedule(self):
+        """
+        Scenario Reported by User:
+        User in IST (+05:30) says:
+        1. 'Math exam from 6 PM to 7 PM'
+        2. 'to eat lunch at 6 PM'
+        Verify:
+        - Math exam is stored with valid start and end (12:30 UTC to 13:30 UTC), matching 6:00 PM - 7:00 PM IST.
+        - end_time is strictly after start_time (never inverted e.g. 10:30 PM - 6:00 PM).
+        - Collision is detected, and 'to eat lunch' is rescheduled to 7:35 PM IST on the SAME DAY (Saturday),
+          NOT pushed to midnight (12:05 AM Sunday)!
+        """
+        from backend.server import resolve_and_save_schedule_item, _parse_dt
+        from datetime import timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-tz-user"
+
+        # 1. Save Math exam at 6 PM to 7 PM local
+        exam_task = {
+            "title": "Math exam",
+            "task_type": "exam",
+            "fixed_start": "2026-11-07T18:00:00",
+            "fixed_end": "2026-11-07T19:00:00",
+            "duration_minutes": 60,
+            "priority": 1,
+            "flexibility": False,
+        }
+        saved_exam, _ = resolve_and_save_schedule_item(user_id, exam_task, [], user_tz=ist_tz)
+        assert saved_exam is not None
+        s_dt = _parse_dt(saved_exam["start_time"])
+        e_dt = _parse_dt(saved_exam["end_time"])
+
+        # End time must be strictly after start time
+        assert e_dt > s_dt, f"End time {e_dt} must be after start time {s_dt}"
+        # In IST local time, it must be 6:00 PM to 7:00 PM
+        assert s_dt.astimezone(ist_tz).hour == 18
+        assert e_dt.astimezone(ist_tz).hour == 19
+
+        # 2. Add 'to eat lunch' at 6 PM (same time)
+        lunch_task = {
+            "title": "to eat lunch",
+            "task_type": "task",
+            "fixed_start": "2026-11-07T18:00:00",
+            "duration_minutes": 60,
+            "priority": 3,
+            "flexibility": True,
+        }
+        saved_lunch, note = resolve_and_save_schedule_item(user_id, lunch_task, [saved_exam], user_tz=ist_tz)
+        assert saved_lunch is not None
+        assert saved_lunch.get("auto_rescheduled") is True
+
+        lunch_s = _parse_dt(saved_lunch["start_time"])
+        lunch_e = _parse_dt(saved_lunch["end_time"])
+
+        # Must be on the SAME Saturday (2026-11-07 in IST)
+        lunch_local_s = lunch_s.astimezone(ist_tz)
+        assert lunch_local_s.day == 7, f"Lunch should be scheduled on Saturday (day 7), but got day {lunch_local_s.day}"
+        assert lunch_local_s.hour == 19 and lunch_local_s.minute == 35, f"Lunch should be at 7:35 PM, got {lunch_local_s.strftime('%I:%M %p')}"
+        assert lunch_e > lunch_s
+
+
 
 
 

@@ -22,3 +22,4 @@ try {
   process.stderr.write(err.message || 'OCR Error')
   process.exit(1)
 }
+

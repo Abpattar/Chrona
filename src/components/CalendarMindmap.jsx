@@ -133,7 +133,12 @@ function ScheduleTaskNode({ data }) {
 
   const hasStartTime = !!item.start_time
   const startDay = hasStartTime ? dayjs(item.start_time) : null
-  const endDay = item.end_time ? dayjs(item.end_time) : null
+  const rawEndDay = item.end_time ? dayjs(item.end_time) : null
+  const durationMin = Number(item.duration_minutes || 60)
+  // Defensive guard: Guarantee endDay is strictly after startDay so invalid inverted times can never render
+  const endDay = (startDay && rawEndDay && rawEndDay.isAfter(startDay))
+    ? rawEndDay
+    : (startDay ? startDay.add(durationMin, 'minute') : null)
 
   return (
     <div
@@ -530,6 +535,43 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
         },
       })
     })
+  })
+
+  // Add explicit task dependency edges for decomposed goals and subtasks
+  items.forEach(task => {
+    const deps = task.dependencies || task.depends_on || []
+    if (Array.isArray(deps)) {
+      deps.forEach(depId => {
+        const depTaskId = `task-${depId}`
+        const targetTaskId = `task-${task.id}`
+        if (nodes.some(n => n.id === depTaskId) && nodes.some(n => n.id === targetTaskId)) {
+          // Avoid duplicate edges
+          const edgeId = `dep-${depTaskId}-${targetTaskId}`
+          if (!edges.some(e => e.id === edgeId)) {
+            edges.push({
+              id: edgeId,
+              source: depTaskId,
+              target: targetTaskId,
+              animated: true,
+              label: 'depends on',
+              labelStyle: { fill: '#38bdf8', fontSize: 9, fontFamily: 'monospace', fontWeight: 600 },
+              labelBgStyle: { fill: '#0b132b', fillOpacity: 0.85 },
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: '#38bdf8',
+                width: 12,
+                height: 12,
+              },
+              style: {
+                stroke: '#38bdf8',
+                strokeWidth: 2,
+                strokeDasharray: '4 4',
+              },
+            })
+          }
+        }
+      })
+    }
   })
 
   return { nodes, edges }
