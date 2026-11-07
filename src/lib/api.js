@@ -1,11 +1,19 @@
-// Use a valid UUID for testing (in production, get from auth context)
-const TEST_USER_ID = '00000000-0000-0000-0000-000000000001'
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const FETCH_TIMEOUT = 15000 // 15 seconds
+/**
+ * Chrona API Client — v2
+ * Connects to the Python FastAPI backend at VITE_API_URL (default: http://localhost:8000)
+ */
+
+// Default user ID for single-user mode (no auth yet)
+export const TEST_USER_ID = '00000000-0000-0000-0000-000000000001'
+
+const API_BASE = import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+
+const TIMEOUT = 20000  // 20 seconds for AI calls
 
 async function request(endpoint, options = {}) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT)
 
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -21,86 +29,205 @@ async function request(endpoint, options = {}) {
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
-      throw new Error(error.detail || `HTTP ${response.status}`)
+      const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
+      throw new Error(err.detail || `HTTP ${response.status}`)
     }
 
     return response.json()
   } catch (err) {
     clearTimeout(timeoutId)
-    if (err.name === 'AbortError') {
-      throw new Error('Request timeout - server took too long to respond')
-    }
+    if (err.name === 'AbortError') throw new Error('Request timed out — server is busy')
     throw err
   }
 }
 
-export { TEST_USER_ID }
+/** Multipart file upload — no Content-Type override (let browser set boundary) */
+async function uploadRequest(endpoint, formData) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT)
+
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'X-User-ID': TEST_USER_ID },
+      body: formData,
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
+      throw new Error(err.detail || `HTTP ${response.status}`)
+    }
+    return response.json()
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (err.name === 'AbortError') throw new Error('Upload timed out')
+    throw err
+  }
+}
+
 export const api = {
-  // Health
+  // ── Health ──────────────────────────────────────────────
   health: () => request('/api/health'),
 
-  // Schedule
-  scheduleGenerate: (data) => request('/api/schedule/generate', {
+  // ── Onboarding ──────────────────────────────────────────
+  onboarding: (data) => request('/api/onboarding', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ user_id: TEST_USER_ID, ...data }),
   }),
 
-  scheduleAccept: (data) => request('/api/schedule/accept', {
+  // ── Chat / Natural Language ──────────────────────────────
+  chat: (message, sessionId = null, context = null) => request('/api/chat', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      message,
+      session_id: sessionId,
+      context,
+    }),
   }),
 
-  scheduleItems: (userId) => request(`/api/schedule/items`, {
-    headers: { 'X-User-ID': userId },
+  // ── Process Event (file/text extraction) ─────────────────
+  processEvent: (textOrFormData) => {
+    if (typeof textOrFormData === 'string') {
+      return request('/api/process-event', {
+        method: 'POST',
+        body: JSON.stringify({ text: textOrFormData }),
+      })
+    }
+    return uploadRequest('/api/process-event', textOrFormData)
+  },
+
+  // ── Task Decomposition ────────────────────────────────────
+  decompose: (title, description, deadline, priority = 3) => request('/api/decompose', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      title,
+      description,
+      deadline,
+      priority,
+    }),
   }),
+
+  // ── Schedule ─────────────────────────────────────────────
+  scheduleGenerate: (startDate = null, endDate = null, force = false) =>
+    request('/api/schedule/generate', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: TEST_USER_ID,
+        start_date: startDate,
+        end_date: endDate,
+        force,
+      }),
+    }),
+
+  scheduleAccept: (version, scheduledItems) => request('/api/schedule/accept', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      version,
+      scheduled_items: scheduledItems,
+    }),
+  }),
+
+  scheduleItems: (start = null, end = null, status = null) => {
+    const params = new URLSearchParams()
+    if (start)  params.set('start', start)
+    if (end)    params.set('end', end)
+    if (status) params.set('status', status)
+    const qs = params.toString()
+    return request(`/api/schedule/items${qs ? '?' + qs : ''}`)
+  },
 
   scheduleFixedCreate: (data) => request('/api/schedule/fixed', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ user_id: TEST_USER_ID, ...data }),
   }),
 
-  scheduleFixedDelete: (itemId, userId) => request(`/api/schedule/fixed`, {
+  scheduleFixedDelete: (itemId) => request(`/api/schedule/fixed/${itemId}`, {
     method: 'DELETE',
-    headers: { 'X-User-ID': userId },
-    body: JSON.stringify({ id: itemId, user_id: userId }),
   }),
 
-  // Repair
-  repairPropose: (data) => request('/api/repair/propose', {
-    method: 'POST',
+  updateScheduleItem: (itemId, data) => request(`/api/schedule/items/${itemId}`, {
+    method: 'PATCH',
     body: JSON.stringify(data),
   }),
 
-  repairApply: (data) => request('/api/repair/apply', {
+  freeSlots: (start = null, end = null) => {
+    const params = new URLSearchParams()
+    if (start) params.set('start', start)
+    if (end)   params.set('end', end)
+    const qs = params.toString()
+    return request(`/api/schedule/free-slots${qs ? '?' + qs : ''}`)
+  },
+
+  // ── Tasks ─────────────────────────────────────────────────
+  completeTask: (taskId, actualDurationMinutes = null, note = null) =>
+    request('/api/tasks/complete', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: TEST_USER_ID,
+        task_id: taskId,
+        actual_duration_minutes: actualDurationMinutes,
+        note,
+      }),
+    }),
+
+  skipTask: (taskId, note = null) => request('/api/tasks/skip', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      task_id: taskId,
+      note,
+    }),
   }),
 
-  // Behavior
-  behaviorProfile: (userId) => request('/api/behavior/profile', {
-    headers: { 'X-User-ID': userId },
+  // ── Repair ───────────────────────────────────────────────
+  repairPropose: (disruptedTaskId, reason = null) => request('/api/repair/propose', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      disrupted_task_id: disruptedTaskId,
+      reason,
+    }),
   }),
 
-  behaviorUpdate: (data) => request('/api/behavior/update', {
+  repairApply: (proposal) => request('/api/repair/apply', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      proposal,
+    }),
   }),
 
-  onboarding: (data) => request('/api/onboarding', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
+  // ── Behavior ──────────────────────────────────────────────
+  behaviorProfile: () => request('/api/behavior/profile'),
 
-  // Command
-  command: (data) => request('/api/command', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
+  behaviorUpdate: (taskId, signal, actualStart = null, metadata = null) =>
+    request('/api/behavior/update', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: TEST_USER_ID,
+        task_id: taskId,
+        signal,
+        actual_start: actualStart,
+        metadata,
+      }),
+    }),
 
-  // Events (Chrona parser)
-  processEvent: (data) => request('/api/process-event', {
+  // ── Context ───────────────────────────────────────────────
+  context: () => request('/api/context'),
+
+  // ── Projects ──────────────────────────────────────────────
+  projects: () => request('/api/projects'),
+
+  // ── Events ────────────────────────────────────────────────
+  events: () => request('/api/events'),
+
+  // ── Legacy command ────────────────────────────────────────
+  command: (command) => request('/api/command', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ user_id: TEST_USER_ID, command }),
   }),
 }

@@ -194,7 +194,8 @@ class EDFScheduler:
         tasks: list,
         free_slots: list,
         behavior_weights: dict = None,
-        fixed_items: list = None
+        fixed_items: list = None,
+        from_time: Optional[datetime] = None
     ) -> ScheduleResult:
         weights = behavior_weights or {
             "morning": 0.5, "afternoon": 0.5,
@@ -203,14 +204,25 @@ class EDFScheduler:
 
         # Separate fixed and flexible tasks
         fixed_tasks = [t for t in tasks if t.is_fixed()]
+        if fixed_items:
+            for f in fixed_items:
+                if f not in fixed_tasks:
+                    fixed_tasks.append(f)
         flexible_tasks = [t for t in tasks if not t.is_fixed()]
 
         # Subtract fixed items from free slots
         available_slots = _subtract_fixed_items(free_slots, fixed_tasks)
 
-        # Check feasibility from NOW for flexible tasks
-        impossible = [t for t in flexible_tasks if not t.is_feasible()]
-        feasible = [t for t in flexible_tasks if t.is_feasible()]
+        # Check feasibility: determine reference time
+        ref_time = _ensure_utc(from_time or _now_utc())
+        if available_slots:
+            earliest_slot = min(s.start for s in available_slots)
+            # If slots are historical/fixed window in the past, align reference time
+            if earliest_slot < ref_time:
+                ref_time = earliest_slot
+
+        impossible = [t for t in flexible_tasks if not t.is_feasible(from_time=ref_time)]
+        feasible = [t for t in flexible_tasks if t.is_feasible(from_time=ref_time)]
 
         heap = list(feasible)
         heapq.heapify(heap)

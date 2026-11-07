@@ -61,6 +61,14 @@ export function getPriorityColor(score) {
     return { bg: '#2ecc7120', border: '#2ecc71', text: '#2ecc71', label: 'Low' }                       // Green
 }
 
+export function getSeverityColor(severity) {
+    const s = (severity || 'medium').toLowerCase()
+    if (s === 'critical' || s === 'cri') return { bg: 'rgba(255, 77, 77, 0.15)', text: '#ff4d4d', border: '#ff4d4d' }
+    if (s === 'high' || s === 'hig') return { bg: 'rgba(255, 159, 67, 0.15)', text: '#ff9f43', border: '#ff9f43' }
+    if (s === 'medium' || s === 'med') return { bg: 'rgba(77, 163, 255, 0.15)', text: '#4da3ff', border: '#4da3ff' }
+    return { bg: 'rgba(61, 220, 151, 0.15)', text: '#3ddc97', border: '#3ddc97' }
+}
+
 /**
  * Calculate distance from center node based on priority.
  */

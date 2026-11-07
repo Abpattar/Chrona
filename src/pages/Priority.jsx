@@ -24,7 +24,7 @@ export default function Priority() {
 
     const fetchEvents = useCallback(async () => {
         try {
-            const data = await api.scheduleItems(USER_ID)
+            const data = await api.scheduleItems()
             setEvents(data.items || [])
             setError(null)
         } catch (err) {

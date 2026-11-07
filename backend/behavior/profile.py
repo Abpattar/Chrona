@@ -116,7 +116,7 @@ class BehaviorProfile:
         scheduled_start: datetime,
         scheduled_end: datetime,
         actual_complete: Optional[datetime],
-        confirmed_at: Optional[datetime]
+        confirmed_at: Optional[datetime] = None
     ) -> str:
         """
         Meta-style real-time weight update.

@@ -1,48 +1,40 @@
 import { useState, useEffect } from 'react'
+import { api } from '../lib/api'
 
-export default function RepairPanel({ task, onClose, onRepair }) {
+export default function RepairPanel({ task, onClose, onRepair, onRepaired }) {
     const [proposals, setProposals] = useState([])
     const [loading, setLoading] = useState(true)
     const [applying, setApplying] = useState(null)
+    const [error, setError] = useState(null)
 
     useEffect(() => {
         if (!task) return
         setLoading(true)
+        setError(null)
 
-        // Backend uses GET with query param
-        fetch(`/api/repair/propose?task_id=${task.id}`)
-            .then(res => res.json())
+        api.repairPropose(task.id, 'user_requested')
             .then(data => {
                 const mapped = (data.proposals || []).map((p, i) => ({
                     id: p.strategy || `proposal-${i}`,
                     title: p.label || p.title || 'Repair option',
                     risk: p.risk || 'medium',
-                    description: p.warning || p.note || `Urgency after: ${p.urgency_after ?? '—'}`,
+                    description: p.note || p.warning || (p.urgency_after ? `Urgency after: ${Math.round(p.urgency_after * 100)}%` : ''),
+                    new_start: p.new_start,
+                    new_end: p.new_end,
+                    task_id: task.id,
                     ...p,
                 }))
                 setProposals(mapped)
                 setLoading(false)
             })
-            .catch(() => {
+            .catch(e => {
+                setError(e.message)
+                // Provide fallback proposals
                 setProposals([
-                    {
-                        id: 'move_today',
-                        title: 'Reschedule to next available slot',
-                        risk: 'low',
-                        description: 'Move the event to the nearest open time slot without conflicts.',
-                    },
-                    {
-                        id: 'split',
-                        title: 'Split into smaller blocks',
-                        risk: 'medium',
-                        description: 'Break this event into two shorter study blocks.',
-                    },
-                    {
-                        id: 'defer_tomorrow',
-                        title: 'Move to tomorrow morning',
-                        risk: 'low',
-                        description: 'Defer to tomorrow at 9:00 AM.',
-                    },
+                    { id: 'move_today', title: 'Next available slot', risk: 'low',
+                      description: 'Move to the nearest open time slot.', task_id: task.id },
+                    { id: 'defer', title: 'Defer to tomorrow', risk: 'medium',
+                      description: 'Push to tomorrow morning.', task_id: task.id },
                 ])
                 setLoading(false)
             })
@@ -51,24 +43,21 @@ export default function RepairPanel({ task, onClose, onRepair }) {
     const handleApply = async (proposal) => {
         setApplying(proposal.id)
         try {
-            const res = await fetch('/api/repair/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ event_id: task.id, proposal_id: proposal.id }),
-            })
-            const data = await res.json()
-            if (onRepair) onRepair(data)
-        } catch {
-            if (onRepair) onRepair({ status: 'applied', proposal })
+            await api.repairApply({ ...proposal, task_id: task.id })
+            onRepaired?.()
+            onClose()
+        } catch (e) {
+            setError(e.message)
         } finally {
             setApplying(null)
         }
     }
 
     const riskStyles = {
-        low: { bg: 'rgba(76,175,130,0.06)', border: '1px solid rgba(76,175,130,0.15)', color: 'var(--ch-success)', label: '● Low Risk' },
-        medium: { bg: 'rgba(232,168,76,0.06)', border: '1px solid rgba(232,168,76,0.15)', color: 'var(--ch-warning)', label: '● Medium Risk' },
-        high: { bg: 'rgba(217,79,79,0.06)', border: '1px solid rgba(217,79,79,0.15)', color: 'var(--ch-critical)', label: '● High Risk' },
+        low:      { bg: 'rgba(76,175,130,0.06)', border: '1px solid rgba(76,175,130,0.15)', color: 'var(--ch-success)',  label: '● Low Risk' },
+        medium:   { bg: 'rgba(232,168,76,0.06)', border: '1px solid rgba(232,168,76,0.15)', color: 'var(--ch-warning)',  label: '● Medium Risk' },
+        high:     { bg: 'rgba(217,79,79,0.06)',  border: '1px solid rgba(217,79,79,0.15)',  color: 'var(--ch-critical)', label: '● High Risk' },
+        critical: { bg: 'rgba(217,79,79,0.06)',  border: '1px solid rgba(217,79,79,0.15)',  color: 'var(--ch-critical)', label: '● Critical' },
     }
 
     if (!task) return null

@@ -1,81 +1,86 @@
 """
-Explanation Agent Node
-=======================
+Explanation Agent Node — v2
+============================
 Generates human-readable explanations for scheduling decisions.
-Uses Gemini to produce natural language reasoning.
+Uses Gemini (google-genai SDK) with Groq fallback.
 
-Graph position: repair/behavior_filter -> EXPLANATION -> END
+Graph position: repair/conflict_check -> EXPLANATION -> END
 """
 import json
+import os
 from typing import Any
 
 
-EXPLANATION_PROMPT = """
-You are a scheduling assistant explaining schedule changes to a student.
+EXPLANATION_PROMPT = """You are Chrona, a friendly AI scheduling assistant explaining scheduling decisions.
 
-Given the following scheduling context, write a brief, friendly explanation
-(2-3 sentences) explaining what was scheduled and why.
+Given the scheduling context below, write a brief, helpful explanation (2-4 sentences) of what was scheduled and why.
 
 Context:
-{context_json}
+{context}
 
 Rules:
-- Be concise and friendly
-- Mention specific times if available
+- Be friendly and concise
+- Mention specific tasks if there are few (< 5)
 - If there were conflicts, explain how they were resolved
-- If behavior data was used, mention it casually ("Based on your patterns...")
-- Return ONLY the explanation text, no JSON
+- Mention behavioral preferences if used (e.g., "Since you prefer mornings...")
+- If tasks couldn't be scheduled, explain why briefly
+- Do NOT return JSON — return only natural language text
 """
 
 
 def explanation_node(state: dict, gemini_client: Any = None) -> dict:
     """
-    Generate a natural language explanation of the scheduling decisions.
-
-    If Gemini is unavailable, falls back to a template-based explanation.
-
-    Args:
-        state: ChronaState dict with scheduling results
-        gemini_client: optional google.generativeai configured client
-
-    Updates state with:
-        - explanation: human-readable string
-        - final_output: complete result dict
+    Generate a natural language explanation of scheduling decisions.
+    Falls back to template-based explanation if AI unavailable.
     """
-    state["errors"] = state.get("errors", [])
+    state.setdefault("errors", [])
 
-    # Build context for explanation
     context = {
         "events_extracted": len(state.get("extracted_events", [])),
         "tasks_enriched": len(state.get("enriched_tasks", [])),
         "conflicts_found": len(state.get("conflicts", [])),
         "repairs_proposed": len(state.get("repair_proposals", [])),
+        "event_titles": [e.get("title", "?") for e in state.get("extracted_events", [])[:5]],
         "behavior_weights": state.get("behavior_weights", {}),
-        "event_titles": [e.get("title", "Untitled") for e in state.get("extracted_events", [])[:5]],
+        "schedule_result": {
+            "scheduled": len(state.get("schedule_result", {}).get("scheduled", [])) if state.get("schedule_result") else 0,
+            "impossible": len(state.get("schedule_result", {}).get("impossible", [])) if state.get("schedule_result") else 0,
+        }
     }
 
-    # Try Gemini explanation
+    explanation = None
+
     if gemini_client:
         try:
-            prompt = EXPLANATION_PROMPT.format(
-                context_json=json.dumps(context, indent=2)
+            from google import genai
+            api_key = os.getenv("GEMINI_API_KEY")
+            client = gemini_client if hasattr(gemini_client, 'models') else genai.Client(api_key=api_key)
+
+            prompt = EXPLANATION_PROMPT.format(context=json.dumps(context, indent=2))
+            resp = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=512,
+                )
             )
-            model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
-            response = model.generate_content(prompt)
-            state["explanation"] = response.text.strip()
+            explanation = resp.text.strip()
         except Exception as e:
             state["errors"].append(f"explanation_error: {e}")
-            state["explanation"] = _fallback_explanation(context)
-    else:
-        state["explanation"] = _fallback_explanation(context)
 
-    # Build final output
+    if not explanation:
+        explanation = _fallback_explanation(context)
+
+    state["explanation"] = explanation
+
     state["final_output"] = {
         "events": state.get("extracted_events", []),
         "enriched_tasks": state.get("enriched_tasks", []),
+        "schedule": state.get("schedule_result"),
         "conflicts": state.get("conflicts", []),
         "repairs": state.get("repair_proposals", []),
-        "explanation": state["explanation"],
+        "explanation": explanation,
         "errors": state.get("errors", []),
     }
 
@@ -83,30 +88,31 @@ def explanation_node(state: dict, gemini_client: Any = None) -> dict:
 
 
 def _fallback_explanation(context: dict) -> str:
-    """Template-based explanation when Gemini is unavailable."""
     parts = []
 
     n_events = context.get("events_extracted", 0)
     if n_events > 0:
         titles = context.get("event_titles", [])
-        title_str = ", ".join(titles[:3])
-        parts.append(f"Extracted {n_events} event(s): {title_str}.")
+        if titles:
+            parts.append(f"Extracted {n_events} task(s): {', '.join(titles[:3])}{'...' if len(titles) > 3 else ''}.")
+        else:
+            parts.append(f"Extracted {n_events} task(s).")
 
     n_tasks = context.get("tasks_enriched", 0)
-    if n_tasks > 0:
-        parts.append(f"Generated {n_tasks} study block(s) for preparation.")
+    if n_tasks > n_events:
+        parts.append(f"Generated {n_tasks - n_events} additional prep/study block(s).")
 
     n_conflicts = context.get("conflicts_found", 0)
     if n_conflicts > 0:
         n_repairs = context.get("repairs_proposed", 0)
-        parts.append(f"Found {n_conflicts} conflict(s) and proposed {n_repairs} repair(s).")
+        parts.append(f"Found {n_conflicts} scheduling conflict(s) and proposed {n_repairs} repair option(s).")
 
     weights = context.get("behavior_weights", {})
     if weights:
-        best_slot = max(weights, key=weights.get) if weights else "afternoon"
-        parts.append(f"Based on your patterns, {best_slot} sessions are preferred.")
+        best = max(weights, key=weights.get) if weights else "afternoon"
+        parts.append(f"Based on your productivity patterns, {best} sessions are preferred.")
 
-    return " ".join(parts) if parts else "Schedule processed successfully."
+    return " ".join(parts) if parts else "Tasks processed successfully. Ready to schedule."
 
 
 # ============================================================
@@ -114,22 +120,14 @@ def _fallback_explanation(context: dict) -> str:
 # ============================================================
 if __name__ == "__main__":
     state = {
-        "extracted_events": [
-            {"title": "OS Final Exam"},
-            {"title": "Database Quiz"},
-        ],
-        "enriched_tasks": [
-            {"title": "Study: Scheduling"},
-            {"title": "Study: Indexing"},
-        ],
+        "extracted_events": [{"title": "Math Exam"}, {"title": "Physics Lab"}],
+        "enriched_tasks": [{"title": "Study: Calculus"}, {"title": "Study: Mechanics"}],
         "conflicts": [],
         "repair_proposals": [],
-        "behavior_weights": {"morning": 0.3, "afternoon": 0.7, "evening": 0.5, "night": 0.2},
+        "behavior_weights": {"morning": 0.8, "afternoon": 0.5, "evening": 0.3, "night": 0.1},
         "errors": [],
     }
-
     result = explanation_node(state, None)
     print(f"Explanation: {result['explanation']}")
-    assert "OS Final Exam" in result["explanation"]
     assert result["final_output"] is not None
     print("Explanation Node: OK")

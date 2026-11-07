@@ -34,6 +34,14 @@ def make_task(data: dict) -> Task:
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
     
+    fixed_start = datetime.fromisoformat(data["fixed_start"]) if data.get("fixed_start") else None
+    if fixed_start and fixed_start.tzinfo is None:
+        fixed_start = fixed_start.replace(tzinfo=timezone.utc)
+
+    fixed_end = datetime.fromisoformat(data["fixed_end"]) if data.get("fixed_end") else None
+    if fixed_end and fixed_end.tzinfo is None:
+        fixed_end = fixed_end.replace(tzinfo=timezone.utc)
+
     return Task(
         id=data["id"],
         title=data["title"],
@@ -41,7 +49,9 @@ def make_task(data: dict) -> Task:
         deadline=deadline,
         priority=data.get("priority", 3),
         flexibility=data.get("flexibility", True),
-        task_type=data.get("task_type", "task")
+        task_type=data.get("task_type", "task"),
+        fixed_start=fixed_start,
+        fixed_end=fixed_end,
     )
 
 
@@ -147,9 +157,24 @@ class TestP3FixedCommitments:
 
     def test_fixed_items_subtracted_from_free_time(self):
         """Fixed items must be subtracted from free time before scheduling flexible tasks."""
-        # This is an integration test - requires the scheduler to understand fixed items
-        # Current EDFScheduler doesn't accept fixed_items parameter
-        pytest.skip("Requires EDFScheduler extension to accept fixed_items")
+        raw_tasks = P3_FIXED_COMMITMENT["tasks"]
+        fixed_task = make_task(raw_tasks[0])
+        flex_task = make_task(raw_tasks[1])
+
+        # Provide a slot that overlaps the fixed item (16:00 to 20:00)
+        slots = [make_slot({"start": "2026-10-28T16:00:00", "end": "2026-10-28T20:00:00"})]
+        weights = P3_FIXED_COMMITMENT["behavior_weights"]
+
+        scheduler = EDFScheduler()
+        result = scheduler.schedule([flex_task], slots, weights, fixed_items=[fixed_task])
+
+        # Both flexible task and fixed task should be in result.scheduled (total 2)
+        assert len(result.scheduled) == 2
+        flex_assigned = next(a for a in result.scheduled if a.task.id == "flexible-study")
+        # Must not overlap with fixed item 18:00-19:00
+        fixed_start = parse_dt("2026-10-28T18:00:00")
+        fixed_end = parse_dt("2026-10-28T19:00:00")
+        assert flex_assigned.assigned_end <= fixed_start or flex_assigned.assigned_start >= fixed_end
 
 
 # ============================================================

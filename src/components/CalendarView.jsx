@@ -101,9 +101,16 @@ export default function CalendarView({ onOpenRepair }) {
 
     const fetchSchedule = useCallback(async () => {
         try {
-            const res = await fetch('/api/schedule/items', {
-                headers: { 'Content-Type': 'application/json' }
-            })
+            const API_BASE = import.meta.env.VITE_API_URL ||
+                (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+            const USER_ID = '00000000-0000-0000-0000-000000000001'
+            // Fetch items for the visible week range
+            const weekStart = currentWeekStart.toISOString()
+            const weekEnd = currentWeekStart.add(7, 'day').toISOString()
+            const res = await fetch(
+                `${API_BASE}/api/schedule/items?start=${weekStart}&end=${weekEnd}`,
+                { headers: { 'Content-Type': 'application/json', 'X-User-ID': USER_ID } }
+            )
             if (!res.ok) throw new Error('Failed to fetch schedule')
             const data = await res.json()
             setEvents(data.items || [])
@@ -112,7 +119,7 @@ export default function CalendarView({ onOpenRepair }) {
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [currentWeekStart])
 
     useEffect(() => { fetchSchedule() }, [fetchSchedule])
 
@@ -126,34 +133,30 @@ export default function CalendarView({ onOpenRepair }) {
     }, [loading])
 
     const handleComplete = useCallback(async (eventId) => {
+        const API_BASE = import.meta.env.VITE_API_URL ||
+            (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+        const USER_ID = '00000000-0000-0000-0000-000000000001'
         try {
-            // Optimistic update
-            setEvents(prev => prev.filter(e => e.id !== eventId))
-            await fetch('/api/behavior/update', {
+            setEvents(prev => prev.map(e => e.id === eventId ? { ...e, status: 'completed' } : e))
+            await fetch(`${API_BASE}/api/tasks/complete`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: eventId,
-                    actual_complete: new Date().toISOString(),
-                    confirmed_at: new Date().toISOString()
-                })
+                headers: { 'Content-Type': 'application/json', 'X-User-ID': USER_ID },
+                body: JSON.stringify({ user_id: USER_ID, task_id: eventId })
             })
+            fetchSchedule()
         } catch (err) { console.error(err) }
-    }, [])
+    }, [fetchSchedule])
 
     const handleDelete = useCallback(async (eventId) => {
-        // Treat delete as "skip" for behavioral updates
+        const API_BASE = import.meta.env.VITE_API_URL ||
+            (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+        const USER_ID = '00000000-0000-0000-0000-000000000001'
         try {
-            // Optimistic update
             setEvents(prev => prev.filter(e => e.id !== eventId))
-            await fetch('/api/behavior/update', {
+            await fetch(`${API_BASE}/api/tasks/skip`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: eventId,
-                    actual_complete: null, // Skipped
-                    confirmed_at: new Date().toISOString()
-                })
+                headers: { 'Content-Type': 'application/json', 'X-User-ID': USER_ID },
+                body: JSON.stringify({ user_id: USER_ID, task_id: eventId, note: 'Dismissed from calendar' })
             })
         } catch (err) { console.error(err) }
     }, [])

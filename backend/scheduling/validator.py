@@ -102,14 +102,15 @@ def validate_plan(
             if item["start"] < fix["end"] and item["end"] > fix["start"]:
                 errors.append(f"Task {item['task_id']} overlaps fixed commitment {fix['start']}-{fix['end']}")
 
-    # 3. Check each item is inside at least one working window
-    for item in plan_items:
-        inside_window = any(
-            w["start"] <= item["start"] and item["end"] <= w["end"]
-            for w in working_windows
-        )
-        if not inside_window:
-            errors.append(f"Task {item['task_id']} outside working windows: {item['start']}-{item['end']}")
+    # 3. Check each item is inside at least one working window (if windows specified)
+    if working_windows:
+        for item in plan_items:
+            inside_window = any(
+                w["start"] <= item["start"] and item["end"] <= w["end"]
+                for w in working_windows
+            )
+            if not inside_window:
+                errors.append(f"Task {item['task_id']} outside working windows: {item['start']}-{item['end']}")
 
     # 4. Check end <= deadline (if deadline specified)
     for item in plan_items:

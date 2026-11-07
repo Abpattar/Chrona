@@ -1,31 +1,48 @@
 """
-LangGraph Agent Graph - Chrona's Agentic Core
-===============================================
-Orchestrates the full pipeline from input ingestion to scheduled output.
+LangGraph Agent Graph — Chrona v2
+====================================
+Orchestrates the full pipeline: ingestion → parsing → enrichment →
+scheduling → conflict check → repair → explanation.
 
-Graph topology:
-  ingestion -> parser -> enrichment -> scheduling -> conflict_check
-                                                          |           |
-                                                     (conflict)   (clear)
-                                                          |           |
-                                                       repair     explanation
-                                                          |           |
-                                                       explanation  <-+
-                                                          |
-                                                         END
+Changes in v2:
+- scheduling_node now INVOKES the EDF scheduler (was just loading behavior)
+- conflict_check_node uses actual schedule data
+- Proper google-genai SDK throughout
+- Sequential fallback also runs full scheduling
 
 Usage:
-    from agents.graph import build_chrona_graph
+    from agents.graph import build_chrona_graph, run_pipeline
 
     graph = build_chrona_graph(gemini_client, supabase_client, redis_client)
     result = graph.invoke(initial_state)
-
-Note: This module requires langgraph. If langgraph is not installed,
-use run_pipeline() as a simple sequential fallback.
+    # or:
+    result = run_pipeline(state, gemini_client, supabase_client)
 """
 import json
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+
+def _ensure_utc(dt):
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_dt(s):
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return _ensure_utc(dt)
+    except (ValueError, TypeError):
+        return None
+
 
 # Import agent nodes
 from .ingestion import ingestion_node
@@ -38,16 +55,7 @@ from .explanation import explanation_node
 def build_chrona_graph(gemini_client, supabase_client, redis_client=None, groq_client=None):
     """
     Build the LangGraph state machine for Chrona.
-
-    Args:
-        gemini_client: google.generativeai module (configured)
-        supabase_client: Supabase client instance
-        redis_client: optional Redis client for caching
-        groq_client: optional Groq client for fallback
-
-    Returns:
-        Compiled LangGraph graph, or None if langgraph not available.
-        Use run_pipeline() as fallback.
+    Returns compiled graph or None if langgraph not available.
     """
     try:
         from langgraph.graph import StateGraph, END
@@ -83,64 +91,126 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None, groq_c
             errors:           Annotated[list, operator.add]
 
         def scheduling_node(state):
-            """Load behavior weights and prepare for scheduling."""
+            """
+            Load behavior weights AND run the EDF scheduler on enriched tasks.
+            This node now produces an actual schedule_result.
+            """
+            from behavior.profile import BehaviorProfile
+            from scheduling.edf import EDFScheduler, Task, TimeSlot
+
+            # 1. Load behavior profile
+            profile = None
+            if redis_client:
+                try:
+                    cached = redis_client.get(f"chrona:profile:{state['user_id']}")
+                    if cached:
+                        profile = BehaviorProfile.from_db_row(json.loads(cached))
+                except Exception:
+                    pass
+
+            if not profile and supabase_client:
+                try:
+                    row = (supabase_client.table("behavior_profiles")
+                           .select("*").eq("user_id", state["user_id"])
+                           .single().execute())
+                    profile = (BehaviorProfile.from_db_row(row.data) if row.data
+                               else BehaviorProfile(user_id=state["user_id"]))
+                except Exception:
+                    profile = BehaviorProfile(user_id=state["user_id"])
+
+            if not profile:
+                profile = BehaviorProfile(user_id=state["user_id"])
+
+            weights = profile.get_scheduling_weights()
+            state["behavior_weights"] = weights
+
+            # 2. Run EDF scheduler on enriched tasks
+            enriched = state.get("enriched_tasks", [])
+            if not enriched:
+                state["schedule_result"] = {"scheduled": [], "impossible": [], "deferred": []}
+                return state
+
+            # Build Task objects
+            tasks = []
+            fixed_items = []
+            for t in enriched:
+                try:
+                    deadline = _parse_dt(t.get("deadline")) or (_now_utc() + timedelta(days=7))
+                    task = Task(
+                        id=t.get("id", f"task-{len(tasks)}"),
+                        title=t.get("title", "Untitled"),
+                        duration_minutes=int(t.get("duration_minutes", 60)),
+                        deadline=deadline,
+                        priority=int(t.get("priority", 3)),
+                        flexibility=bool(t.get("flexibility", True)),
+                        task_type=t.get("task_type", "task"),
+                    )
+                    if not t.get("flexibility", True) and t.get("fixed_start") and t.get("fixed_end"):
+                        task.fixed_start = _parse_dt(t["fixed_start"])
+                        task.fixed_end   = _parse_dt(t["fixed_end"])
+                        fixed_items.append(task)
+                    else:
+                        tasks.append(task)
+                except Exception as e:
+                    state["errors"] = state.get("errors", []) + [f"task_build_error: {e}"]
+
+            # Generate free slots (next 7 days, 7am-10pm)
+            now = _now_utc()
+            free_slots = []
+            for day_offset in range(7):
+                day = now + timedelta(days=day_offset)
+                day_start = day.replace(hour=7, minute=0, second=0, microsecond=0)
+                day_end   = day.replace(hour=22, minute=0, second=0, microsecond=0)
+                if day_start > now:
+                    free_slots.append(TimeSlot(start=day_start, end=day_end))
+                elif day_end > now:
+                    free_slots.append(TimeSlot(start=now, end=day_end))
+
+            # Run scheduler
             try:
-                from behavior.profile import BehaviorProfile
+                scheduler = EDFScheduler()
+                result = scheduler.schedule(tasks, free_slots, weights, fixed_items)
 
-                # Try Redis cache first
-                cached = None
-                if redis_client:
-                    try:
-                        cached = redis_client.get(f"chrona:profile:{state['user_id']}")
-                    except Exception:
-                        pass
-
-                if cached:
-                    profile_data = json.loads(cached)
-                    profile = BehaviorProfile.from_db_row(profile_data)
-                else:
-                    # Fallback to Supabase
-                    try:
-                        row = (supabase_client.table("behavior_profiles")
-                               .select("*").eq("user_id", state["user_id"])
-                               .single().execute())
-                        profile = (BehaviorProfile.from_db_row(row.data)
-                                   if row.data else
-                                   BehaviorProfile(user_id=state["user_id"]))
-                    except Exception:
-                        profile = BehaviorProfile(user_id=state["user_id"])
-
-                state["behavior_weights"] = profile.get_scheduling_weights()
-            except Exception as e:
-                state["errors"] = state.get("errors", [])
-                state["errors"].append(f"behavior_load_error: {e}")
-                state["behavior_weights"] = {
-                    "morning": 0.5, "afternoon": 0.5,
-                    "evening": 0.5, "night": 0.5
+                state["schedule_result"] = {
+                    "scheduled": [
+                        {
+                            "task_id": a.task.id,
+                            "title": a.task.title,
+                            "start_time": a.assigned_start.isoformat(),
+                            "end_time": a.assigned_end.isoformat(),
+                            "task_type": a.task.task_type,
+                            "priority": a.task.priority,
+                            "flexibility": a.task.flexibility,
+                        }
+                        for a in result.scheduled
+                    ],
+                    "impossible": [{"task_id": t.id, "title": t.title} for t in result.impossible],
+                    "deferred":   [{"task_id": t.id, "title": t.title} for t in result.deferred],
                 }
+            except Exception as e:
+                state["errors"] = state.get("errors", []) + [f"scheduling_error: {e}"]
+                state["schedule_result"] = {"scheduled": [], "impossible": [], "deferred": []}
+
             return state
 
         def conflict_check_node(state):
-            """Check for schedule conflicts on extracted events."""
+            """Check for schedule conflicts in extracted events."""
             from scheduling.conflict import detect_conflicts
 
             conflicts = []
             for event in state.get("extracted_events", []):
-                if event.get("event_datetime"):
-                    try:
-                        start = datetime.fromisoformat(
-                            str(event["event_datetime"]).replace("Z", "").replace("+00:00", "")
-                        )
-                        duration = event.get("estimated_prep_hours", 1) or 1
-                        end = start + timedelta(hours=duration)
-                        found = detect_conflicts(
-                            supabase_client, state["user_id"], start, end
-                        )
-                        if found:
-                            conflicts.extend(found)
-                    except Exception as e:
-                        state["errors"] = state.get("errors", [])
-                        state["errors"].append(f"conflict_check_error: {e}")
+                event_dt = event.get("event_datetime") or event.get("fixed_start")
+                if not event_dt:
+                    continue
+                try:
+                    start = _parse_dt(event_dt)
+                    duration = event.get("duration_minutes", 60) or 60
+                    end = start + timedelta(minutes=duration)
+                    if supabase_client:
+                        found = detect_conflicts(supabase_client, state["user_id"], start, end)
+                        conflicts.extend(found or [])
+                except Exception as e:
+                    state["errors"] = state.get("errors", []) + [f"conflict_check_error: {e}"]
 
             state["conflicts"] = conflicts
             return state
@@ -165,7 +235,7 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None, groq_c
         graph.add_edge("scheduling",     "conflict_check")
         graph.add_conditional_edges("conflict_check", should_repair, {
             "repair":      "repair",
-            "explanation": "explanation"
+            "explanation": "explanation",
         })
         graph.add_edge("repair",         "explanation")
         graph.add_edge("explanation",    END)
@@ -173,56 +243,99 @@ def build_chrona_graph(gemini_client, supabase_client, redis_client=None, groq_c
         return graph.compile()
 
     except ImportError:
-        print("WARNING: langgraph not installed. Use run_pipeline() as fallback.")
+        print("WARNING: langgraph not installed. Using run_pipeline() sequential fallback.")
         return None
 
 
 def run_pipeline(state: dict, gemini_client, supabase_client, redis_client=None, groq_client=None) -> dict:
     """
-    Sequential fallback when LangGraph is not available.
-    Runs the same nodes in order without the graph framework.
-
-    This is useful for:
-    - Testing without langgraph installed
-    - Simpler deployments
-    - Debugging individual nodes
+    Sequential fallback when LangGraph is unavailable.
+    Runs the complete pipeline including EDF scheduling.
     """
-    state["errors"] = state.get("errors", [])
-    state["extracted_events"] = state.get("extracted_events", [])
-    state["enriched_tasks"] = state.get("enriched_tasks", [])
-    state["conflicts"] = state.get("conflicts", [])
-    state["repair_proposals"] = state.get("repair_proposals", [])
+    state.setdefault("errors", [])
+    state.setdefault("extracted_events", [])
+    state.setdefault("enriched_tasks", [])
+    state.setdefault("conflicts", [])
+    state.setdefault("repair_proposals", [])
 
-    # 1. Ingestion
+    # 1. Ingestion — classify input type
     state = ingestion_node(state)
 
-    # 2. Parser
+    # 2. Parser — extract events/tasks from raw input
     state = parser_node(state, gemini_client, groq_client)
 
-    # 3. Enrichment
+    # 3. Enrichment — add scheduling metadata, generate prep blocks
     state = enrichment_node(state, gemini_client, groq_client)
 
-    # 4. Scheduling (behavior weights)
-    from behavior.profile import BehaviorProfile
+    # 4. Scheduling — load behavior weights + run EDF
     try:
-        cached = None
-        if redis_client:
-            try:
-                cached = redis_client.get(f"chrona:profile:{state.get('user_id', '')}")
-            except Exception:
-                pass
-        if cached:
-            profile = BehaviorProfile.from_db_row(json.loads(cached))
-        else:
-            profile = BehaviorProfile(user_id=state.get("user_id", ""))
+        from behavior.profile import BehaviorProfile
+        from scheduling.edf import EDFScheduler, Task, TimeSlot
+
+        # Behavior weights
+        profile = BehaviorProfile(user_id=state.get("user_id", ""))
         state["behavior_weights"] = profile.get_scheduling_weights()
-    except Exception:
-        state["behavior_weights"] = {"morning":0.5,"afternoon":0.5,"evening":0.5,"night":0.5}
 
-    # 5. Conflict check
-    # (simplified — needs supabase_client for real check)
+        # Build tasks
+        tasks = []
+        fixed_items = []
+        for t in state.get("enriched_tasks", []):
+            try:
+                deadline = _parse_dt(t.get("deadline")) or (_now_utc() + timedelta(days=7))
+                task = Task(
+                    id=t.get("id", f"task-{len(tasks)}"),
+                    title=t.get("title", "Untitled"),
+                    duration_minutes=int(t.get("duration_minutes", 60)),
+                    deadline=deadline,
+                    priority=int(t.get("priority", 3)),
+                    flexibility=bool(t.get("flexibility", True)),
+                    task_type=t.get("task_type", "task"),
+                )
+                if not t.get("flexibility", True) and t.get("fixed_start") and t.get("fixed_end"):
+                    task.fixed_start = _parse_dt(t["fixed_start"])
+                    task.fixed_end   = _parse_dt(t["fixed_end"])
+                    fixed_items.append(task)
+                else:
+                    tasks.append(task)
+            except Exception as e:
+                state["errors"].append(f"task_build: {e}")
 
-    # 6. Repair (if conflicts)
+        # Free slots (default: next 7 days, 7am-10pm)
+        now = _now_utc()
+        free_slots = []
+        for d in range(7):
+            day = now + timedelta(days=d)
+            ds = day.replace(hour=7, minute=0, second=0, microsecond=0)
+            de = day.replace(hour=22, minute=0, second=0, microsecond=0)
+            if ds < de:
+                free_slots.append(TimeSlot(start=max(ds, now), end=de))
+
+        if tasks:
+            scheduler = EDFScheduler()
+            result = scheduler.schedule(tasks, free_slots, state["behavior_weights"], fixed_items)
+            state["schedule_result"] = {
+                "scheduled": [
+                    {
+                        "task_id": a.task.id,
+                        "title": a.task.title,
+                        "start_time": a.assigned_start.isoformat(),
+                        "end_time": a.assigned_end.isoformat(),
+                        "task_type": a.task.task_type,
+                        "priority": a.task.priority,
+                    }
+                    for a in result.scheduled
+                ],
+                "impossible": [{"task_id": t.id, "title": t.title} for t in result.impossible],
+                "deferred":   [{"task_id": t.id, "title": t.title} for t in result.deferred],
+            }
+    except Exception as e:
+        state["errors"].append(f"scheduling_pipeline: {e}")
+        state.setdefault("behavior_weights", {"morning": 0.5, "afternoon": 0.5, "evening": 0.5, "night": 0.5})
+
+    # 5. Conflict check (simplified for sequential)
+    state.setdefault("conflicts", [])
+
+    # 6. Repair if conflicts
     if state.get("conflicts"):
         state = repair_node(state, gemini_client, redis_client)
 
@@ -236,9 +349,8 @@ def run_pipeline(state: dict, gemini_client, supabase_client, redis_client=None,
 # SELF-TEST
 # ============================================================
 if __name__ == "__main__":
-    # Test the pipeline fallback
     state = {
-        "raw_input": "Test event",
+        "raw_input": "I have a math exam next Friday and need to study 6 hours for it.",
         "input_bytes": None,
         "input_type": "",
         "user_id": "test-user",
@@ -255,8 +367,10 @@ if __name__ == "__main__":
         "errors": [],
     }
 
-    # Run pipeline with no Gemini (will fail gracefully)
-    result = run_pipeline(state, None, None, None)
-    print(f"Pipeline completed with {len(result.get('errors', []))} error(s)")
-    print(f"Explanation: {result.get('explanation', 'N/A')}")
-    print("Agent Graph: OK (fallback pipeline)")
+    result = run_pipeline(state, None, None, None, None)
+    print(f"Pipeline completed with {len(result.get('errors', []))} errors")
+    print(f"Extracted: {len(result.get('extracted_events', []))} events")
+    print(f"Enriched: {len(result.get('enriched_tasks', []))} tasks")
+    print(f"Scheduled: {len(result.get('schedule_result', {}).get('scheduled', []))} items")
+    print(f"Explanation: {result.get('explanation', 'N/A')[:100]}")
+    print("Agent Graph: OK")

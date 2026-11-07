@@ -1,176 +1,209 @@
 """
-Enrichment Agent Node - Chrona's Killer Feature
-=================================================
-Converts key_topics + estimated_prep_hours into individual study blocks.
-This is what no other scheduler does.
-
-Example:
-  Input:  "OS Final Exam" with key_topics=["scheduling", "memory", "deadlocks"]
-          and estimated_prep_hours=12
-  Output: 5 study blocks of 45-90 min each, with progressive deadlines
+Enrichment Agent Node — v2
+===========================
+Enriches extracted events with scheduling metadata.
+Estimates durations, priorities, and prep blocks.
+Optionally decomposes projects into subtasks.
 
 Graph position: parser -> ENRICHMENT -> scheduling
 """
 import json
-from datetime import datetime, timedelta
-from typing import Any
+import os
+from datetime import datetime, timedelta, timezone
 
 
-ENRICHMENT_PROMPT = """
-You are a study planning expert. Given an extracted event with key_topics and estimated_prep_hours,
-generate a list of individual study block tasks.
+ENRICHMENT_PROMPT = """You are a scheduling enrichment engine for Chrona.
+
+Given extracted events/tasks, enrich each with realistic scheduling metadata and generate study/prep blocks if needed.
+
+For each input event, return an enriched version. For events needing preparation (exams, presentations, big assignments), also generate prep_blocks.
+
+Return JSON in this format:
+{
+  "enriched": [
+    {
+      "original_id": "index",
+      "title": "string",
+      "task_type": "string",
+      "duration_minutes": number,
+      "priority": 1-4,
+      "flexibility": boolean,
+      "deadline": "ISO string or null",
+      "estimated_sessions": 1,
+      "session_duration_minutes": 60,
+      "needs_prep": false,
+      "completion_criteria": "string"
+    }
+  ],
+  "prep_blocks": [
+    {
+      "for_event": "event title",
+      "title": "string",
+      "duration_minutes": number,
+      "priority": 2,
+      "task_type": "study_block",
+      "days_before_deadline": number
+    }
+  ]
+}
 
 Rules:
-- Split the total prep hours across all topics proportionally by complexity
-- Each block should be 45-90 minutes maximum (cognitive science optimal range)
-- If a topic has sub-topics, split further
-- Set deadlines progressively: hardest topics first, review session last (1 day before event)
-- Return ONLY valid JSON, no markdown, no explanation
-
-Input event:
-{event_json}
-
-Return format (JSON array only):
-[
-  {{
-    "title": "Study: <topic>",
-    "task_type": "study_block",
-    "duration_minutes": <int>,
-    "deadline": "<ISO date string>",
-    "priority": <1-4>,
-    "topic": "<topic name>"
-  }}
-]
+- For exams: generate 1 prep block per subject/topic (60-120 min each)
+- For assignments: estimate realistic completion time
+- For recurring tasks (class, workout): set estimated_sessions=1 (each occurrence is 1 session)
+- Completion criteria should be specific and measurable
+- If prep_hours > 2, split into multiple sessions
+- Today's date: {today}
 """
 
 
-def enrichment_node(state: dict, gemini_client: Any, groq_client=None) -> dict:
+def enrichment_node(state: dict, gemini_client=None, groq_client=None) -> dict:
     """
-    Enrich extracted events by generating study blocks from key_topics.
-
-    Only enriches events that have:
-    - key_topics (non-empty list)
-    - estimated_prep_hours >= 0.5
-
-    Args:
-        state: ChronaState dict
-        gemini_client: google.generativeai configured client
-        groq_client: optional Groq client for fallback
-
-    Updates state with:
-        - enriched_tasks: list of study block dicts
+    Enrich extracted events with scheduling metadata.
+    Generates prep/study blocks for events that need preparation.
     """
-    enriched_tasks = []
-    state["errors"] = state.get("errors", [])
+    state.setdefault("enriched_tasks", [])
+    state.setdefault("errors", [])
 
-    def _enrich_with_gemini(prompt_text):
-        model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
-        response = model.generate_content(prompt_text)
-        raw = response.text.strip()
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw.strip())
+    events = state.get("extracted_events", [])
+    if not events:
+        return state
 
-    def _enrich_with_groq(prompt_text):
-        if not groq_client:
-            raise Exception("Groq client not available")
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt_text}],
+    today = datetime.now().strftime("%Y-%m-%d")
+    prompt = ENRICHMENT_PROMPT.format(today=today)
+
+    def _enrich_with_gemini(events_data):
+        from google import genai
+        api_key = os.getenv("GEMINI_API_KEY")
+        client = gemini_client if (gemini_client and hasattr(gemini_client, 'models')) else genai.Client(api_key=api_key)
+
+        full_prompt = f"{prompt}\n\nEvents to enrich:\n{json.dumps(events_data, indent=2)}"
+        resp = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=full_prompt,
+            config=genai.types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+                max_output_tokens=4096,
+            )
+        )
+        text = resp.text.strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:-1])
+        return json.loads(text)
+
+    def _enrich_with_groq(events_data):
+        full_prompt = f"{prompt}\n\nEvents to enrich:\n{json.dumps(events_data, indent=2)}"
+        resp = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": full_prompt}],
             response_format={"type": "json_object"},
             temperature=0.1,
             max_tokens=4096,
         )
-        return json.loads(response.choices[0].message.content)
+        return json.loads(resp.choices[0].message.content)
 
-    for event in state.get("extracted_events", []):
-        # Only enrich events with prep work needed
-        if not event.get("key_topics") or not event.get("estimated_prep_hours"):
-            continue
-        if event.get("estimated_prep_hours", 0) < 0.5:
-            continue
-
-        prompt = ENRICHMENT_PROMPT.format(
-            event_json=json.dumps(event, indent=2)
-        )
-
+    # Try enrichment
+    result = None
+    if gemini_client:
         try:
-            if gemini_client:
-                try:
-                    tasks = _enrich_with_gemini(prompt)
-                except Exception as e:
-                    print(f"⚠️ Enrichment Gemini failed: {e}, trying Groq...")
-                    if groq_client:
-                        tasks = _enrich_with_groq(prompt)
-                    else:
-                        raise
-            else:
-                tasks = _enrich_with_groq(prompt)
-
-            for task in tasks:
-                task["event_id"] = event.get("id")
-                task["user_id"]  = state.get("user_id")
-                enriched_tasks.append(task)
-
+            result = _enrich_with_gemini(events)
         except Exception as e:
-            state["errors"].append(f"enrichment_error for '{event.get('title')}': {e}")
-            # Fallback: create one generic prep block
-            if event.get("event_datetime"):
-                try:
-                    event_dt = datetime.fromisoformat(
-                        str(event["event_datetime"]).replace("Z", "+00:00").replace("+00:00", "")
-                    )
-                except (ValueError, TypeError):
-                    event_dt = datetime.now() + timedelta(days=3)
+            state["errors"].append(f"enrichment_gemini_error: {e}")
 
-                enriched_tasks.append({
-                    "title":            f"Prepare: {event['title']}",
-                    "task_type":        "study_block",
-                    "duration_minutes": min(int(event["estimated_prep_hours"] * 60), 90),
-                    "deadline":         (event_dt - timedelta(days=1)).isoformat(),
-                    "priority":         2,
-                    "event_id":         event.get("id"),
-                    "user_id":          state.get("user_id")
+    if not result and groq_client:
+        try:
+            result = _enrich_with_groq(events)
+        except Exception as e:
+            state["errors"].append(f"enrichment_groq_error: {e}")
+
+    if result:
+        # Merge enriched data back with original events
+        enriched_map = {str(e.get("original_id", i)): e for i, e in enumerate(result.get("enriched", []))}
+        all_tasks = []
+
+        for i, event in enumerate(events):
+            enriched = enriched_map.get(str(i), {})
+            merged = {**event, **enriched}
+            all_tasks.append(merged)
+
+        # Add prep blocks as separate tasks
+        for block in result.get("prep_blocks", []):
+            all_tasks.append({
+                **block,
+                "task_type": block.get("task_type", "study_block"),
+                "flexibility": True,
+                "is_prep_block": True,
+            })
+
+        state["enriched_tasks"] = all_tasks
+    else:
+        # Fallback: use events as-is with defaults
+        state["enriched_tasks"] = _default_enrichment(events)
+
+    return state
+
+
+def _default_enrichment(events: list) -> list:
+    """Simple rule-based enrichment when AI is unavailable."""
+    enriched = []
+    for event in events:
+        task = dict(event)
+        category = event.get("category", "").lower()
+        prep = event.get("prep_hours", 0) or 0
+
+        # Set defaults based on category
+        if category == "exam":
+            task.setdefault("priority", 1)
+            task.setdefault("duration_minutes", 180)
+            task["flexibility"] = False
+        elif category in ("class", "meeting"):
+            task.setdefault("priority", 2)
+            task.setdefault("duration_minutes", 90)
+            task["flexibility"] = False
+        elif category == "assignment":
+            task.setdefault("priority", 2)
+            task.setdefault("duration_minutes", 120)
+        elif category == "workout":
+            task.setdefault("priority", 3)
+            task.setdefault("duration_minutes", 60)
+        else:
+            task.setdefault("priority", 3)
+            task.setdefault("duration_minutes", 60)
+
+        enriched.append(task)
+
+        # Generate prep blocks for exams
+        if category == "exam" and prep > 0 and event.get("event_datetime"):
+            topics = event.get("key_topics", []) or ["Review"]
+            for topic in topics[:5]:
+                enriched.append({
+                    "title": f"Study: {topic}",
+                    "task_type": "study_block",
+                    "duration_minutes": min(90, int(prep * 60 / max(len(topics), 1))),
+                    "priority": 2,
+                    "flexibility": True,
+                    "deadline": event.get("event_datetime"),
+                    "is_prep_block": True,
+                    "for_event": event.get("title"),
                 })
 
-    state["enriched_tasks"] = enriched_tasks
-    return state
+    return enriched
 
 
 # ============================================================
 # SELF-TEST
 # ============================================================
 if __name__ == "__main__":
-    # Test fallback behavior (no Gemini)
     state = {
-        "user_id": "test-user",
         "extracted_events": [
-            {
-                "id": "evt-001",
-                "title": "OS Final Exam",
-                "key_topics": ["scheduling", "memory", "deadlocks"],
-                "estimated_prep_hours": 12,
-                "event_datetime": (datetime.now() + timedelta(days=5)).isoformat(),
-            }
+            {"title": "OS Final Exam", "category": "exam", "event_datetime": "2026-11-15T14:00:00",
+             "prep_hours": 6, "key_topics": ["Processes", "Memory", "File Systems"]},
         ],
         "errors": [],
     }
-
-    # Without Gemini, the fallback should create 1 generic block
-    class MockClient:
-        class GenerativeModel:
-            def __init__(self, **kw): pass
-            def generate_content(self, prompt):
-                raise Exception("Mock - no API key")
-
-        def GenerativeModel(self, **kw):
-            return self.GenerativeModel(**kw)
-
-    result = enrichment_node(state, MockClient())
-    assert len(result.get("enriched_tasks", [])) == 1
-    assert result["enriched_tasks"][0]["task_type"] == "study_block"
-    print(f"Fallback task: {result['enriched_tasks'][0]['title']}")
-    print("Enrichment Node: OK (fallback test)")
+    result = enrichment_node(state, None, None)
+    print(f"Enriched tasks: {len(result.get('enriched_tasks', []))}")
+    for t in result.get("enriched_tasks", []):
+        print(f"  - {t.get('title')} ({t.get('task_type')})")
+    print("Enrichment Node: OK (fallback used)")

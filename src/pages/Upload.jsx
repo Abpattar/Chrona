@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { api } from '../lib/api'
 
 export default function Upload() {
     const [text, setText] = useState('')
@@ -19,17 +20,17 @@ export default function Upload() {
         setStatus(null)
 
         try {
-            const formData = new FormData()
-            if (file) formData.append('file', file)
-            if (text.trim()) formData.append('text', text.trim())
+            let res
+            if (file) {
+                const formData = new FormData()
+                formData.append('file', file)
+                if (text.trim()) formData.append('text', text.trim())
+                res = await api.processEvent(formData)
+            } else {
+                res = await api.processEvent(text.trim())
+            }
 
-            const res = await fetch('/api/process-event', {
-                method: 'POST',
-                body: formData,
-            })
-
-            if (!res.ok) throw new Error(`Server error: ${res.status}`)
-            setStatus({ type: 'success', message: 'Event processed successfully ✨' })
+            setStatus({ type: 'success', message: `Extracted ${res.count || res.events?.length || 1} task(s) successfully ✨` })
             setText('')
             setFile(null)
             if (fileInputRef.current) fileInputRef.current.value = ''

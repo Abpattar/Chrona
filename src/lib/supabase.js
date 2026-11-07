@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://tvzenknzcxuegkzujihu.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR2emVua256Y3h1ZWdrenVqaWh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NTYyNDIsImV4cCI6MjA4ODEzMjI0Mn0.rbceObIw6hMdWyCtBEu487cPAo3jxgtyw_3X44vsySE'
+// Use the same Supabase project as the backend
+// (read from env, falls back to the project configured in .env)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://anpyvughfvfwgklyjbmu.supabase.co'
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFucHl2dWdoZnZmd2drbHlqYm11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyMjAyNzksImV4cCI6MjEwNzc5NjI3OX0.3f_vb1PHYcL9-oUWm6fdTQXiGoCcAO7miYSjeyNj3Fo'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)

@@ -1,193 +1,156 @@
 """
-Parser Agent Node
-==================
-Uses Gemini to extract structured event data from raw input.
+Parser Agent Node — v2 (google-genai SDK)
+==========================================
+Extracts structured task/event data from raw input using Gemini.
 Handles text, images, and PDFs. Falls back to Groq if Gemini fails.
 
 Graph position: ingestion -> PARSER -> enrichment
 """
 import json
-import tempfile
 import os
-import base64
+from datetime import datetime
 
 
-EXTRACTION_PROMPT = """
-You are an intelligent event extraction engine. Analyze the input and extract event information.
+EXTRACTION_PROMPT = """You are an intelligent event and task extraction engine for Chrona, an AI scheduling assistant.
 
-Return JSON in this exact format:
-{
-  "title": "",
-  "category": "",
-  "venue": "",
-  "event_datetime": "",
-  "severity_level": "",
-  "complexity_score": 0,
-  "estimated_prep_hours": 0,
+Analyze the input and extract ALL tasks/events/commitments with rich metadata.
+
+Return a JSON ARRAY of objects in this exact format:
+[{
+  "title": "string",
+  "category": "exam|assignment|class|meeting|study|workout|personal|reminder|project|other",
+  "venue": "string or null",
+  "event_datetime": "ISO datetime or null",
+  "duration_minutes": 60,
+  "priority": 3,
+  "flexibility": true,
+  "task_type": "task|fixed|study|exam|assignment|class|workout|meeting",
+  "is_fixed": false,
+  "fixed_start": "ISO datetime or null",
+  "fixed_end": "ISO datetime or null",
+  "deadline": "ISO datetime or null",
+  "recurrence": "daily|weekdays|weekly|null",
+  "recurrence_days": null,
   "key_topics": [],
-  "action_items": []
-}
+  "prep_hours": 0,
+  "is_project": false,
+  "project_description": null
+}]
 
 Rules:
-- category: exam, hackathon, assignment, meeting, personal, reminder
-- severity_level: low, medium, high, critical
-- complexity_score: 1-10
-- estimated_prep_hours: realistic hours needed
-- key_topics: 3-5 specific sub-topics
-- action_items: 3-5 concrete steps
-- Convert datetime to ISO format: YYYY-MM-DDTHH:MM:SS
-- Return ONLY valid JSON
+- priority: 1=critical, 2=important, 3=normal, 4=optional
+- flexibility=false for classes, meetings, fixed appointments
+- flexibility=true for study, assignments, workouts
+- is_fixed=true only when user specifies an exact time
+- Recurrence: "daily" if every day, "weekdays" if Mon-Fri, "weekly" if once/week
+- Convert relative times to ISO dates using today's date provided
+- If user mentions a project or large goal, set is_project=true and project_description
+- Extract EVERY task mentioned, even if brief
+- Return ONLY valid JSON array, no markdown
 """
 
 
-def parser_node(state: dict, gemini_client, groq_client=None) -> dict:
+def parser_node(state: dict, gemini_client=None, groq_client=None) -> dict:
     """
-    Parse raw input into structured event data using Gemini with Groq fallback.
+    Parse raw input into structured event/task data.
 
-    Args:
-        state: ChronaState dict
-        gemini_client: google.generativeai configured client
-        groq_client: optional Groq client for fallback
-
-    Updates state with:
-        - extracted_events: list of event dicts
-        - extraction_error: error message if failed
+    Uses Gemini (google-genai SDK) with Groq fallback.
+    Handles text, PDF bytes, and image bytes.
     """
-    from datetime import datetime
+    state.setdefault("extracted_events", [])
+    state.setdefault("errors", [])
 
-    state["extracted_events"] = state.get("extracted_events", [])
-    state["errors"] = state.get("errors", [])
+    today = datetime.now().strftime("%Y-%m-%d %A")
+    prompt_header = EXTRACTION_PROMPT + f"\n\nToday's date: {today}"
 
-    prompt_with_date = EXTRACTION_PROMPT + f"\n\nToday's date: {datetime.now().strftime('%Y-%m-%d')}"
+    def _extract_with_new_gemini(content):
+        """Use google-genai SDK."""
+        from google import genai
+        api_key = os.getenv("GEMINI_API_KEY")
+        client = gemini_client if (gemini_client and hasattr(gemini_client, 'models')) else genai.Client(api_key=api_key)
 
-    def _extract_with_gemini(text_or_parts):
-        model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
-        response = model.generate_content(
-            text_or_parts,
-            generation_config={"response_mime_type": "application/json"},
-            request_options={"timeout": 10}
+        full_prompt = f"{prompt_header}\n\nInput:\n{content}"
+        resp = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=full_prompt,
+            config=genai.types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+                max_output_tokens=4096,
+            )
         )
-        return json.loads(response.text)
+        text = resp.text.strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:-1])
+        result = json.loads(text)
+        return result if isinstance(result, list) else [result]
 
-    def _extract_with_groq(text_or_parts):
+    def _extract_with_legacy_gemini(content):
+        """Use old google.generativeai SDK as fallback."""
+        import google.generativeai as old_genai
+        model = old_genai.GenerativeModel(model_name="gemini-2.0-flash")
+        full_prompt = f"{prompt_header}\n\nInput:\n{content}"
+        resp = model.generate_content(
+            full_prompt,
+            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+        )
+        text = resp.text.strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:-1])
+        result = json.loads(text)
+        return result if isinstance(result, list) else [result]
+
+    def _extract_with_groq(content):
         if not groq_client:
-            raise Exception("Groq client not available")
-        # Convert parts to text for Groq (Groq doesn't support inline images the same way)
-        if isinstance(text_or_parts, list):
-            text_content = ""
-            for part in text_or_parts:
-                if isinstance(part, str):
-                    text_content += part
-                elif hasattr(part, 'mime_type') and part.mime_type.startswith('image'):
-                    text_content += f"\n[Image: {part.mime_type}]"
-            text_or_parts = text_content
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": text_or_parts}],
+            raise ValueError("Groq client not available")
+        full_prompt = f"{prompt_header}\n\nInput:\n{content}"
+        resp = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": full_prompt}],
             response_format={"type": "json_object"},
             temperature=0.1,
             max_tokens=4096,
         )
-        return json.loads(response.choices[0].message.content)
+        text = resp.choices[0].message.content.strip()
+        result = json.loads(text)
+        # Groq might return {"tasks": [...]} instead of [...]
+        if isinstance(result, dict) and not isinstance(result, list):
+            for key in ("tasks", "events", "items"):
+                if key in result:
+                    return result[key]
+            return [result]
+        return result
 
-    try:
-        if state["input_type"] == "text":
-            full_prompt = f"{prompt_with_date}\n\nText to analyze:\n{state['raw_input']}"
-            
-            # Try Gemini first
-            if gemini_client:
-                try:
-                    raw_text = response.text
-                    parsed = _extract_with_gemini(full_prompt)
-                except Exception as e:
-                    print(f"⚠️ Parser Gemini failed: {e}, trying Groq...")
-                    if groq_client:
-                        parsed = _extract_with_groq(full_prompt)
-                    else:
-                        raise
-            else:
-                parsed = _extract_with_groq(full_prompt)
+    # Determine what to parse
+    input_type = state.get("input_type", "text")
+    raw_input  = state.get("raw_input", "")
+    input_bytes = state.get("input_bytes")
 
-            # Handle both single event and list of events
-            if isinstance(parsed, list):
-                state["extracted_events"].extend(parsed)
-            else:
-                state["extracted_events"].append(parsed)
+    # Prepare content
+    content = raw_input or ""
+    if input_bytes and input_type in ("image", "pdf"):
+        import base64
+        # For now encode to base64 and pass as text description
+        # Full vision would use Gemini Files API
+        content = f"[Binary file: {input_type}]\n{raw_input}"
 
-        elif state["input_type"] in ("image", "pdf", "file"):
-            # Write bytes to temp file and encode as base64 for inline data
-            mime_map = {
-                "image": "image/png",  # default for images
-                "pdf": "application/pdf",
-                "file": "application/octet-stream",
-            }
-            suffix_map = {
-                "image": ".png",
-                "pdf": ".pdf",
-                "file": ".tmp",
-            }
-            mime_type = mime_map.get(state["input_type"], "application/octet-stream")
-            suffix = suffix_map.get(state["input_type"], ".tmp")
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(state["input_bytes"])
-                tmp_path = tmp.name
+    if not content.strip():
+        state["errors"].append("parser_error: No content to parse")
+        return state
 
-            try:
-                import google.generativeai as genai
-                import base64
-                
-                # Read file and encode as base64 for inline data
-                with open(tmp_path, "rb") as f:
-                    file_data = f.read()
-                
-                # Use inline data for Gemini
-                inline_data = {
-                    "mime_type": mime_type,
-                    "data": base64.b64encode(file_data).decode('utf-8')
-                }
-                
-                # Try Gemini first
-                if gemini_client:
-                    try:
-                        model = gemini_client.GenerativeModel(model_name="gemini-flash-latest")
-                        response = model.generate_content(
-                            [prompt_with_date, inline_data],
-                            generation_config={"response_mime_type": "application/json"},
-                            request_options={"timeout": 10}
-                        )
-                        parsed = json.loads(response.text)
-                    except Exception as e:
-                        print(f"⚠️ Parser Gemini (image) failed: {e}, trying Groq...")
-                        # For Groq, we can only send text description, not the image directly
-                        if groq_client:
-                            full_prompt = f"{prompt_with_date}\n\nFile: {state.get('raw_input', 'uploaded file')} (type: {mime_type})\n\nAnalyze this file and extract event information as JSON."
-                            parsed = _extract_with_groq(full_prompt)
-                        else:
-                            raise
-                else:
-                    # No Gemini client, use Groq
-                    if groq_client:
-                        full_prompt = f"{prompt_with_date}\n\nFile: {state.get('raw_input', 'uploaded file')} (type: {mime_type})\n\nAnalyze this file and extract event information as JSON."
-                        parsed = _extract_with_groq(full_prompt)
-                    else:
-                        raise Exception("No AI client available")
+    # Try extraction chain
+    extracted = None
+    for attempt, extractor in enumerate([_extract_with_new_gemini, _extract_with_legacy_gemini, _extract_with_groq]):
+        try:
+            extracted = extractor(content)
+            break
+        except Exception as e:
+            state["errors"].append(f"parser_attempt_{attempt}_error: {e}")
 
-                if isinstance(parsed, list):
-                    state["extracted_events"].extend(parsed)
-                else:
-                    state["extracted_events"].append(parsed)
-            finally:
-                os.unlink(tmp_path)
-        else:
-            state["errors"].append(f"parser_error: Unknown input type '{state['input_type']}'")
-
-    except json.JSONDecodeError as e:
-        state["errors"].append(f"parser_json_error: {e}")
-        state["extraction_error"] = f"Gemini returned invalid JSON"
-    except Exception as e:
-        state["errors"].append(f"parser_error: {e}")
-        state["extraction_error"] = str(e)
+    if extracted:
+        state["extracted_events"] = extracted
+    else:
+        state["extraction_error"] = "All extraction attempts failed"
 
     return state
 
@@ -196,11 +159,15 @@ def parser_node(state: dict, gemini_client, groq_client=None) -> dict:
 # SELF-TEST
 # ============================================================
 if __name__ == "__main__":
-    # Test with mock (no actual Gemini call)
     state = {
-        "raw_input": "Test exam",
+        "raw_input": "I have a math exam on Friday at 2pm and need to study for 3 hours",
+        "input_bytes": None,
         "input_type": "text",
-        "extracted_events": [],
         "errors": [],
     }
-    print("Parser Node: OK (mock test - no Gemini call)")
+    result = parser_node(state, None, None)
+    print(f"Errors: {result.get('errors')}")
+    print(f"Events: {len(result.get('extracted_events', []))}")
+    if result.get("extracted_events"):
+        print(f"First: {result['extracted_events'][0].get('title')}")
+    print("Parser Node: OK (no AI available, expected empty)")
