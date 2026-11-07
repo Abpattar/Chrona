@@ -399,7 +399,7 @@ class TestChronaScenarios:
         assert dinner["task_type"] == "social"
 
         # Verify optimal slot auto-rescheduling
-        new_start, new_end = find_optimal_reschedule_slot(dinner, exam, [exam])
+        new_start, new_end, note = find_optimal_reschedule_slot(dinner, exam, [exam])
         assert new_start is not None
         assert new_end is not None
 
@@ -409,6 +409,51 @@ class TestChronaScenarios:
         assert not (new_start < exam_end and new_end > exam_start), "Rescheduled slot must not overlap with exam!"
         # Verify it was scheduled on the same day (Sunday Nov 8)
         assert new_start.date() == exam_start.date()
+
+    def test_cognitive_recovery_gap_exam_ending_at_9_dinner_at_9(self):
+        """
+        User scenario:
+        Exam from 8 PM to 9 PM, Dinner from 9 PM to 11 PM.
+        Even though there is no timestamp overlap (20:00-21:00 and 21:00-23:00),
+        Chrona detects the 0-minute gap, calculates that a stressful exam requires a
+        30-35m decompression & travel break, and auto-reschedules Dinner to 9:30 PM.
+        """
+        from backend.server import check_collision_or_gap_issue, find_optimal_reschedule_slot, calculate_recovery_buffer_minutes
+
+        exam = {
+            "title": "Operating Systems exam",
+            "task_type": "exam",
+            "start_time": "2026-11-08T20:00:00+00:00",
+            "end_time": "2026-11-08T21:00:00+00:00",
+            "priority": 1,
+            "flexibility": False,
+        }
+        dinner = {
+            "title": "Dinner with friends",
+            "task_type": "social",
+            "start_time": "2026-11-08T21:00:00+00:00",
+            "end_time": "2026-11-08T23:00:00+00:00",
+            "duration_minutes": 120,
+            "priority": 3,
+            "flexibility": True,
+        }
+
+        # Verify dynamic buffer calculation
+        buf = calculate_recovery_buffer_minutes(exam, dinner)
+        assert buf >= 30, f"Stressful exam must mandate >= 30m recovery, got {buf}m"
+
+        # Verify gap issue detection
+        has_issue, anchor, loser, deficit = check_collision_or_gap_issue(exam, dinner)
+        assert has_issue is True, "0-minute transition after exam must trigger gap issue!"
+        assert anchor["title"] == exam["title"]
+        assert loser["title"] == dinner["title"]
+
+        # Verify auto-rescheduled slot gives the required decompression break
+        new_start, new_end, note = find_optimal_reschedule_slot(dinner, exam, [exam], sleep_time="23:30")
+        exam_end = datetime.fromisoformat(exam["end_time"])
+        gap_after_exam = (new_start - exam_end).total_seconds() / 60
+        assert gap_after_exam >= 30, f"Expected at least 30m break after exam, got {gap_after_exam}m"
+        assert new_start.minute == 30, f"Expected 9:30 PM start, got {new_start}"
 
 
 

@@ -630,17 +630,67 @@ def compute_free_slots(
     return free
 
 # ==============================
-# INTELLIGENT TASK INFERENCE & CONFLICT RESOLUTION ENGINE
+# INTELLIGENT TASK INFERENCE, COGNITIVE RECOVERY & CONFLICT RESOLUTION ENGINE
 # ==============================
 
-def infer_task_properties(task_dict: dict) -> dict:
+def calculate_recovery_buffer_minutes(preceding_task: dict, succeeding_task: dict = None) -> int:
     """
-    Intelligently infer task type, priority, and flexibility based on title and context.
-    Exams, classes, tests, appointments, flights are hard commitments (Priority 1, flexibility: False).
-    Dinners, social hangouts, workouts, and personal tasks are flexible (Priority 3/4, flexibility: True).
+    Calculate dynamic cognitive recovery and transition buffer based on task exertion.
+    High exertion / stressful tasks (exams, interviews, presentations) require 30-45m recovery.
+    Moderate exertion (gym, workouts, lectures) require 20-30m.
+    Casual / low effort tasks require 10-15m.
+    """
+    p_title = (preceding_task.get("title") or "").lower()
+    p_type = (preceding_task.get("task_type") or "").lower()
+
+    # High stress / cognitive exhaustion
+    stressful_keywords = ["exam", "midterm", "final", "test", "quiz", "interview", "presentation", "defense", "surgery", "oral"]
+    is_stressful = any(k in p_title for k in stressful_keywords) or p_type in ["exam", "quiz"]
+
+    # Physical exhaustion / workouts
+    workout_keywords = ["gym", "workout", "exercise", "run", "running", "swimming", "sports"]
+    is_workout = any(k in p_title for k in workout_keywords) or p_type == "workout"
+
+    # Deep focus
+    focus_keywords = ["lecture", "class", "coding", "project", "assignment", "lab"]
+    is_focus = any(k in p_title for k in focus_keywords) or p_type in ["class", "lecture", "study"]
+
+    if is_stressful:
+        buffer_min = 35  # 30-45 min relaxation after stressful exam
+    elif is_workout:
+        buffer_min = 30  # shower & cooldown
+    elif is_focus:
+        buffer_min = 20
+    else:
+        buffer_min = 15
+
+    # If succeeding task is social or travel-heavy, ensure at least 30m after exam
+    if succeeding_task:
+        s_title = (succeeding_task.get("title") or "").lower()
+        if ("dinner" in s_title or "lunch" in s_title or "party" in s_title) and is_stressful:
+            buffer_min = max(buffer_min, 30)
+
+    return buffer_min
+
+def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
+    """
+    Intelligently infer task type, priority, and flexibility based on description and context.
+    Rule: Unless the user explicitly says a task is 'very important' / 'high priority' / 'urgent',
+    tasks default to Normal or Low priority (Priority 3/4).
+    Hard commitments (Exams, tests, finals) default to Priority 1 (Critical) and flexibility: False.
     """
     title = (task_dict.get("title") or "").strip().lower()
     task_type = (task_dict.get("task_type") or "").strip().lower()
+    combined_text = f"{title} {task_dict.get('description', '')} {user_text}".lower()
+
+    # Explicit user importance check
+    explicit_high_prio = any(
+        kw in combined_text for kw in [
+            "very important", "extremely important", "high priority", "top priority",
+            "highest priority", "super important", "crucial", "must do", "urgent",
+            "p1", "priority 1", "priority 2", "cannot miss"
+        ]
+    )
 
     hard_keywords = [
         "exam", "midterm", "final", "quiz", "test", "lecture", "class",
@@ -661,43 +711,90 @@ def infer_task_properties(task_dict: dict) -> dict:
 
     res = dict(task_dict)
 
-    if is_hard:
+    if explicit_high_prio:
+        res["priority"] = 2
+        res["flexibility"] = not is_hard
+    elif is_hard:
         res["task_type"] = res.get("task_type") if res.get("task_type") in ["exam", "class", "quiz"] else "exam"
         res["priority"] = 1
         res["flexibility"] = False
     elif is_social:
         res["task_type"] = "social"
-        res["priority"] = max(int(res.get("priority") or 3), 3)
+        res["priority"] = 3
         res["flexibility"] = True
     elif is_workout:
         res["task_type"] = "workout"
-        res["priority"] = int(res.get("priority") or 3)
+        res["priority"] = 3
         res["flexibility"] = True
     else:
+        res["priority"] = 3
         if "flexibility" not in res:
             res["flexibility"] = True
-        if "priority" not in res:
-            res["priority"] = int(res.get("priority") or 3)
 
     return res
 
-def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list) -> tuple:
+def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
     """
-    Find the best, optimal, non-overlapping free slot on the same day for a flexible task.
-    Prefers:
-    1. Before the anchor event (e.g. 6:30 PM - 7:30 PM before an 8:00 PM exam).
-    2. After the anchor event (e.g. 10:00 PM - 11:00 PM after exam).
-    3. Next closest free slot on that day.
+    Check if two tasks collide or have an insufficient cognitive recovery gap.
+    Returns (has_conflict, anchor, loser, gap_minutes).
+    """
+    s1 = _parse_dt(it1.get("start_time"))
+    e1 = _parse_dt(it1.get("end_time"))
+    s2 = _parse_dt(it2.get("start_time"))
+    e2 = _parse_dt(it2.get("end_time"))
+    if not (s1 and e1 and s2 and e2):
+        return False, None, None, 0
+
+    prop1 = infer_task_properties(it1)
+    prop2 = infer_task_properties(it2)
+
+    score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
+    score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
+
+    if score1 <= score2:
+        anchor, loser = it1, it2
+    else:
+        anchor, loser = it2, it1
+
+    # 1. Overlap
+    if s1 < e2 and e1 > s2:
+        return True, anchor, loser, 0
+
+    # 2. Insufficient recovery gap check (e.g. Exam ends at 9:00 PM, Dinner starts at 9:00 PM)
+    if e1 <= s2:
+        gap = (s2 - e1).total_seconds() / 60
+        req_buf = calculate_recovery_buffer_minutes(it1, it2)
+        if gap < req_buf:
+            return True, anchor, loser, int(req_buf - gap)
+    elif e2 <= s1:
+        gap = (s1 - e2).total_seconds() / 60
+        req_buf = calculate_recovery_buffer_minutes(it2, it1)
+        if gap < req_buf:
+            return True, anchor, loser, int(req_buf - gap)
+
+    return False, None, None, 0
+
+def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "23:00") -> tuple:
+    """
+    Find optimal slot for to_reschedule enforcing dynamic cognitive buffers based on task exertion.
+    If target day is packed, searches subsequent days (day + 1, weekend, next week).
+    Returns (start_dt, end_dt, reason_note).
     """
     dur = int(to_reschedule.get("duration_minutes") or 60)
     anchor_start = _parse_dt(anchor.get("start_time"))
     anchor_end = _parse_dt(anchor.get("end_time"))
     if not anchor_start or not anchor_end:
         now = _now_utc()
-        c_s = now.replace(hour=14, minute=0, second=0, microsecond=0)
-        return c_s, c_s + timedelta(minutes=dur)
+        c_s = now.replace(hour=19, minute=0, second=0, microsecond=0)
+        return c_s, c_s + timedelta(minutes=dur), "fallback"
 
-    def has_conflict(c_start, c_end):
+    tz = anchor_start.tzinfo or timezone.utc
+
+    # Calculate dynamic recovery buffers
+    post_anchor_buffer = calculate_recovery_buffer_minutes(anchor, to_reschedule)
+    pre_anchor_buffer = calculate_recovery_buffer_minutes(to_reschedule, anchor)
+
+    def is_slot_free(c_start, c_end):
         for it in all_items:
             if it.get("id") and to_reschedule.get("id") and it.get("id") == to_reschedule.get("id"):
                 continue
@@ -706,53 +803,72 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             it_s = _parse_dt(it.get("start_time"))
             it_e = _parse_dt(it.get("end_time"))
             if it_s and it_e:
-                if c_start < it_e and c_end > it_s:
-                    return True
-        return False
+                # Require at least 15m transition buffer with any other event
+                buf = timedelta(minutes=15)
+                if c_start < (it_e + buf) and c_end > (it_s - buf):
+                    return False
+        return True
 
-    # Candidate 1: Before anchor event (clean buffer of 15-30m)
-    pre_end = anchor_start - timedelta(minutes=15)
+    target_date = anchor_start.date()
+
+    # Strategy 1: Post-anchor slot on the same day with stress recovery buffer
+    post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
+    if post_start.minute not in [0, 30]:
+        post_start = post_start.replace(minute=30 if post_start.minute < 30 else 0, second=0, microsecond=0)
+        if post_start < anchor_end + timedelta(minutes=post_anchor_buffer):
+            post_start += timedelta(minutes=30)
+    post_end = post_start + timedelta(minutes=dur)
+
+    sh, sm = [int(x) for x in sleep_time.split(":")]
+    sleep_dt = datetime(target_date.year, target_date.month, target_date.day, sh, sm, tzinfo=tz)
+
+    if post_end <= (sleep_dt + timedelta(minutes=30)) and is_slot_free(post_start, post_end):
+        note = f"Added a {post_anchor_buffer}-minute decompression break after '{anchor.get('title')}' so you don't feel rushed."
+        return post_start, post_end, note
+
+    # Strategy 2: Pre-anchor slot on the same day (giving breathing room before exam)
+    pre_end = anchor_start - timedelta(minutes=pre_anchor_buffer)
     pre_start = pre_end - timedelta(minutes=dur)
     if pre_start.minute not in [0, 30]:
         pre_start = pre_start.replace(minute=0 if pre_start.minute < 30 else 30, second=0, microsecond=0)
         pre_end = pre_start + timedelta(minutes=dur)
 
-    if pre_start.hour >= 8 and (pre_end + timedelta(minutes=10)) <= anchor_start:
-        if not has_conflict(pre_start, pre_end):
-            return pre_start, pre_end
+    wh, wm = [int(x) for x in wake_time.split(":")]
+    wake_dt = datetime(target_date.year, target_date.month, target_date.day, wh, wm, tzinfo=tz)
 
-    # Candidate 2: After anchor event
-    post_start = anchor_end + timedelta(minutes=15)
-    if post_start.minute not in [0, 30]:
-        post_start = post_start.replace(minute=30 if post_start.minute < 30 else 0, second=0, microsecond=0)
-        if post_start < anchor_end:
-            post_start += timedelta(minutes=30)
-    post_end = post_start + timedelta(minutes=dur)
+    if pre_start >= wake_dt and (pre_end + timedelta(minutes=pre_anchor_buffer)) <= anchor_start and is_slot_free(pre_start, pre_end):
+        note = f"Scheduled before '{anchor.get('title')}' with a {pre_anchor_buffer}-minute transition buffer."
+        return pre_start, pre_end, note
 
-    if post_end.hour < 23 or (post_end.hour == 23 and post_end.minute == 0):
-        if not has_conflict(post_start, post_end):
-            return post_start, post_end
+    # Strategy 3: Scan other optimal focus/social windows on the same day
+    for hour in [19, 18, 17, 13, 12, 14, 15, 16, 20]:
+        c_s = datetime(target_date.year, target_date.month, target_date.day, hour, 0, tzinfo=tz)
+        c_e = c_s + timedelta(minutes=dur)
+        if is_slot_free(c_s, c_e):
+            note = f"Placed in an open focus window on {c_s.strftime('%A')} with plenty of breathing room."
+            return c_s, c_e, note
 
-    # Candidate 3: Scan candidate slots on the same day from 12:00 to 21:00
-    base_date = anchor_start.date()
-    for hour in [18, 19, 17, 13, 12, 14, 15, 16, 11, 10]:
-        c_start = datetime(base_date.year, base_date.month, base_date.day, hour, 0, tzinfo=timezone.utc)
-        c_end = c_start + timedelta(minutes=dur)
-        if not has_conflict(c_start, c_end):
-            return c_start, c_end
+    # Strategy 4: If target day is packed, spillover to subsequent days (Day + 1 to Day + 14)
+    preferred_hour = 19 if "dinner" in to_reschedule.get("title", "").lower() else 14
+    for day_offset in range(1, 15):
+        next_day = target_date + timedelta(days=day_offset)
+        for h in [preferred_hour, preferred_hour + 1, preferred_hour - 1, 18, 20, 13]:
+            c_s = datetime(next_day.year, next_day.month, next_day.day, h, 0, tzinfo=tz)
+            c_e = c_s + timedelta(minutes=dur)
+            if is_slot_free(c_s, c_e):
+                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {c_s.strftime('%A, %b %d at %I:%M %p')} to prevent overload."
+                return c_s, c_e, note
 
-    # Fallback: next day at 14:00
-    next_day = _ensure_utc(anchor_start + timedelta(days=1))
-    c_start = next_day.replace(hour=14, minute=0, second=0, microsecond=0)
-    return c_start, c_start + timedelta(minutes=dur)
+    fallback_s = _ensure_utc(anchor_start + timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0)
+    return fallback_s, fallback_s + timedelta(minutes=dur), "Rescheduled to next day."
 
-def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list) -> tuple:
+def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list, user_text: str = "") -> tuple:
     """
     Save or update a task item while automatically detecting collisions
-    and rescheduling any conflicting flexible tasks to optimal non-overlapping slots.
+    and insufficient recovery gaps, rescheduling flexible tasks to optimal non-overlapping slots.
     Returns (saved_item, optional_explanation_note).
     """
-    inferred = infer_task_properties(task_data)
+    inferred = infer_task_properties(task_data, user_text=user_text)
     dur = int(inferred.get("duration_minutes") or 60)
 
     item = {
@@ -780,11 +896,8 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
     reschedule_note = None
 
-    # Check for collisions with existing scheduled items or items in this batch
+    # Check for collisions or insufficient recovery gaps with existing scheduled items or items in this batch
     if item.get("start_time") and item.get("end_time"):
-        item_s = _parse_dt(item["start_time"])
-        item_e = _parse_dt(item["end_time"])
-
         existing_resp = sb_get("schedule_items", {
             "user_id": f"eq.{user_id}",
             "status": "neq.cancelled",
@@ -795,38 +908,27 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         for other in combined:
             if (other.get("title") or "").strip().lower() == item["title"].strip().lower():
                 continue
-            o_s = _parse_dt(other.get("start_time"))
-            o_e = _parse_dt(other.get("end_time"))
-            if o_s and o_e and (item_s < o_e and item_e > o_s):
-                # Overlap collision detected!
-                other_prop = infer_task_properties(other)
-                item_score = (item["priority"], 0 if not item["flexibility"] else 1)
-                other_score = (other_prop["priority"], 0 if not other_prop["flexibility"] else 1)
 
-                if item_score > other_score:
-                    # item yields and is auto-rescheduled!
-                    new_s, new_e = find_optimal_reschedule_slot(item, other, combined)
-                    orig_fmt = item_s.strftime("%I:%M %p")
-                    new_s_fmt = new_s.strftime("%I:%M %p")
-                    new_e_fmt = new_e.strftime("%I:%M %p")
+            has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other)
+            if has_conflict:
+                orig_s_fmt = _parse_dt(loser.get("start_time")).strftime("%I:%M %p")
+                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined)
+                new_s_fmt = new_s.strftime("%I:%M %p")
+                new_e_fmt = new_e.strftime("%I:%M %p")
+
+                reason = f"Auto-rescheduled from {orig_s_fmt} to {new_s_fmt}: {slot_note}"
+
+                if loser == item:
                     item["start_time"] = new_s.isoformat()
                     item["end_time"] = new_e.isoformat()
                     item["status"] = "rescheduled"
                     item["auto_rescheduled"] = True
                     item["flexibility"] = True
-                    reason = f"Auto-rescheduled from {orig_fmt} to {new_s_fmt} due to collision with '{other.get('title')}'."
                     item["completion_note"] = reason
                     reschedule_note = (
-                        f"⚡ Auto-Rescheduled: '{item['title']}' conflicted with '{other.get('title')}' at {orig_fmt}. "
-                        f"Chrona automatically scheduled '{item['title']}' to {new_s_fmt} – {new_e_fmt}."
+                        f"⚡ Auto-Rescheduled: '{item['title']}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
                     )
                 else:
-                    # other yields and is auto-rescheduled!
-                    new_s, new_e = find_optimal_reschedule_slot(other, item, combined)
-                    orig_fmt = o_s.strftime("%I:%M %p")
-                    new_s_fmt = new_s.strftime("%I:%M %p")
-                    new_e_fmt = new_e.strftime("%I:%M %p")
-                    reason = f"Auto-rescheduled from {orig_fmt} to {new_s_fmt} due to collision with '{item['title']}'."
                     patch_data = {
                         "start_time": new_s.isoformat(),
                         "end_time": new_e.isoformat(),
@@ -839,8 +941,7 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                         sb_patch("schedule_items", patch_data, params={"id": f"eq.{other['id']}", "user_id": f"eq.{user_id}"})
                     other.update(patch_data)
                     reschedule_note = (
-                        f"⚡ Auto-Rescheduled: '{other.get('title')}' conflicted with '{item['title']}' at {orig_fmt}. "
-                        f"Chrona automatically moved '{other.get('title')}' to {new_s_fmt} – {new_e_fmt}."
+                        f"⚡ Auto-Rescheduled: '{other.get('title')}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
                     )
 
     # Deduplication check
@@ -874,8 +975,8 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
 def auto_repair_existing_conflicts(user_id: str) -> list:
     """
-    Scan all active scheduled items for the user, detect any time overlaps,
-    and automatically reschedule lower-priority/flexible items.
+    Scan all active scheduled items for the user, detect any time overlaps or zero-minute gaps,
+    and automatically reschedule lower-priority/flexible items with recovery buffers.
     """
     resp = sb_get("schedule_items", {
         "user_id": f"eq.{user_id}",
@@ -892,31 +993,16 @@ def auto_repair_existing_conflicts(user_id: str) -> list:
         for j in range(i + 1, len(scheduled_items)):
             it1 = scheduled_items[i]
             it2 = scheduled_items[j]
-            s1 = _parse_dt(it1.get("start_time"))
-            e1 = _parse_dt(it1.get("end_time"))
-            s2 = _parse_dt(it2.get("start_time"))
-            e2 = _parse_dt(it2.get("end_time"))
 
-            if s1 and e1 and s2 and e2 and (s1 < e2 and e1 > s2):
-                prop1 = infer_task_properties(it1)
-                prop2 = infer_task_properties(it2)
-
-                score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
-                score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
-
-                if score1 <= score2:
-                    anchor, loser = it1, it2
-                    loser_prop = prop2
-                else:
-                    anchor, loser = it2, it1
-                    loser_prop = prop1
-
-                new_s, new_e = find_optimal_reschedule_slot(loser, anchor, scheduled_items)
+            has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(it1, it2)
+            if has_conflict:
+                loser_prop = infer_task_properties(loser)
+                new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, scheduled_items)
                 orig_str = _parse_dt(loser.get("start_time")).strftime("%I:%M %p")
                 new_s_str = new_s.strftime("%I:%M %p")
                 new_e_str = new_e.strftime("%I:%M %p")
 
-                reason = f"Auto-rescheduled from {orig_str} to {new_s_str} due to collision with '{anchor.get('title')}'."
+                reason = f"Auto-rescheduled from {orig_str} to {new_s_str}: {slot_note}"
 
                 patch_data = {
                     "start_time": new_s.isoformat(),
@@ -1345,6 +1431,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
 
     # Auto-process extracted tasks if present
     inserted_tasks = []
+    reschedule_notes = []
     if result.get("tasks"):
         for task_data in result["tasks"]:
             if task_data.get("is_project"):
@@ -1374,7 +1461,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 except Exception as e:
                     print(f"⚠️ Decomposition error: {e}")
             else:
-                saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks)
+                saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=request.message)
                 if saved_item:
                     inserted_tasks.append(saved_item)
                 if conflict_note:
@@ -1445,7 +1532,7 @@ async def chat_upload(
     reschedule_notes = []
     if result.get("tasks"):
         for task_data in result["tasks"]:
-            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks)
+            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=full_user_input)
             if saved_item:
                 inserted_tasks.append(saved_item)
             if conflict_note:
