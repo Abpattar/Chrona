@@ -324,6 +324,11 @@ def _ai_json(prompt: str, system: str = None) -> Any:
 # PYDANTIC MODELS
 # ==============================
 
+class AutoRescheduleRequest(BaseModel):
+    user_id: str
+    task_id: Optional[str] = None
+    all_unplaced: bool = False
+
 class OnboardingRequest(BaseModel):
     user_id: str
     productive_time: str  # morning, afternoon, evening, night
@@ -953,6 +958,82 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
         "decomposition": result.get("decomposition"),
     }
 
+@app.post("/api/chat/upload")
+async def chat_upload(
+    message: Optional[str] = Form(""),
+    file: Optional[UploadFile] = File(None),
+    user_id: str = Depends(get_user_id),
+    session_id: Optional[str] = Form(None)
+):
+    """
+    Unified Chat + Upload endpoint.
+    Accepts text message, uploaded timetable/syllabus/document, or both.
+    Extracts events/commitments, auto-plans them, and returns conversational response.
+    """
+    file_text = ""
+    file_name = ""
+    if file:
+        file_name = file.filename or "uploaded_file"
+        try:
+            content = await file.read()
+            try:
+                file_text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                import re
+                strings = re.findall(b"[\x20-\x7E]{4,}", content)
+                file_text = " ".join([s.decode('latin1', errors='ignore') for s in strings[:150]])
+        except Exception as e:
+            print(f"⚠️ Error reading file: {e}")
+
+    full_user_input = message.strip() if message else ""
+    if file_name:
+        attachment_context = f"\n[Attached file: {file_name}]\n{file_text[:3500]}"
+        full_user_input = f"{full_user_input}{attachment_context}".strip()
+
+    if not full_user_input:
+        full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
+
+    result = await process_chat_message(user_id, full_user_input, session_id=session_id)
+
+    inserted_tasks = []
+    if result.get("tasks"):
+        for task_data in result["tasks"]:
+            dur = task_data.get("duration_minutes", 60)
+            item = {
+                "user_id": user_id,
+                "title": task_data.get("title", "Untitled"),
+                "task_type": task_data.get("task_type", "task"),
+                "duration_minutes": dur,
+                "priority": task_data.get("priority", 3),
+                "flexibility": task_data.get("flexibility", True),
+                "status": "pending",
+            }
+            if task_data.get("fixed_start") and task_data.get("fixed_end"):
+                item["start_time"] = task_data["fixed_start"]
+                item["end_time"] = task_data["fixed_end"]
+                item["flexibility"] = False
+                item["status"] = "scheduled"
+            if task_data.get("deadline"):
+                item["deadline"] = task_data["deadline"]
+
+            resp = sb_post("schedule_items", item)
+            if resp.status_code in [200, 201]:
+                try:
+                    inserted_tasks.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
+                except Exception:
+                    pass
+
+    return {
+        "message": result.get("message", "I analyzed your document and extracted the relevant tasks."),
+        "action": result.get("action"),
+        "tasks_extracted": result.get("tasks", []),
+        "tasks_saved": inserted_tasks,
+        "file_name": file_name,
+        "clarification_needed": result.get("clarification_needed"),
+        "schedule_trigger": result.get("schedule_trigger", False),
+        "decomposition": result.get("decomposition"),
+    }
+
 # ---- PROCESS EVENT (legacy + new) ----
 
 @app.post("/api/process-event")
@@ -1196,6 +1277,43 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
 
         impossible = [{"task_id": t.id, "title": t.title, "reason": "Deadline passed or insufficient time"} for t in result.impossible]
         deferred   = [{"task_id": t.id, "title": t.title} for t in result.deferred]
+
+        # Auto-reschedule tasks that were impossible or deferred
+        auto_rescheduled = []
+        if result.impossible or result.deferred:
+            unplaced = list(result.impossible) + list(result.deferred)
+            for t in unplaced:
+                # Find available slot with remaining time, or search ahead
+                assigned_slot = None
+                for s in edf_slots:
+                    if s.remaining_minutes() >= min(t.duration_minutes, 30):
+                        assigned_slot = s
+                        break
+
+                if assigned_slot:
+                    t_start = assigned_slot.consume(t)
+                    t_dur = min(t.duration_minutes, max(30, int((assigned_slot.end - t_start).total_seconds() / 60)))
+                    t_end = t_start + timedelta(minutes=t_dur)
+                else:
+                    # Place in earliest feasible window on next day
+                    latest_end = max([a.assigned_end for a in result.scheduled] + [now])
+                    t_start = (latest_end + timedelta(hours=2)).replace(minute=0, second=0)
+                    t_end = t_start + timedelta(minutes=t.duration_minutes)
+
+                resched_item = {
+                    "task_id": t.id,
+                    "title": t.title,
+                    "start_time": t_start.isoformat(),
+                    "end_time": t_end.isoformat(),
+                    "task_type": t.task_type,
+                    "priority": t.priority,
+                    "flexibility": t.flexibility,
+                    "deadline": max(t.deadline, t_end + timedelta(days=1)).isoformat(),
+                    "auto_rescheduled": True,
+                    "reschedule_reason": "Originally unplaceable/impossible; automatically rescheduled to next available focus block."
+                }
+                proposed.append(resched_item)
+                auto_rescheduled.append(resched_item)
     else:
         # AI-only fallback
         tasks_for_ai = [{"id": t["id"], "title": t["title"],
@@ -1205,6 +1323,7 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
         proposed  = ai_result.get("scheduled", [])
         impossible = []
         deferred = ai_result.get("unscheduled", [])
+        auto_rescheduled = []
 
     # Version token
     version = hashlib.sha256(f"{user_id}:{_now_utc().isoformat()}".encode()).hexdigest()[:16]
@@ -1215,8 +1334,79 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
         "proposed": proposed,
         "impossible": impossible,
         "deferred": deferred,
+        "auto_rescheduled": auto_rescheduled,
         "free_slots_count": len(free_slots),
         "tasks_considered": len(flex_tasks),
+    }
+
+@app.post("/api/schedule/auto-reschedule")
+async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str = Depends(get_user_id)):
+    """Automatically find and apply the next best free slot for impossible/missed/overdue tasks."""
+    if request.user_id != user_id:
+        raise HTTPException(403, "User mismatch")
+
+    now = _now_utc()
+    profile = await get_behavior_profile(user_id)
+    wake = profile.get("wake_time", "07:00")
+    sleep = profile.get("sleep_time", "23:00")
+
+    target_tasks = []
+    if request.task_id:
+        resp = sb_get("schedule_items", {"id": f"eq.{request.task_id}", "user_id": f"eq.{user_id}"})
+        if resp.status_code == 200 and resp.json():
+            target_tasks = resp.json()
+    elif request.all_unplaced:
+        resp = sb_get("schedule_items", {
+            "user_id": f"eq.{user_id}",
+            "status": "in.(pending,skipped,impossible)",
+            "limit": "20",
+        })
+        if resp.status_code == 200 and resp.json():
+            target_tasks = resp.json()
+
+    if not target_tasks:
+        raise HTTPException(404, "No tasks found to reschedule")
+
+    slots = compute_free_slots(user_id, now, now + timedelta(days=14), wake, sleep)
+    rescheduled_items = []
+
+    for task in target_tasks:
+        dur = int(task.get("duration_minutes") or 60)
+        chosen_slot = None
+        for s in slots:
+            s_start = _parse_dt(s["start"])
+            s_end = _parse_dt(s["end"])
+            if s_start and s_end and s_start > now:
+                avail_min = (s_end - s_start).total_seconds() / 60
+                if avail_min >= min(dur, 30):
+                    chosen_slot = (s_start, min(s_end, s_start + timedelta(minutes=dur)))
+                    s["start"] = (s_start + timedelta(minutes=dur + 15)).isoformat()
+                    break
+
+        if not chosen_slot:
+            tomorrow = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+            chosen_slot = (tomorrow, tomorrow + timedelta(minutes=dur))
+
+        new_start, new_end = chosen_slot
+        update_data = {
+            "start_time": new_start.isoformat(),
+            "end_time": new_end.isoformat(),
+            "status": "rescheduled",
+        }
+        sb_patch("schedule_items", update_data, params={"id": f"eq.{task['id']}", "user_id": f"eq.{user_id}"})
+        rescheduled_items.append({
+            "task_id": task["id"],
+            "title": task.get("title", "Untitled"),
+            "new_start": new_start.isoformat(),
+            "new_end": new_end.isoformat(),
+            "auto_rescheduled": True,
+        })
+
+    return {
+        "success": True,
+        "count": len(rescheduled_items),
+        "rescheduled": rescheduled_items,
+        "message": f"Successfully auto-rescheduled {len(rescheduled_items)} task(s) to optimal free slots."
     }
 
 @app.post("/api/schedule/accept")
@@ -1389,7 +1579,7 @@ async def complete_task(request: TaskCompleteRequest, user_id: str = Depends(get
 
 @app.post("/api/tasks/skip")
 async def skip_task(request: TaskCompleteRequest, user_id: str = Depends(get_user_id)):
-    """Mark a task as skipped and trigger rescheduling."""
+    """Mark a task as skipped and automatically reschedule it to the next viable slot."""
     if request.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
@@ -1399,11 +1589,40 @@ async def skip_task(request: TaskCompleteRequest, user_id: str = Depends(get_use
         raise HTTPException(404, "Task not found")
     task = resp.json()[0]
 
-    # Update task to pending (needs rescheduling)
-    sb_patch("schedule_items", {"status": "pending", "start_time": None, "end_time": None},
-             params={"id": f"eq.{request.task_id}", "user_id": f"eq.{user_id}"})
+    now = _now_utc()
+    profile = await get_behavior_profile(user_id)
+    wake = profile.get("wake_time", "07:00")
+    sleep = profile.get("sleep_time", "23:00")
+    dur = int(task.get("duration_minutes") or 60)
 
-    slot = _slot_for_hour(_parse_dt(task.get("start_time")).hour if task.get("start_time") else _now_utc().hour)
+    # Find the next viable free slot to auto-reschedule
+    slots = compute_free_slots(user_id, now, now + timedelta(days=7), wake, sleep)
+    new_start = None
+    new_end = None
+    for s in slots:
+        s_start = _parse_dt(s["start"])
+        s_end = _parse_dt(s["end"])
+        if s_start and s_end and s_start > now:
+            avail = (s_end - s_start).total_seconds() / 60
+            if avail >= min(dur, 30):
+                new_start = s_start
+                new_end = min(s_end, s_start + timedelta(minutes=dur))
+                break
+
+    if not new_start:
+        tomorrow = (now + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
+        new_start = tomorrow
+        new_end = tomorrow + timedelta(minutes=dur)
+
+    # Update task with auto-rescheduled times
+    sb_patch("schedule_items", {
+        "status": "rescheduled",
+        "start_time": new_start.isoformat(),
+        "end_time": new_end.isoformat(),
+        "completion_note": f"Auto-rescheduled after skip: {request.note or 'missed'}",
+    }, params={"id": f"eq.{request.task_id}", "user_id": f"eq.{user_id}"})
+
+    slot = _slot_for_hour(_parse_dt(task.get("start_time")).hour if task.get("start_time") else now.hour)
     await update_behavior_profile(user_id, "skipped", slot=slot, task_type=task.get("task_type"))
 
     sb_post("behavior_events", {
@@ -1412,11 +1631,18 @@ async def skip_task(request: TaskCompleteRequest, user_id: str = Depends(get_use
         "event_type": "skipped",
         "scheduled_start": task.get("start_time"),
         "scheduled_end": task.get("end_time"),
-        "metadata": {"reason": request.note},
-        "logged_at": _now_utc().isoformat(),
+        "metadata": {"reason": request.note, "auto_rescheduled_to": new_start.isoformat()},
+        "logged_at": now.isoformat(),
     })
 
-    return {"success": True, "task_status": "pending", "needs_rescheduling": True}
+    return {
+        "success": True,
+        "task_status": "rescheduled",
+        "auto_rescheduled": True,
+        "new_start": new_start.isoformat(),
+        "new_end": new_end.isoformat(),
+        "message": f"Task automatically rescheduled to {new_start.strftime('%a, %b %d at %I:%M %p')}",
+    }
 
 # ---- REPAIR ----
 

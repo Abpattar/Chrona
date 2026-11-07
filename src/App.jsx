@@ -11,9 +11,8 @@ import Upload from './pages/Upload'
 const navLinks = [
   { to: '/dashboard', label: 'Today', icon: '⚡' },
   { to: '/chat', label: 'Chrona', icon: '✦' },
-  { to: '/calendar', label: 'Calendar', icon: '📅' },
+  { to: '/calendar', label: 'Mind Map', icon: '🧠' },
   { to: '/tasks', label: 'Tasks', icon: '📋' },
-  { to: '/upload', label: 'Upload', icon: '⬆️' },
 ]
 
 export default function App() {
@@ -90,7 +89,7 @@ export default function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/tasks" element={<Priority />} />
-          <Route path="/upload" element={<Upload />} />
+          <Route path="/upload" element={<Navigate to="/chat" replace />} />
           {/* Legacy routes */}
           <Route path="/mindmap" element={<Navigate to="/calendar" replace />} />
           <Route path="/priority" element={<Navigate to="/tasks" replace />} />

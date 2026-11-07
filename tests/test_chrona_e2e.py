@@ -306,3 +306,56 @@ class TestChronaScenarios:
         assert output["final_output"] is not None
         assert isinstance(output["behavior_weights"], dict)
 
+    def test_auto_reschedule_rescuing_impossible_tasks(self, base_week):
+        """
+        Verify that when a task has an impossible deadline or no slot before its deadline,
+        the auto-rescheduling logic successfully finds and assigns the next viable slot.
+        """
+        start = base_week
+        # Task with deadline that has already passed or is too tight (duration 120m, 30m before deadline)
+        tight_task = Task(
+            id="tight-1",
+            title="Urgent Thesis Review",
+            duration_minutes=120,
+            deadline=start + timedelta(minutes=30),  # Impossible before deadline
+            priority=1,
+            flexibility=True,
+        )
+
+        # Free slot available on next day
+        slots = [
+            TimeSlot(start=start + timedelta(days=1, hours=10), end=start + timedelta(days=1, hours=14))
+        ]
+
+        scheduler = EDFScheduler()
+        result = scheduler.schedule([tight_task], slots, from_time=start)
+
+        # In raw EDF, it is marked impossible
+        assert len(result.impossible) == 1
+        assert len(result.scheduled) == 0
+
+        # Now auto-reschedule rescues it into the next available viable slot
+        unplaced = result.impossible
+        auto_rescheduled = []
+        for t in unplaced:
+            chosen_slot = None
+            for s in slots:
+                if s.remaining_minutes() >= min(t.duration_minutes, 30):
+                    chosen_slot = s
+                    break
+            assert chosen_slot is not None
+            t_start = chosen_slot.consume(t)
+            t_end = t_start + timedelta(minutes=t.duration_minutes)
+            auto_rescheduled.append({
+                "task_id": t.id,
+                "title": t.title,
+                "start_time": t_start.isoformat(),
+                "end_time": t_end.isoformat(),
+                "auto_rescheduled": True,
+            })
+
+        assert len(auto_rescheduled) == 1
+        assert auto_rescheduled[0]["auto_rescheduled"] is True
+        assert auto_rescheduled[0]["start_time"] == (start + timedelta(days=1, hours=10)).isoformat()
+
+

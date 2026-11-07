@@ -183,6 +183,20 @@ export const api = {
     }),
   }),
 
+  // ── Auto Reschedule ────────────────────────────────────────
+  autoReschedule: (taskId = null, allUnplaced = false) =>
+    request('/api/schedule/auto-reschedule', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: TEST_USER_ID,
+        task_id: taskId,
+        all_unplaced: allUnplaced,
+      }),
+    }),
+
+  // ── Chat with Upload ──────────────────────────────────────
+  chatUpload: (formData) => uploadRequest('/api/chat/upload', formData),
+
   // ── Repair ───────────────────────────────────────────────
   repairPropose: (disruptedTaskId, reason = null) => request('/api/repair/propose', {
     method: 'POST',
