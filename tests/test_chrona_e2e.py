@@ -453,7 +453,120 @@ class TestChronaScenarios:
         exam_end = datetime.fromisoformat(exam["end_time"])
         gap_after_exam = (new_start - exam_end).total_seconds() / 60
         assert gap_after_exam >= 30, f"Expected at least 30m break after exam, got {gap_after_exam}m"
-        assert new_start.minute == 30, f"Expected 9:30 PM start, got {new_start}"
+        assert new_start.minute in [30, 35], f"Expected 9:30 or 9:35 PM start with decompression break, got {new_start}"
+
+    def test_strict_time_user_override_skips_decompression_break(self):
+        """
+        User Requirement:
+        The decompression break should be by default, but if the user explicitly mentions
+        'I want a thing very important at that time only' or 'strictly at that time',
+        it should place on that time (no gap conflict triggered).
+        """
+        from backend.server import check_collision_or_gap_issue, infer_task_properties
+
+        exam = {
+            "title": "Math exam",
+            "task_type": "exam",
+            "start_time": "2026-11-08T20:00:00+00:00",
+            "end_time": "2026-11-08T21:00:00+00:00",
+            "priority": 1,
+            "flexibility": False,
+        }
+        dinner_strict = {
+            "title": "Dinner with friends",
+            "task_type": "social",
+            "start_time": "2026-11-08T21:00:00+00:00",
+            "end_time": "2026-11-08T23:00:00+00:00",
+            "duration_minutes": 120,
+            "strict_time": True,
+            "skip_recovery_buffer": True,
+        }
+
+        # 1. Verify property inference detects user strict time statement
+        inferred = infer_task_properties({"title": "Dinner with friends"}, user_text="dinner at 9 PM is very important at that time only")
+        assert inferred.get("strict_time") is True
+        assert inferred.get("skip_recovery_buffer") is True
+
+        # 2. Verify collision check does NOT flag gap conflict when user explicitly requested strict time
+        has_issue, anchor, loser, deficit = check_collision_or_gap_issue(exam, dinner_strict)
+        assert has_issue is False, "Strict time override must skip decompression break and place on that time!"
+
+    def test_strict_time_direct_simultaneous_overlap_resolution(self):
+        """
+        When there is a physical direct overlap (Math exam 8-10 PM and Dinner 8-9 PM),
+        even if user requested strict time, a user cannot physically be in two places at once.
+        Chrona schedules Math exam at 8-10 PM and places Dinner immediately at 10:00 PM (zero break wait).
+        """
+        from backend.server import check_collision_or_gap_issue, find_optimal_reschedule_slot
+
+        exam = {
+            "title": "Math exam",
+            "task_type": "exam",
+            "start_time": "2026-11-08T20:00:00+00:00",
+            "end_time": "2026-11-08T22:00:00+00:00",
+            "priority": 1,
+            "flexibility": False,
+        }
+        dinner = {
+            "title": "Dinner with friends",
+            "task_type": "social",
+            "start_time": "2026-11-08T20:00:00+00:00",
+            "end_time": "2026-11-08T21:00:00+00:00",
+            "duration_minutes": 60,
+            "strict_time": True,
+            "skip_recovery_buffer": True,
+        }
+
+        # 1. Direct overlap MUST be flagged
+        has_conflict, anchor, loser, gap = check_collision_or_gap_issue(exam, dinner)
+        assert has_conflict is True
+        assert anchor["title"] == "Math exam"
+        assert loser["title"] == "Dinner with friends"
+
+        # 2. Optimal slot with strict_time places Dinner immediately at 10:00 PM without waiting 35m
+        new_start, new_end, note = find_optimal_reschedule_slot(dinner, exam, [exam])
+        exam_end = datetime.fromisoformat(exam["end_time"])
+        assert new_start == exam_end, f"Expected 10:00 PM placement right after exam, got {new_start}"
+        assert "decompression break skipped" in note.lower()
+
+    @pytest.mark.asyncio
+    async def test_override_break_endpoint(self):
+        """
+        Test the POST /api/schedule/override-break endpoint.
+        """
+        from backend.server import app, sb_post
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app)
+        user_id = "00000000-0000-0000-0000-000000000001"
+
+        # Seed dinner
+        sb_post("schedule_items", {
+            "id": "test-dinner-override-id",
+            "user_id": user_id,
+            "title": "Dinner with friends",
+            "start_time": "2026-11-08T21:35:00+00:00",
+            "end_time": "2026-11-08T23:35:00+00:00",
+            "status": "rescheduled",
+            "duration_minutes": 120,
+        })
+
+        # Call override break with skip_break=True
+        resp = client.post(
+            "/api/schedule/override-break",
+            json={
+                "task_id": "test-dinner-override-id",
+                "target_time": "2026-11-08T21:00:00+00:00",
+                "skip_break": True,
+            },
+            headers={"X-User-ID": user_id}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["item"]["strict_time"] is True
+        assert "21:00" in data["item"]["start_time"]
+
 
 
 

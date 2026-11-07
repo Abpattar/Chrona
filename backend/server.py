@@ -678,6 +678,8 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
     Rule: Unless the user explicitly says a task is 'very important' / 'high priority' / 'urgent',
     tasks default to Normal or Low priority (Priority 3/4).
     Hard commitments (Exams, tests, finals) default to Priority 1 (Critical) and flexibility: False.
+    Strict time override: If user specifies 'at that time only', 'strictly at', 'no break', etc.,
+    marks strict_time=True and skip_recovery_buffer=True.
     """
     title = (task_dict.get("title") or "").strip().lower()
     task_type = (task_dict.get("task_type") or "").strip().lower()
@@ -691,6 +693,16 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
             "p1", "priority 1", "priority 2", "cannot miss"
         ]
     )
+
+    # Explicit strict time check (e.g. user insists on that exact time or no decompression break)
+    strict_time_keywords = [
+        "at that time only", "at this time only", "strictly at", "only at that time",
+        "very important at that time", "important at that time", "must be at that time",
+        "only at", "exactly at", "no break", "skip break", "skip decompression",
+        "without break", "don't need a break", "no decompression", "keep strictly",
+        "keep at that time"
+    ]
+    is_strict_time = any(kw in combined_text for kw in strict_time_keywords)
 
     hard_keywords = [
         "exam", "midterm", "final", "quiz", "test", "lecture", "class",
@@ -710,6 +722,10 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
     is_workout = any(k in title for k in workout_keywords)
 
     res = dict(task_dict)
+
+    if task_dict.get("strict_time") or task_dict.get("skip_recovery_buffer") or is_strict_time:
+        res["strict_time"] = True
+        res["skip_recovery_buffer"] = True
 
     if explicit_high_prio:
         res["priority"] = 2
@@ -753,14 +769,22 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
 
     if score1 <= score2:
         anchor, loser = it1, it2
+        anchor_prop, loser_prop = prop1, prop2
     else:
         anchor, loser = it2, it1
+        anchor_prop, loser_prop = prop2, prop1
 
-    # 1. Overlap
+    # 1. Direct Overlap: simultaneous physical presence clash
     if s1 < e2 and e1 > s2:
         return True, anchor, loser, 0
 
-    # 2. Insufficient recovery gap check (e.g. Exam ends at 9:00 PM, Dinner starts at 9:00 PM)
+    # 2. Decompression gap check:
+    # If the subordinate/flexible task was explicitly requested with strict time / skip break,
+    # honor user choice and do not flag an adjacent gap conflict!
+    if loser.get("strict_time") or loser.get("skip_recovery_buffer") or loser_prop.get("strict_time") or loser_prop.get("skip_recovery_buffer"):
+        return False, None, None, 0
+
+    # 3. Check recovery gap between adjacent tasks (e.g. Exam ends at 9:00 PM, Dinner starts at 9:00 PM)
     if e1 <= s2:
         gap = (s2 - e1).total_seconds() / 60
         req_buf = calculate_recovery_buffer_minutes(it1, it2)
@@ -777,6 +801,7 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
 def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "23:00") -> tuple:
     """
     Find optimal slot for to_reschedule enforcing dynamic cognitive buffers based on task exertion.
+    If strict time was requested, places immediately adjacent to anchor with zero decompression wait.
     If target day is packed, searches subsequent days (day + 1, weekend, next week).
     Returns (start_dt, end_dt, reason_note).
     """
@@ -800,29 +825,56 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
                 continue
             if (it.get("title") or "").strip().lower() == (to_reschedule.get("title") or "").strip().lower():
                 continue
+
             it_s = _parse_dt(it.get("start_time"))
             it_e = _parse_dt(it.get("end_time"))
             if it_s and it_e:
-                # Require at least 15m transition buffer with any other event
-                buf = timedelta(minutes=15)
-                if c_start < (it_e + buf) and c_end > (it_s - buf):
-                    return False
+                # If checking against the anchor task itself, do not apply the generic 10-minute buffer
+                # because the anchor spacing is explicitly handled by the scheduling strategies
+                is_anchor = False
+                if anchor:
+                    if it.get("id") and anchor.get("id") and it.get("id") == anchor.get("id"):
+                        is_anchor = True
+                    elif (it.get("title") or "").strip().lower() == (anchor.get("title") or "").strip().lower():
+                        is_anchor = True
+
+                if is_anchor:
+                    # Strict boundary overlap check only
+                    if c_start < it_e and c_end > it_s:
+                        return False
+                else:
+                    buf = timedelta(minutes=10)
+                    if c_start < (it_e + buf) and c_end > (it_s - buf):
+                        return False
         return True
 
     target_date = anchor_start.date()
-
-    # Strategy 1: Post-anchor slot on the same day with stress recovery buffer
-    post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
-    if post_start.minute not in [0, 30]:
-        post_start = post_start.replace(minute=30 if post_start.minute < 30 else 0, second=0, microsecond=0)
-        if post_start < anchor_end + timedelta(minutes=post_anchor_buffer):
-            post_start += timedelta(minutes=30)
-    post_end = post_start + timedelta(minutes=dur)
-
     sh, sm = [int(x) for x in sleep_time.split(":")]
     sleep_dt = datetime(target_date.year, target_date.month, target_date.day, sh, sm, tzinfo=tz)
 
-    if post_end <= (sleep_dt + timedelta(minutes=30)) and is_slot_free(post_start, post_end):
+    # Strict Time Override: Place immediately after anchor without decompression break
+    skip_recovery = (
+        to_reschedule.get("strict_time") or
+        to_reschedule.get("skip_recovery_buffer") or
+        infer_task_properties(to_reschedule).get("strict_time")
+    )
+    if skip_recovery:
+        post_start = anchor_end
+        post_end = post_start + timedelta(minutes=dur)
+        if is_slot_free(post_start, post_end):
+            note = f"Placed strictly at {post_start.strftime('%I:%M %p')} right after '{anchor.get('title')}' as requested (decompression break skipped)."
+            return post_start, post_end, note
+
+    # Strategy 1: Post-anchor slot on the same day with stress recovery buffer
+    post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
+    # Ensure post_start is rounded to clean 5-minute interval
+    rem = post_start.minute % 5
+    if rem != 0:
+        post_start += timedelta(minutes=(5 - rem))
+    post_start = post_start.replace(second=0, microsecond=0)
+    post_end = post_start + timedelta(minutes=dur)
+
+    if post_end <= (sleep_dt + timedelta(minutes=60)) and is_slot_free(post_start, post_end):
         note = f"Added a {post_anchor_buffer}-minute decompression break after '{anchor.get('title')}' so you don't feel rushed."
         return post_start, post_end, note
 
@@ -880,6 +932,10 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         "flexibility": inferred.get("flexibility", True),
         "status": "pending",
     }
+    if inferred.get("strict_time") or inferred.get("skip_recovery_buffer"):
+        item["strict_time"] = True
+        item["skip_recovery_buffer"] = True
+
     if task_data.get("deadline"):
         item["deadline"] = task_data["deadline"]
 
@@ -929,11 +985,14 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                         f"⚡ Auto-Rescheduled: '{item['title']}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
                     )
                 else:
+                    loser_prop = infer_task_properties(other)
                     patch_data = {
                         "start_time": new_s.isoformat(),
                         "end_time": new_e.isoformat(),
                         "status": "rescheduled",
                         "auto_rescheduled": True,
+                        "task_type": loser_prop["task_type"],
+                        "priority": loser_prop["priority"],
                         "flexibility": True,
                         "completion_note": reason,
                     }
@@ -943,6 +1002,10 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                     reschedule_note = (
                         f"⚡ Auto-Rescheduled: '{other.get('title')}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
                     )
+
+    if item.get("strict_time") and not reschedule_note:
+        s_dt = _parse_dt(item.get("start_time"))
+        reschedule_note = f"⚡ Strict Schedule: '{item['title']}' was placed strictly at {s_dt.strftime('%I:%M %p')} as requested (decompression break skipped)."
 
     # Deduplication check
     existing_resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
@@ -1008,6 +1071,8 @@ def auto_repair_existing_conflicts(user_id: str) -> list:
                     "start_time": new_s.isoformat(),
                     "end_time": new_e.isoformat(),
                     "status": "rescheduled",
+                    "auto_rescheduled": True,
+                    "task_type": loser_prop["task_type"],
                     "priority": loser_prop["priority"],
                     "flexibility": True,
                     "completion_note": reason,
@@ -1082,6 +1147,64 @@ Break this down into realistic, actionable subtasks.
 # CHRONA CHAT ENGINE
 # ==============================
 
+def extract_context_hints(text: str) -> dict:
+    """Extract quick hints like 'at 9 PM', 'Sunday 8pm', 'for 2 hours', '45 min' from user utterance."""
+    import re
+    t_lower = text.lower()
+    hints = {}
+    time_m = re.search(r'\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower)
+    if time_m:
+        hints["time_str"] = time_m.group(1).upper()
+    day_m = re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b', t_lower)
+    if day_m:
+        hints["day_str"] = day_m.group(1).capitalize()
+    dur_h = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', t_lower)
+    if dur_h:
+        hints["duration_minutes"] = int(dur_h.group(1)) * 60
+    else:
+        dur_m = re.search(r'(\d+)\s*(?:minutes?|mins?|m)\b', t_lower)
+        if dur_m:
+            hints["duration_minutes"] = int(dur_m.group(1))
+
+    # Look for task title
+    title_m = re.search(r'\b(?:schedule|add|have|plan|for|about)\s+([a-zA-Z0-9\s]{3,35}?)(?:\s+at|\s+on|\s+tomorrow|\s+next|\s+for|\.|\?|$)', text, re.IGNORECASE)
+    if title_m:
+        cand = title_m.group(1).strip()
+        if cand.lower() not in ["it", "that", "this", "something", "a task", "me", "my schedule"]:
+            hints["title"] = cand
+
+    return hints
+
+def compute_datetime_from_day_and_time(day_str: str, time_str: str) -> datetime:
+    """Compute offset-aware UTC datetime given day name and time string (e.g. 'Sunday', '9 PM')."""
+    import re
+    now = _now_utc()
+    hr, mn = 21, 0
+    if time_str:
+        m = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', time_str.lower())
+        if m:
+            hr = int(m.group(1))
+            mn = int(m.group(2) or 0)
+            ampm = m.group(3)
+            if ampm == 'pm' and hr < 12:
+                hr += 12
+            elif ampm == 'am' and hr == 12:
+                hr = 0
+
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    target_date = now.date()
+    if day_str and day_str.lower() in days:
+        target_idx = days.index(day_str.lower())
+        current_idx = now.weekday()
+        diff = (target_idx - current_idx) % 7
+        if diff == 0 and hr < now.hour:
+            diff = 7
+        target_date = now.date() + timedelta(days=diff)
+    elif day_str and day_str.lower() == 'tomorrow':
+        target_date = now.date() + timedelta(days=1)
+
+    return datetime(target_date.year, target_date.month, target_date.day, hr, mn, 0, tzinfo=timezone.utc)
+
 CHRONA_SYSTEM = """You are Chrona, an intelligent personal time-management and AI scheduling assistant.
 
 Today's date is {today}.
@@ -1092,10 +1215,9 @@ You help users plan their time intelligently.
 CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
 1. MULTI-TURN MEMORY & TASK UPDATES:
    - Always connect the user's latest message with the previous messages in the conversation!
-   - If the user provides durations, adjustments, or prep time for a task mentioned in the recent dialogue (e.g., "it will be 45 minutes long", "I need 2 hours of prep beforehand", "change duration to 30 mins", "move it to 4 PM"):
+   - If the user provides durations, times, or answers questions for a task mentioned previously (e.g. "at 9 PM", "for 2 hours", "on Sunday", "make it 30 mins"):
      * DO NOT ASK FOR THE TITLE, DATE, OR EVENT NAME AGAIN! The title and date are already in the conversation history!
-     * Update the existing task with the new duration/time, and extract any requested prep blocks (e.g. prep task before the presentation).
-     * Return the updated tasks in the "tasks" array immediately.
+     * Combine the title and the newly provided details to extract the finalized task in the "tasks" array immediately!
 2. SENSIBLE DEFAULTS OVER BLOCKING:
    - If a duration is not explicitly specified, USE INTELLIGENT DEFAULTS:
      * Exams: 120 minutes (2 hours)
@@ -1111,15 +1233,13 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - Extract tasks into the "tasks" array.
    - Only set clarification_needed if a truly essential detail is missing (e.g. user says "I have an exam" with no subject, date, or timeframe).
    - If user says "My exam is next Friday at 2 PM", that is completely sufficient! Extract it immediately with duration=120 min.
-4. CONFLICT DETECTION & IMMOVABLE VS FLEXIBLE COMMITMENTS:
-   - NEVER schedule two events at the exact same start time!
-   - Distinguish strictly IMMOVABLE commitments vs FLEXIBLE commitments:
-     * IMMOVABLE (flexibility: false, priority: 1): Exams, Midterms, Finals, Quizzes, University/College Lectures & Classes, Flights, Doctor/Dentist Appointments, Job Interviews.
-     * FLEXIBLE (flexibility: true, priority: 3 or 4): Dinner with friends, Lunch, Coffee, Social hangouts, Workouts, Gym, Reading, Personal study sessions. Even if the user specifies a time (e.g. "dinner with friends at 8 PM"), social and personal activities are ALWAYS flexible!
-   - CONFLICT RESOLUTION: When two events conflict at the same time:
-     * The fixed exam or class ALWAYS keeps the slot (e.g. 8:00 PM - 10:00 PM).
-     * The flexible event (e.g. Dinner with friends) MUST be auto-rescheduled to an adjacent non-overlapping slot (e.g. 6:30 PM - 7:30 PM before the exam, or 10:00 PM - 11:00 PM after the exam).
-     * Explain this clearly in your response: "Conflict detected: 'Dinner with friends' conflicted with 'Math exam' (8:00 PM). Since your exam is fixed (Priority 1), I scheduled your Math exam for 8:00 PM - 10:00 PM and automatically moved 'Dinner with friends' to 6:30 PM - 7:30 PM so you won't miss either!"
+4. COGNITIVE RECOVERY & DECOMPRESSION BREAKS (CRITICAL):
+   - Exhausting / stressful tasks (Exams, tests, midterms, finals, interviews) require a 35-minute cognitive recovery break by default!
+   - If a succeeding task (such as Dinner with friends or Gym) is scheduled right after an exam (e.g. Exam ends at 9:00 PM and Dinner is at 9:00 PM), Chrona MUST by default insert a 35-minute decompression break and reschedule Dinner to 9:35 PM so the user doesn't burn out!
+   - STRICT TIME EXCEPTION: If the user explicitly mentions that the succeeding event is "very important at that time only", "strictly at that time", "only at that time", or asks to skip the decompression break:
+     * Place the event at that exact requested time (9:00 PM) without waiting for the break!
+     * Explain: "Since you specified this is very important at that time only, I have placed Dinner with friends strictly at 9:00 PM with no decompression break after your Math exam. Would you like to keep this strictly at 9:00 PM or should I add the 35-minute recovery break?"
+   - DIRECT SIMULTANEOUS CLASH (e.g. Exam 8-10 PM and Dinner 8-9 PM): A user cannot attend dinner while sitting in an exam room. Since the exam is Priority 1 fixed, if the user insisted on strict placement, place it immediately after the exam (10:00 PM with zero wait) rather than the impossible 8:00 PM!
 5. TIMETABLE & SYLLABUS EXTRACTION:
    - When extracted text from an uploaded timetable or syllabus image/document is provided:
      * Extract ALL classes, lectures, labs, exams, and assignments.
@@ -1189,6 +1309,31 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
         except Exception:
             pending_draft = None
 
+    # Merge accumulated draft context across turns
+    draft_dict = {}
+    if pending_draft:
+        if isinstance(pending_draft, dict):
+            draft_dict = dict(pending_draft)
+        elif isinstance(pending_draft, str):
+            try:
+                draft_dict = json.loads(pending_draft)
+            except Exception:
+                draft_dict = {"title": pending_draft}
+
+    current_hints = extract_context_hints(message)
+    for k, v in current_hints.items():
+        if v:
+            draft_dict[k] = v
+
+    # If title is missing, search backwards in history turns
+    if not draft_dict.get("title"):
+        for turn in reversed(history_turns):
+            if turn.get("role") == "user":
+                h_prev = extract_context_hints(turn.get("content", ""))
+                if h_prev.get("title"):
+                    draft_dict["title"] = h_prev["title"]
+                    break
+
     # Get user's existing schedule context
     week_start = _now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
     week_end = week_start + timedelta(days=14)
@@ -1213,11 +1358,15 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
         recent_tasks_str += "\nCRITICAL RULE: If the user provides durations, prep time, or adjustments (e.g. 'it will be 45 minutes long', '2 hours prep beforehand', 'make it 30 mins'), they are modifying the active task above! DO NOT ASK FOR TITLE OR DATE AGAIN! Update the active task and/or add the prep block immediately in the 'tasks' array!\n"
 
     pending_draft_str = ""
-    if pending_draft:
+    if draft_dict.get("title") or draft_dict.get("time_str"):
         pending_draft_str = (
-            f"\nUnfinished / Pending Task from previous message: {json.dumps(pending_draft)}\n"
-            f"Note: If the user's latest message provides details answering this pending task, "
-            f"MERGE them to finalize and extract the task now!"
+            f"\nACCUMULATED TASK IN PROGRESS ACROSS TURNS:\n"
+            f"- Event Title: \"{draft_dict.get('title', 'Pending Task')}\"\n"
+            f"- Scheduled Time/Day: \"{draft_dict.get('day_str', '')} {draft_dict.get('time_str', '')}\"\n"
+            f"- Target Duration: {draft_dict.get('duration_minutes', 60)} minutes\n"
+            f"MANDATORY INSTRUCTION: You now have the accumulated details for this task. "
+            f"Extract this task immediately into the 'tasks' array! "
+            f"DO NOT ASK what task this is for! DO NOT ASK for date or time again!"
         )
 
     system = CHRONA_SYSTEM.replace("{today}", today)
@@ -1253,21 +1402,51 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
             if s_dt:
                 t["fixed_end"] = (s_dt + timedelta(minutes=int(t["duration_minutes"]))).isoformat()
 
+    # Deterministic fallback: If user provided title & time across turns but LLM hesitated
+    if not extracted_tasks and draft_dict.get("title") and (draft_dict.get("time_str") or current_hints.get("time_str")):
+        t_title = draft_dict["title"]
+        t_time = draft_dict.get("time_str") or current_hints.get("time_str")
+        t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Sunday"
+        dt_start = compute_datetime_from_day_and_time(t_day, t_time)
+        dur = int(draft_dict.get("duration_minutes") or 60)
+
+        synth_task = {
+            "title": t_title,
+            "duration_minutes": dur,
+            "task_type": "social" if any(s in t_title.lower() for s in ["dinner", "lunch", "coffee", "friends", "party"]) else "task",
+            "priority": 3,
+            "flexibility": True,
+            "fixed_start": dt_start.isoformat(),
+            "fixed_end": (dt_start + timedelta(minutes=dur)).isoformat(),
+        }
+        extracted_tasks = [synth_task]
+        result["tasks"] = extracted_tasks
+        result["clarification_needed"] = None
+        result["message"] = f"Understood! I have scheduled '{t_title}' for {t_day} at {t_time}."
+
+    # Check strict time override in user message
+    strict_keywords = [
+        "at that time only", "at this time only", "strictly at", "only at that time",
+        "very important at that time", "important at that time", "no break", "skip break",
+        "skip decompression", "without break", "don't need a break", "no decompression"
+    ]
+    if any(k in message.lower() for k in strict_keywords):
+        for t in extracted_tasks:
+            t["strict_time"] = True
+            t["skip_recovery_buffer"] = True
+            t["priority"] = 2
+
     result["tasks"] = extracted_tasks
 
-    # Memory update: Track active recent tasks
+    # Memory update: Track active recent tasks and draft
     if extracted_tasks:
         await cache_del(draft_cache_key)
-        # Update recent tasks
         recent_tasks.extend(extracted_tasks)
         await cache_set(recent_tasks_cache_key, json.dumps(recent_tasks[-6:]), ex=7200)
-    elif result.get("clarification_needed"):
-        # Save pending draft
-        await cache_set(draft_cache_key, json.dumps({
-            "user_prompt": message,
-            "clarification_needed": result.get("clarification_needed"),
-            "assistant_response": result.get("message", "")
-        }), ex=3600)
+    elif result.get("clarification_needed") or draft_dict.get("title"):
+        draft_dict["last_question"] = result.get("message", "")
+        draft_dict["clarification_needed"] = result.get("clarification_needed")
+        await cache_set(draft_cache_key, json.dumps(draft_dict), ex=3600)
 
     # Save to conversation history
     history_turns.append({"role": "user", "content": message})
@@ -1471,6 +1650,40 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
     if reschedule_notes:
         final_msg = final_msg.strip() + "\n\n" + "\n".join(reschedule_notes)
 
+    # Contextual quick actions for decompression break overrides
+    quick_actions = []
+    for t in inserted_tasks:
+        if t.get("auto_rescheduled") and "decompression" in (t.get("completion_note") or "").lower():
+            s_dt = _parse_dt(t.get("start_time"))
+            quick_actions.append({
+                "label": f"⚡ Keep '{t.get('title')}' strictly (Skip break)",
+                "task_id": t.get("id"),
+                "task_title": t.get("title"),
+                "target_time": t.get("start_time"),
+                "skip_break": True,
+                "action": "override_break",
+                "variant": "warning"
+            })
+            quick_actions.append({
+                "label": f"🧘 Keep 35m Decompression Break ({s_dt.strftime('%I:%M %p') if s_dt else ''})",
+                "action": "dismiss",
+                "variant": "primary"
+            })
+        elif t.get("strict_time") or t.get("skip_recovery_buffer"):
+            quick_actions.append({
+                "label": f"🧘 Add 35m Decompression Break for '{t.get('title')}'",
+                "task_id": t.get("id"),
+                "task_title": t.get("title"),
+                "skip_break": False,
+                "action": "override_break",
+                "variant": "primary"
+            })
+            quick_actions.append({
+                "label": "✓ Keep strictly at requested time (No break)",
+                "action": "dismiss",
+                "variant": "secondary"
+            })
+
     return {
         "message": final_msg,
         "action": result.get("action"),
@@ -1479,6 +1692,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
         "clarification_needed": result.get("clarification_needed"),
         "schedule_trigger": result.get("schedule_trigger", False),
         "decomposition": result.get("decomposition"),
+        "quick_actions": quick_actions,
     }
 
 @app.post("/api/chat/upload")
@@ -1504,6 +1718,26 @@ async def chat_upload(
             content = await file.read()
             if extracted_text and extracted_text.strip():
                 file_text = extracted_text.strip()
+            elif is_image:
+                # Server-side OCR execution fallback via node tesseract
+                try:
+                    import tempfile, subprocess
+                    suffix = os.path.splitext(file_name)[1] or ".jpg"
+                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                        tmp.write(content)
+                        tmp_path = tmp.name
+                    res = subprocess.run(
+                        ["node", "scripts/ocr_extract.mjs", tmp_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=15
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        file_text = res.stdout.strip()
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except Exception as e:
+                    print(f"⚠️ Server OCR fallback notice: {e}")
             elif file_name.lower().endswith(".pdf") or content.startswith(b"%PDF"):
                 file_text = extract_text_from_pdf(content)
             else:
@@ -1518,7 +1752,7 @@ async def chat_upload(
 
     full_user_input = message.strip() if message else ""
     if file_name and file_text:
-        attachment_context = f"\n[Document / Timetable Extracted Content ({file_name})]:\n{file_text[:5000]}"
+        attachment_context = f"\n[Timetable / Syllabus OCR Extracted Content ({file_name})]:\n{file_text[:5000]}"
         full_user_input = f"{full_user_input}\n{attachment_context}".strip()
     elif is_image and not file_text and not full_user_input:
         full_user_input = f"I uploaded timetable image {file_name}. Please help me extract my schedule."
@@ -1541,11 +1775,46 @@ async def chat_upload(
     final_msg = result.get("message", "I analyzed your document and extracted the relevant tasks.")
     if is_image and not file_text and not inserted_tasks:
         final_msg = (
-            f"I received your image '{file_name}'. If the text in the image wasn't scanned automatically, "
-            f"you can also paste the course codes or schedule text directly into chat, and I'll organize your entire calendar!"
+            f"I received your uploaded image '{file_name}'. I wasn't able to automatically detect legible text in this image. "
+            f"Could you please type or paste your key schedule commitments (e.g. 'Math exam Sunday 8-9 PM, Dinner at 9 PM')? "
+            f"I'll immediately organize your schedule with conflict resolution and decompression breaks!"
         )
+        result["clarification_needed"] = None
     elif reschedule_notes:
         final_msg = final_msg.strip() + "\n\n" + "\n".join(reschedule_notes)
+
+    quick_actions = []
+    for t in inserted_tasks:
+        if t.get("auto_rescheduled") and "decompression" in (t.get("completion_note") or "").lower():
+            s_dt = _parse_dt(t.get("start_time"))
+            quick_actions.append({
+                "label": f"⚡ Keep '{t.get('title')}' strictly (Skip break)",
+                "task_id": t.get("id"),
+                "task_title": t.get("title"),
+                "target_time": t.get("start_time"),
+                "skip_break": True,
+                "action": "override_break",
+                "variant": "warning"
+            })
+            quick_actions.append({
+                "label": f"🧘 Keep 35m Decompression Break ({s_dt.strftime('%I:%M %p') if s_dt else ''})",
+                "action": "dismiss",
+                "variant": "primary"
+            })
+        elif t.get("strict_time") or t.get("skip_recovery_buffer"):
+            quick_actions.append({
+                "label": f"🧘 Add 35m Decompression Break for '{t.get('title')}'",
+                "task_id": t.get("id"),
+                "task_title": t.get("title"),
+                "skip_break": False,
+                "action": "override_break",
+                "variant": "primary"
+            })
+            quick_actions.append({
+                "label": "✓ Keep strictly at requested time (No break)",
+                "action": "dismiss",
+                "variant": "secondary"
+            })
 
     return {
         "message": final_msg,
@@ -1556,6 +1825,7 @@ async def chat_upload(
         "clarification_needed": result.get("clarification_needed"),
         "schedule_trigger": result.get("schedule_trigger", False),
         "decomposition": result.get("decomposition"),
+        "quick_actions": quick_actions,
     }
 
 # ---- PROCESS EVENT (legacy + new) ----
@@ -2073,27 +2343,129 @@ async def schedule_resolve_conflicts(user_id: str = Depends(get_user_id)):
         "message": f"Successfully resolved {len(repaired)} schedule conflict(s)." if repaired else "No schedule conflicts detected."
     }
 
+class OverrideBreakRequest(BaseModel):
+    user_id: Optional[str] = "00000000-0000-0000-0000-000000000001"
+    task_id: Optional[str] = None
+    task_title: Optional[str] = None
+    target_time: Optional[str] = None
+    skip_break: bool = True
+
+@app.post("/api/schedule/override-break")
+async def schedule_override_break(req: OverrideBreakRequest, user_id: str = Depends(get_user_id)):
+    """
+    Override or restore decompression break for a specific task.
+    If skip_break=True: places task strictly at target_time without decompression buffer.
+    If skip_break=False: restores decompression break after preceding stressful task.
+    """
+    target_item = None
+    resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
+    items = resp.json() if resp.status_code == 200 else []
+
+    if req.task_id:
+        for it in items:
+            if it.get("id") == req.task_id:
+                target_item = it
+                break
+
+    if not target_item and req.task_title:
+        t_clean = req.task_title.strip().lower()
+        for it in items:
+            it_t = (it.get("title") or "").strip().lower()
+            if t_clean in it_t or it_t in t_clean:
+                target_item = it
+                break
+
+    if not target_item:
+        raise HTTPException(404, "Task not found")
+
+    dur = int(target_item.get("duration_minutes") or 60)
+
+    if req.skip_break:
+        new_start = _parse_dt(req.target_time) if req.target_time else _parse_dt(target_item.get("start_time"))
+        if not new_start:
+            new_start = _now_utc().replace(hour=21, minute=0, second=0, microsecond=0)
+
+        new_end = new_start + timedelta(minutes=dur)
+        patch_data = {
+            "start_time": new_start.isoformat(),
+            "end_time": new_end.isoformat(),
+            "strict_time": True,
+            "skip_recovery_buffer": True,
+            "status": "scheduled",
+            "completion_note": f"Strict placement by user request: Decompression break skipped (scheduled at {new_start.strftime('%I:%M %p')})."
+        }
+        sb_patch("schedule_items", patch_data, params={"id": f"eq.{target_item['id']}", "user_id": f"eq.{user_id}"})
+        target_item.update(patch_data)
+        return {
+            "success": True,
+            "item": target_item,
+            "message": f"Updated! '{target_item['title']}' is now scheduled strictly at {new_start.strftime('%I:%M %p')} with no decompression break."
+        }
+    else:
+        # Restore decompression break
+        anchor = None
+        t_start = _parse_dt(target_item.get("start_time"))
+        for other in items:
+            if other.get("id") == target_item.get("id"):
+                continue
+            o_end = _parse_dt(other.get("end_time"))
+            if o_end and t_start and (t_start - o_end).total_seconds() >= -1800 and (t_start - o_end).total_seconds() <= 7200:
+                anchor = other
+                break
+
+        if anchor:
+            req_buf = calculate_recovery_buffer_minutes(anchor, target_item)
+            a_end = _parse_dt(anchor.get("end_time"))
+            new_start = a_end + timedelta(minutes=req_buf)
+            rem = new_start.minute % 5
+            if rem != 0:
+                new_start += timedelta(minutes=(5 - rem))
+            new_start = new_start.replace(second=0, microsecond=0)
+            new_end = new_start + timedelta(minutes=dur)
+            note = f"Decompression break of {req_buf}m restored after '{anchor.get('title')}'."
+        else:
+            new_start = t_start + timedelta(minutes=35) if t_start else _now_utc()
+            new_end = new_start + timedelta(minutes=dur)
+            note = "Decompression break of 35m restored."
+
+        patch_data = {
+            "start_time": new_start.isoformat(),
+            "end_time": new_end.isoformat(),
+            "strict_time": False,
+            "skip_recovery_buffer": False,
+            "status": "rescheduled",
+            "completion_note": note,
+        }
+        sb_patch("schedule_items", patch_data, params={"id": f"eq.{target_item['id']}", "user_id": f"eq.{user_id}"})
+        target_item.update(patch_data)
+        return {
+            "success": True,
+            "item": target_item,
+            "message": f"Decompression break restored! '{target_item['title']}' moved to {new_start.strftime('%I:%M %p')} – {new_end.strftime('%I:%M %p')}."
+        }
+
 @app.post("/api/schedule/fixed")
 async def schedule_fixed_create(item: FixedCommitmentCreate, user_id: str = Depends(get_user_id)):
-    """Create a fixed commitment (class, meeting, etc.)."""
+    """Create a commitment with intelligent inference and conflict resolution."""
     if item.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
-    data = {
-        "user_id": user_id,
+    dur = int((item.end_time - item.start_time).total_seconds() / 60)
+    task_data = {
         "title": item.title,
+        "fixed_start": item.start_time.isoformat(),
+        "fixed_end": item.end_time.isoformat(),
         "start_time": item.start_time.isoformat(),
         "end_time": item.end_time.isoformat(),
-        "task_type": "fixed",
-        "flexibility": False,
-        "status": "scheduled",
-        "priority": 1,
+        "duration_minutes": dur,
         "recurrence": item.recurrence,
     }
-    resp = sb_post("schedule_items", data)
-    if resp.status_code in [200, 201]:
-        return {"success": True, "item": resp.json()[0] if isinstance(resp.json(), list) else resp.json()}
-    raise HTTPException(500, resp.text)
+    saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, [], user_text=item.title)
+    return {
+        "success": True,
+        "item": saved_item,
+        "reschedule_note": conflict_note
+    }
 
 @app.delete("/api/schedule/fixed/{item_id}")
 async def schedule_fixed_delete(item_id: str, user_id: str = Depends(get_user_id)):

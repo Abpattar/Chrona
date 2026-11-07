@@ -24,7 +24,8 @@ export function getNodeTheme(item) {
   const titleLower = (item.title || '').toLowerCase()
   const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout|movie|gym|workout|flute|practice/i.test(titleLower)
   const isExamOrClass = item.task_type === 'exam' || item.task_type === 'class' || /exam|midterm|final|quiz|test|lecture/i.test(titleLower)
-  const isFixed = !isRescheduled && !isSocial && (isExamOrClass || item.task_type === 'fixed' || item.flexibility === false)
+  const isStrictTime = !!item.strict_time || !!item.skip_recovery_buffer || !!item.completion_note?.includes('Strict')
+  const isFixed = !isRescheduled && !isStrictTime && !isSocial && (isExamOrClass || item.task_type === 'fixed' || item.flexibility === false)
   const priority = Number(item.priority || 3)
 
   if (isCompleted) {
@@ -47,6 +48,18 @@ export function getNodeTheme(item) {
       badgeBg: 'rgba(245, 158, 11, 0.25)',
       badgeText: '#fbbf24',
       label: '⏳ PENDING',
+      textStyle: 'text-amber-100 font-semibold',
+    }
+  }
+
+  if (isStrictTime) {
+    return {
+      border: '#f59e0b',
+      bg: 'rgba(245, 158, 11, 0.16)',
+      glow: '0 0 18px rgba(245, 158, 11, 0.45)',
+      badgeBg: 'rgba(245, 158, 11, 0.25)',
+      badgeText: '#fbbf24',
+      label: '⚡ STRICT (NO BREAK)',
       textStyle: 'text-amber-100 font-semibold',
     }
   }
@@ -115,7 +128,7 @@ export function getNodeTheme(item) {
 
 // ── Custom Node: Schedule Item (with date, time, status & importance) ─────────
 function ScheduleTaskNode({ data }) {
-  const { item, onComplete, onReschedule, onDelete } = data
+  const { item, onComplete, onReschedule, onDelete, onOverrideBreak, onExplain } = data
   const theme = getNodeTheme(item)
 
   const hasStartTime = !!item.start_time
@@ -201,18 +214,44 @@ function ScheduleTaskNode({ data }) {
         )}
       </div>
 
-      {/* Hover action bar */}
-      <div className="mt-2.5 pt-2 flex items-center gap-1.5" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      {/* Action buttons */}
+      <div className="mt-2.5 pt-2 flex items-center gap-1.5 flex-wrap" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         {item.status !== 'completed' && (
           <button
             onClick={(e) => {
               e.stopPropagation()
               if (onComplete) onComplete(item.id)
             }}
-            className="flex-1 py-1 rounded text-[10px] font-bold transition-all text-emerald-400 hover:text-emerald-200"
+            className="flex-1 min-w-[50px] py-1 rounded text-[10px] font-bold transition-all text-emerald-400 hover:text-emerald-200"
             style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)' }}
           >
             ✓ Done
+          </button>
+        )}
+        {item.auto_rescheduled && onOverrideBreak && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onOverrideBreak(item.id, true)
+            }}
+            className="flex-1 min-w-[65px] py-1 rounded text-[10px] font-bold transition-all text-amber-300 hover:text-amber-100"
+            style={{ background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)' }}
+            title="Place strictly with zero decompression break"
+          >
+            ⚡ Skip Break
+          </button>
+        )}
+        {(item.strict_time || item.completion_note?.includes('Strict')) && onOverrideBreak && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onOverrideBreak(item.id, false)
+            }}
+            className="flex-1 min-w-[65px] py-1 rounded text-[10px] font-bold transition-all text-sky-300 hover:text-sky-100"
+            style={{ background: 'rgba(56, 189, 248, 0.2)', border: '1px solid rgba(56, 189, 248, 0.4)' }}
+            title="Restore 35m cognitive decompression break"
+          >
+            🧘 Add Break
           </button>
         )}
         <button
@@ -220,12 +259,25 @@ function ScheduleTaskNode({ data }) {
             e.stopPropagation()
             if (onReschedule) onReschedule(item.id)
           }}
-          className="flex-1 py-1 rounded text-[10px] font-bold transition-all text-amber-300 hover:text-amber-100"
-          style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)' }}
+          className="py-1 px-2 rounded text-[10px] font-bold transition-all text-amber-300 hover:text-amber-100"
+          style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)' }}
           title="Auto-reschedule to next free slot"
         >
-          ↻ Reschedule
+          ↻
         </button>
+        {onExplain && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onExplain(item)
+            }}
+            className="py-1 px-2 rounded text-[10px] font-bold transition-all text-cyan-300 hover:text-cyan-100"
+            style={{ background: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)' }}
+            title="Explain schedule decision"
+          >
+            💡
+          </button>
+        )}
       </div>
 
       <Handle type="source" position={Position.Right} className="!bg-cyan-400 !w-2 !h-2" />
@@ -340,7 +392,7 @@ const nodeTypes = {
 }
 
 // ── Layout Generator ─────────────────────────────────────────────────────────
-function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll, onLoadSamples }) {
+function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll, onLoadSamples, onOverrideBreak, onExplain }) {
   const nodes = []
   const edges = []
 
@@ -453,6 +505,8 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
           onComplete,
           onReschedule,
           onDelete,
+          onOverrideBreak,
+          onExplain,
         },
         draggable: true,
       })
@@ -504,6 +558,30 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
   }, [])
 
   // Actions
+  const [explainData, setExplainData] = useState(null)
+
+  const handleOverrideBreak = useCallback(async (taskId, skipBreak) => {
+    try {
+      await api.overrideBreak({ task_id: taskId, skip_break: skipBreak })
+      loadSchedule()
+    } catch (e) {
+      alert(`Error adjusting break: ${e.message}`)
+    }
+  }, [loadSchedule])
+
+  const handleExplain = useCallback(async (item) => {
+    try {
+      const res = await api.explainSchedule(item.id)
+      setExplainData({ item, ...res })
+    } catch (err) {
+      setExplainData({
+        item,
+        explanation: item.completion_note || 'Scheduled using constraint satisfaction, cognitive buffer analysis, and available focus windows.',
+        factors: ['Energy & exhaustion buffer', 'Priority constraint matching', 'Collision avoidance']
+      })
+    }
+  }, [])
+
   const handleComplete = useCallback(async (taskId) => {
     try {
       await api.completeTask(taskId)
@@ -575,6 +653,8 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
       onDelete: handleDelete,
       onAutoRescheduleAll: handleAutoRescheduleAll,
       onLoadSamples,
+      onOverrideBreak: handleOverrideBreak,
+      onExplain: handleExplain,
     })
     setNodes(newNodes)
     setEdges(newEdges)
@@ -582,7 +662,7 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
     setTimeout(() => {
       rfInstance.current?.fitView({ padding: 0.25, duration: 400 })
     }, 200)
-  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, onLoadSamples, setNodes, setEdges])
+  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, onLoadSamples, handleOverrideBreak, handleExplain, setNodes, setEdges])
 
   const onInit = useCallback((instance) => {
     rfInstance.current = instance
@@ -710,6 +790,58 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
           />
         </ReactFlow>
       </div>
+
+      {/* ── Explanation Modal ───────────────────────────────────────── */}
+      {explainData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-5 max-w-md w-full shadow-2xl relative">
+            <button
+              onClick={() => setExplainData(null)}
+              className="absolute top-3.5 right-3.5 text-slate-400 hover:text-white text-base"
+            >
+              ✕
+            </button>
+            <div className="flex items-center gap-2 mb-2 text-cyan-400">
+              <span className="text-lg">💡</span>
+              <h3 className="font-bold text-sm tracking-wide uppercase">Chrona Decision Reasoning</h3>
+            </div>
+            <h4 className="text-base font-semibold text-white mb-2">{explainData.item?.title}</h4>
+            <p className="text-xs text-slate-300 leading-relaxed mb-3 whitespace-pre-wrap">
+              {explainData.explanation || explainData.item?.completion_note}
+            </p>
+            {explainData.factors && explainData.factors.length > 0 && (
+              <div className="space-y-1 mb-4">
+                <p className="text-[10px] uppercase font-bold text-slate-400">Decision Factors:</p>
+                {explainData.factors.map((f, i) => (
+                  <div key={i} className="text-xs text-cyan-200/90 flex items-center gap-1.5">
+                    <span>✦</span>
+                    <span>{f}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+              {explainData.item?.auto_rescheduled && (
+                <button
+                  onClick={() => {
+                    handleOverrideBreak(explainData.item.id, true)
+                    setExplainData(null)
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:brightness-110"
+                >
+                  ⚡ Place Strictly (Skip Break)
+                </button>
+              )}
+              <button
+                onClick={() => setExplainData(null)}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-white hover:bg-white/15"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

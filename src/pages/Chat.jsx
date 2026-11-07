@@ -13,7 +13,7 @@ const SUGGESTIONS = [
   'I have a flute class every Sunday at 5 PM',
 ]
 
-function Message({ msg, onNavigateTimeline }) {
+function Message({ msg, onNavigateTimeline, onQuickAction }) {
   const isUser = msg.role === 'user'
 
   return (
@@ -90,6 +90,26 @@ function Message({ msg, onNavigateTimeline }) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Quick action buttons (Decompression override / Confirmation) */}
+        {msg.quick_actions && msg.quick_actions.length > 0 && (
+          <div className="mt-3 pt-2.5 flex flex-wrap gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            {msg.quick_actions.map((qa, i) => (
+              <button
+                key={i}
+                onClick={() => onQuickAction && onQuickAction(qa)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border shadow-sm flex items-center gap-1.5 hover:scale-105 active:scale-95"
+                style={{
+                  background: qa.variant === 'warning' ? 'rgba(245, 158, 11, 0.18)' : qa.variant === 'primary' ? 'rgba(56, 189, 248, 0.18)' : 'rgba(255, 255, 255, 0.08)',
+                  borderColor: qa.variant === 'warning' ? 'rgba(245, 158, 11, 0.45)' : qa.variant === 'primary' ? 'rgba(56, 189, 248, 0.45)' : 'rgba(255, 255, 255, 0.2)',
+                  color: qa.variant === 'warning' ? '#fbbf24' : qa.variant === 'primary' ? '#7dd3fc' : '#cbd5e1',
+                }}
+              >
+                <span>{qa.label}</span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -222,10 +242,22 @@ export default function Chat() {
 
     let ocrText = ''
     if (currentFile && (currentFile.type?.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(currentFile.name || ''))) {
-      setOcrStatus('Scanning timetable image with OCR...')
+      setOcrStatus('Scanning timetable image with local OCR...')
       try {
-        const ocrRes = await Tesseract.recognize(currentFile, 'eng')
+        const worker = await Tesseract.createWorker('eng', 1, {
+          workerPath: '/tesseract/worker.min.js',
+          corePath: '/tesseract/tesseract-core.wasm.js',
+          langPath: '/tesseract',
+          gzip: true,
+          logger: (m) => {
+            if (m.status === 'recognizing text') {
+              setOcrStatus(`Scanning image (${Math.round((m.progress || 0) * 100)}%)...`)
+            }
+          }
+        })
+        const ocrRes = await worker.recognize(currentFile)
         ocrText = (ocrRes?.data?.text || '').trim()
+        await worker.terminate()
       } catch (err) {
         console.warn('OCR scan warning:', err)
       } finally {
@@ -269,6 +301,7 @@ export default function Chat() {
         clarification_needed: result.clarification_needed,
         schedule_trigger: result.schedule_trigger,
         decomposition: result.decomposition,
+        quick_actions: result.quick_actions || [],
       }
       setMessages((prev) => [...prev, assistantMsg])
     } catch (e) {
@@ -287,6 +320,40 @@ export default function Chat() {
     }
   }, [input, attachedFile, loading, sessionId])
 
+  const handleQuickAction = async (qa) => {
+    if (qa.action === 'override_break') {
+      setLoading(true)
+      try {
+        const res = await api.overrideBreak({
+          task_id: qa.task_id,
+          task_title: qa.task_title,
+          target_time: qa.target_time,
+          skip_break: qa.skip_break,
+        })
+        const confirmMsg = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: res.message || `Schedule updated for '${qa.task_title}'.`,
+          timestamp: new Date().toISOString(),
+          tasks_saved: res.item ? [res.item] : [],
+        }
+        setMessages((prev) => [...prev, confirmMsg])
+      } catch (err) {
+        console.error('Quick action failed:', err)
+      } finally {
+        setLoading(false)
+      }
+    } else if (qa.action === 'keep_break' || qa.action === 'dismiss') {
+      const confirmMsg = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Understood! Keeping the decompression break in place so you have time to recharge.`,
+        timestamp: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, confirmMsg])
+    }
+  }
+
   // Direct syllabus/document upload panel submit
   const handlePanelSubmit = async (e) => {
     e.preventDefault()
@@ -299,10 +366,17 @@ export default function Chat() {
         const formData = new FormData()
         formData.append('file', attachedFile)
         if (attachedFile.type?.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(attachedFile.name || '')) {
-          setOcrStatus('Scanning timetable image with OCR...')
+          setOcrStatus('Scanning timetable image with local OCR...')
           try {
-            const ocrRes = await Tesseract.recognize(attachedFile, 'eng')
+            const worker = await Tesseract.createWorker('eng', 1, {
+              workerPath: '/tesseract/worker.min.js',
+              corePath: '/tesseract/tesseract-core.wasm.js',
+              langPath: '/tesseract',
+              gzip: true,
+            })
+            const ocrRes = await worker.recognize(attachedFile)
             const ocrText = (ocrRes?.data?.text || '').trim()
+            await worker.terminate()
             if (ocrText) {
               formData.append('extracted_text', ocrText)
               if (!panelText.trim()) formData.append('text', ocrText)
@@ -473,7 +547,12 @@ export default function Chat() {
       {/* ── Messages Stream ────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.map((msg) => (
-          <Message key={msg.id} msg={msg} onNavigateTimeline={() => navigate('/calendar')} />
+          <Message
+            key={msg.id}
+            msg={msg}
+            onNavigateTimeline={() => navigate('/calendar')}
+            onQuickAction={handleQuickAction}
+          />
         ))}
 
         {loading && (

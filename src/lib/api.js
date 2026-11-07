@@ -145,6 +145,23 @@ export const api = {
     body: JSON.stringify({ user_id: TEST_USER_ID, ...data }),
   }),
 
+  overrideBreak: (data) => request('/api/schedule/override-break', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: TEST_USER_ID, ...data }),
+  }),
+
+  explainSchedule: (taskId) => request(`/api/schedule/explain/${taskId}`),
+
+  executeAgent: (taskId, action = null, instructions = null) => request('/api/agents/execute', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: TEST_USER_ID,
+      task_id: taskId,
+      action,
+      instructions,
+    }),
+  }),
+
   scheduleFixedDelete: (itemId) => request(`/api/schedule/fixed/${itemId}`, {
     method: 'DELETE',
   }),
