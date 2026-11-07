@@ -17,6 +17,7 @@ Run with: uvicorn server:app --port 8000 --reload
 """
 import os
 import sys
+import re
 import json
 import hashlib
 import traceback
@@ -124,6 +125,64 @@ def _sb_headers(service: bool = False) -> dict:
         "Prefer": "return=representation",
     }
 
+def _eval_in_memory_filter(item: dict, key: str, val: Any) -> bool:
+    target = str(val)
+    op = "eq"
+    if "." in target:
+        prefix = target.split(".", 1)[0]
+        if prefix in ["eq", "neq", "in", "lt", "lte", "gt", "gte"]:
+            op = prefix
+            target = target.split(".", 1)[1]
+
+    item_val = item.get(key)
+    if op == "eq":
+        return str(item_val or "") == target
+    elif op == "neq":
+        return str(item_val or "") != target
+    elif op == "in":
+        allowed = [x.strip() for x in target.strip("()").split(",")]
+        return str(item_val or "") in allowed
+
+    if item_val is None:
+        return False
+
+    # Check datetime range comparison
+    is_dt_target = False
+    target_dt = None
+    try:
+        if isinstance(target, str) and ("T" in target or (len(target) == 10 and "-" in target)):
+            target_dt = _parse_dt(target)
+            is_dt_target = target_dt is not None
+    except Exception:
+        pass
+
+    if is_dt_target and target_dt is not None:
+        item_dt = _parse_dt(item_val)
+        if not item_dt:
+            return False
+        if op == "lt": return item_dt < target_dt
+        elif op == "lte": return item_dt <= target_dt
+        elif op == "gt": return item_dt > target_dt
+        elif op == "gte": return item_dt >= target_dt
+        return True
+
+    # Numeric or string range comparison
+    try:
+        n_val = float(item_val)
+        n_tgt = float(target)
+        if op == "lt": return n_val < n_tgt
+        elif op == "lte": return n_val <= n_tgt
+        elif op == "gt": return n_val > n_tgt
+        elif op == "gte": return n_val >= n_tgt
+    except (ValueError, TypeError):
+        s_val = str(item_val)
+        if op == "lt": return s_val < target
+        elif op == "lte": return s_val <= target
+        elif op == "gt": return s_val > target
+        elif op == "gte": return s_val >= target
+
+    return True
+
 def sb_get(table: str, params: dict = None, service: bool = False) -> Any:
     try:
         resp = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), params=params, timeout=2)
@@ -132,14 +191,49 @@ def sb_get(table: str, params: dict = None, service: bool = False) -> Any:
     except Exception:
         pass
     # In-memory fallback
-    items = _in_memory_db.get(table, [])
-    # Basic user_id filter if present
-    if params and "user_id" in params:
-        uid = params["user_id"].replace("eq.", "")
-        items = [i for i in items if i.get("user_id") == uid]
+    items = list(_in_memory_db.get(table, []))
+    if params:
+        limit_val = None
+        order_val = None
+        for k, v in params.items():
+            if k == "limit":
+                try:
+                    limit_val = int(v)
+                except Exception:
+                    pass
+                continue
+            if k == "order":
+                order_val = str(v)
+                continue
+
+            items = [it for it in items if _eval_in_memory_filter(it, k, v)]
+
+        if order_val:
+            reverse = "desc" in order_val.lower()
+            order_col = order_val.split(".")[0].split(",")[0]
+            try:
+                items.sort(key=lambda x: str(x.get(order_col) or ""), reverse=reverse)
+            except Exception:
+                pass
+
+        if limit_val is not None and limit_val > 0:
+            items = items[:limit_val]
+
     return MockResponse(items, 200)
 
 def sb_post(table: str, data: dict | list, service: bool = True) -> Any:
+    # Reject dummy phantom tasks
+    if table == "schedule_items":
+        raw_items = data if isinstance(data, list) else [data]
+        valid_post = []
+        for it in raw_items:
+            t_clean = (it.get("title") or "").strip().lower()
+            if t_clean and t_clean not in ["pending task", "untitled", "task", "undefined", "null"]:
+                valid_post.append(it)
+        if not valid_post:
+            return MockResponse([], 201)
+        data = valid_post if isinstance(data, list) else valid_post[0]
+
     try:
         resp = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), json=data, timeout=2)
         if resp.status_code in [200, 201]:
@@ -1047,29 +1141,59 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             return c_s, c_e, note
 
     # Strategy 4: If target day is packed, spillover to subsequent days (Day + 1 to Day + 14)
-    # Strictly in daytime waking hours!
-    preferred_hour = 19 if is_dinner else (13 if is_lunch else 11)
+    # Strictly in daytime waking hours, prioritizing the user's requested hour!
+    orig_s = _parse_dt(to_reschedule.get("start_time"), user_tz) or _parse_dt(to_reschedule.get("fixed_start"), user_tz)
+    orig_local = orig_s.astimezone(tz) if orig_s else None
+    orig_hour = orig_local.hour if orig_local else None
+    orig_minute = orig_local.minute if orig_local else 0
+
+    candidate_hours = []
+    if orig_hour is not None:
+        candidate_hours.append(orig_hour)
+        if orig_hour >= 18:
+            # Evening events (Dinner, Date, Drinks, Movie, etc.)
+            for h in [orig_hour - 1, orig_hour + 1, 20, 19, 21, 18]:
+                if h not in candidate_hours and 17 <= h <= 21:
+                    candidate_hours.append(h)
+        elif 11 <= orig_hour <= 14:
+            # Midday / Lunch
+            for h in [12, 13, 14, 11]:
+                if h not in candidate_hours:
+                    candidate_hours.append(h)
+        else:
+            for h in [orig_hour + 1, orig_hour - 1, 11, 14, 15, 16, 17]:
+                if h not in candidate_hours and 8 <= h <= 21:
+                    candidate_hours.append(h)
+    elif is_dinner:
+        candidate_hours = [19, 20, 18, 21]
+    elif is_lunch:
+        candidate_hours = [13, 12, 14]
+    else:
+        candidate_hours = [11, 10, 14, 15, 16, 17, 18]
+
     for day_offset in range(1, 15):
         next_day = target_date + timedelta(days=day_offset)
         # If task has day of week (e.g. Sunday), only check matching day of week
         if day_match and next_day.weekday() != target_idx:
             continue
 
-        for h in [preferred_hour, preferred_hour + 1, preferred_hour - 1, 18, 15, 14, 11, 10]:
-            c_s_local = datetime(next_day.year, next_day.month, next_day.day, h, 0, tzinfo=tz)
+        for h in candidate_hours:
+            m = orig_minute if h == orig_hour else 0
+            c_s_local = datetime(next_day.year, next_day.month, next_day.day, h, m, tzinfo=tz)
             c_s = c_s_local.astimezone(timezone.utc)
             c_e = c_s + timedelta(minutes=dur)
             n_sleep = datetime(next_day.year, next_day.month, next_day.day, sh, sm, 0, tzinfo=tz).astimezone(timezone.utc)
             n_wake = datetime(next_day.year, next_day.month, next_day.day, wh, wm, 0, tzinfo=tz).astimezone(timezone.utc)
             if c_s >= n_wake and c_e <= n_sleep and is_slot_free(c_s, c_e):
                 time_str = c_s_local.strftime('%A, %b %d at %I:%M %p')
-                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {time_str} in optimal daytime hours."
+                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {time_str} at your requested time."
                 return c_s, c_e, note
 
-    # Sane daytime fallback (tomorrow morning or dinner time, never at night!)
+    # Sane daytime fallback (tomorrow at requested hour or dinner time, never at night!)
     fallback_day = target_date + timedelta(days=1)
-    fb_hour = 19 if is_dinner else (13 if is_lunch else 10)
-    fallback_s_local = datetime(fallback_day.year, fallback_day.month, fallback_day.day, fb_hour, 0, 0, tzinfo=tz)
+    fb_hour = orig_hour if (orig_hour and 8 <= orig_hour <= 21) else (19 if is_dinner else (13 if is_lunch else 10))
+    fb_min = orig_minute if fb_hour == orig_hour else 0
+    fallback_s_local = datetime(fallback_day.year, fallback_day.month, fallback_day.day, fb_hour, fb_min, 0, tzinfo=tz)
     fallback_s = fallback_s_local.astimezone(timezone.utc)
     return fallback_s, fallback_s + timedelta(minutes=dur), f"Rescheduled to {fallback_s_local.strftime('%A at %I:%M %p')}."
 
@@ -1083,10 +1207,13 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
     tz = user_tz or _get_default_tz()
     inferred = infer_task_properties(task_data, user_text=user_text)
     dur = int(inferred.get("duration_minutes") or 60)
+    t_clean = (inferred.get("title") or "").strip()
+    if not t_clean or t_clean.lower() in ["pending task", "untitled", "task", "undefined", "null"]:
+        return None, None
 
     item = {
         "user_id": user_id,
-        "title": inferred.get("title", "Untitled"),
+        "title": t_clean,
         "task_type": inferred.get("task_type", "task"),
         "duration_minutes": dur,
         "priority": inferred.get("priority", 3),
@@ -1237,6 +1364,17 @@ def auto_repair_existing_conflicts(user_id: str, user_tz: Optional[timezone] = N
 
     scheduled_items = [it for it in resp.json() if it.get("start_time")]
 
+    # Purge any dummy phantom tasks
+    valid_items = []
+    for it in scheduled_items:
+        t_clean = (it.get("title") or "").strip().lower()
+        if not t_clean or t_clean in ["pending task", "untitled", "task", "undefined", "null"]:
+            if it.get("id"):
+                sb_delete("schedule_items", params={"id": f"eq.{it['id']}", "user_id": f"eq.{user_id}"})
+            continue
+        valid_items.append(it)
+    scheduled_items = valid_items
+
     # 1. Sanitize naive, missing, or inverted timestamps, and correct night-time anomalies
     for it in scheduled_items:
         s_dt = _parse_dt(it.get("start_time"), user_tz)
@@ -1261,9 +1399,9 @@ def auto_repair_existing_conflicts(user_id: str, user_tz: Optional[timezone] = N
             patch["end_time"] = e_dt.isoformat()
             needs_patch = True
 
-        # Clamp middle-of-the-night tasks (e.g. 1:00 AM or 2:15 AM) into daytime focus hours
+        # Clamp middle-of-the-night tasks (e.g. 1:00 AM or 2:15 AM) into sane focus hours
         if s_dt and not it.get("strict_time") and (s_dt.astimezone(tz).hour >= 22 or s_dt.astimezone(tz).hour < 8):
-            f_h = 19 if "dinner" in t_title else (13 if "lunch" in t_title else 11)
+            f_h = 20 if ("date" in t_title or "party" in t_title or "drinks" in t_title) else (19 if "dinner" in t_title else (13 if "lunch" in t_title else 11))
             s_dt = s_dt.astimezone(tz).replace(hour=f_h, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
             e_dt = s_dt + timedelta(minutes=dur)
             patch["start_time"] = s_dt.isoformat()
@@ -1516,6 +1654,11 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - When extracted text from an uploaded timetable or syllabus image/document is provided:
      * Extract ALL classes, lectures, labs, exams, and assignments.
      * Keep college lectures and exams as fixed (priority 1), and workouts/study as flexible (priority 3).
+6. RESCHEDULING & MOVING EXISTING TASKS (CRITICAL):
+   - When the user asks to move, reschedule, postpone, or change the time/date of an existing task (e.g. "move the date to 9pm on sunday", "reschedule math exam to 10am"):
+   - You MUST include the updated task in the "tasks" array!
+   - Set fixed_start to the new requested ISO time (e.g. Sunday 9:00 PM), fixed_end to fixed_start + duration, and set action to "reschedule".
+   - NEVER leave "tasks" empty when the user tells you to move or reschedule a task! If "tasks" is empty, the database cannot be updated!
 
 When extracting tasks/events, return valid JSON in this exact structure:
 {
@@ -1633,11 +1776,62 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
             recent_tasks_str += f"- Title: \"{rt.get('title')}\", Scheduled: {rt.get('fixed_start') or rt.get('start_time')}, Duration: {rt.get('duration_minutes')}m, Deadline: {rt.get('deadline')}\n"
         recent_tasks_str += "\nCRITICAL RULE: If the user provides durations, prep time, or adjustments (e.g. 'it will be 45 minutes long', '2 hours prep beforehand', 'make it 30 mins'), they are modifying the active task above! DO NOT ASK FOR TITLE OR DATE AGAIN! Update the active task and/or add the prep block immediately in the 'tasks' array!\n"
 
+    # Check move / reschedule intent for an existing task
+    is_move_cmd = bool(re.search(r'\b(move|reschedule|shift|postpone|push|change\s+time|set\s+time)\b', message.lower()))
+    if is_move_cmd:
+        all_user_items = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"}).json() or []
+        sorted_existing = sorted(all_user_items, key=lambda x: len(x.get("title") or ""), reverse=True)
+        matched_item = None
+        msg_lower = message.lower()
+        for ex in sorted_existing:
+            ex_title = (ex.get("title") or "").strip().lower()
+            if not ex_title or ex_title in ["pending task", "untitled", "task"]:
+                continue
+            pattern = r'\b' + re.escape(ex_title) + r'\b'
+            if re.search(pattern, msg_lower):
+                matched_item = ex
+                break
+
+        if matched_item:
+            t_day = current_hints.get("day_str") or "Sunday"
+            t_time = current_hints.get("time_str") or "9:00 PM"
+            target_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
+            dur = int(matched_item.get("duration_minutes") or 60)
+            target_end = target_start + timedelta(minutes=dur)
+
+            patch_data = {
+                "start_time": target_start.isoformat(),
+                "end_time": target_end.isoformat(),
+                "status": "scheduled",
+                "strict_time": True,
+                "auto_rescheduled": False,
+                "completion_note": f"Moved to {target_start.astimezone(tz).strftime('%A, %b %d at %I:%M %p')} as requested."
+            }
+            sb_patch("schedule_items", patch_data, params={"id": f"eq.{matched_item['id']}", "user_id": f"eq.{user_id}"})
+            matched_item.update(patch_data)
+
+            time_display = target_start.astimezone(tz).strftime('%A, %b %d at %I:%M %p')
+            resp_msg = f"I've moved '{matched_item.get('title')}' to {time_display}."
+
+            await cache_del(draft_cache_key)
+            history_turns.append({"role": "user", "content": message})
+            history_turns.append({"role": "assistant", "content": resp_msg})
+            await cache_set(history_cache_key, json.dumps(history_turns[-10:]), ex=7200)
+
+            return {
+                "action": "reschedule",
+                "message": resp_msg,
+                "tasks": [matched_item],
+                "clarification_needed": None,
+                "schedule_trigger": True
+            }
+
     pending_draft_str = ""
-    if draft_dict.get("title") or draft_dict.get("time_str"):
+    clean_draft_title = (draft_dict.get("title") or "").strip()
+    if clean_draft_title and clean_draft_title.lower() not in ["pending task", "untitled", "task"]:
         pending_draft_str = (
             f"\nACCUMULATED TASK IN PROGRESS ACROSS TURNS:\n"
-            f"- Event Title: \"{draft_dict.get('title', 'Pending Task')}\"\n"
+            f"- Event Title: \"{clean_draft_title}\"\n"
             f"- Scheduled Time/Day: \"{draft_dict.get('day_str', '')} {draft_dict.get('time_str', '')}\"\n"
             f"- Target Duration: {draft_dict.get('duration_minutes', 60)} minutes\n"
             f"MANDATORY INSTRUCTION: You now have the accumulated details for this task. "
@@ -2045,7 +2239,23 @@ async def chat_upload(
         attachment_context = f"\n[Timetable / Syllabus OCR Extracted Content ({file_name})]:\n{file_text[:5000]}"
         full_user_input = f"{full_user_input}\n{attachment_context}".strip()
     elif is_image and not file_text and not full_user_input:
-        full_user_input = f"I uploaded timetable image {file_name}. Please help me extract my schedule."
+        session_key = session_id or "default"
+        await cache_del(f"chrona:draft:{user_id}:{session_key}")
+        return {
+            "message": (
+                f"I received your uploaded image '{file_name}'. I wasn't able to automatically detect legible text in this image. "
+                f"Could you please type or paste your key schedule commitments (e.g. 'Math exam Sunday 8-9 PM, Dinner at 9 PM')? "
+                f"I'll immediately organize your schedule with conflict resolution and decompression breaks!"
+            ),
+            "action": "clarification",
+            "tasks_extracted": [],
+            "tasks_saved": [],
+            "file_name": file_name,
+            "clarification_needed": None,
+            "schedule_trigger": False,
+            "decomposition": None,
+            "quick_actions": [],
+        }
 
     if not full_user_input:
         full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
@@ -3092,49 +3302,74 @@ async def behavior_update(request: BehaviorUpdateRequest, user_id: str = Depends
 # ---- CONTEXT / MEMORY ----
 
 @app.get("/api/context")
-async def get_user_context(user_id: str = Depends(get_user_id)):
+async def get_user_context(req: Request, user_id: str = Depends(get_user_id)):
     """Get user's full context: profile, upcoming schedule, pending tasks."""
     profile = await get_behavior_profile(user_id)
+    user_tz = get_user_timezone(req)
 
     now = _now_utc()
-    today_start = now.replace(hour=0, minute=0, second=0)
-    week_end    = today_start + timedelta(days=7)
+    now_local = now.astimezone(user_tz)
+    today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end_local = today_start_local + timedelta(days=1)
+    week_end_local = today_start_local + timedelta(days=7)
 
-    # Today's schedule
-    today_items = get_user_schedule(user_id, today_start, today_start + timedelta(days=1))
+    today_start = today_start_local.astimezone(timezone.utc)
+    today_end = today_end_local.astimezone(timezone.utc)
+    week_end = week_end_local.astimezone(timezone.utc)
 
-    # This week
-    week_items = get_user_schedule(user_id, today_start, week_end)
-
-    # Pending tasks
-    pending_resp = sb_get("schedule_items", {
+    # Fetch all user items to build consistent, disjoint partitions
+    all_resp = sb_get("schedule_items", {
         "user_id": f"eq.{user_id}",
-        "status": "eq.pending",
-        "order": "priority.asc,deadline.asc.nullslast",
-        "limit": "20",
+        "status": "neq.cancelled",
     })
-    pending = pending_resp.json() if pending_resp.status_code == 200 else []
+    all_items = all_resp.json() if all_resp.status_code == 200 else []
 
-    # Overdue
-    overdue_resp = sb_get("schedule_items", {
-        "user_id": f"eq.{user_id}",
-        "status": "in.(scheduled,pending)",
-        "end_time": f"lt.{now.isoformat()}",
-        "order": "end_time.asc",
-        "limit": "10",
-    })
-    overdue = overdue_resp.json() if overdue_resp.status_code == 200 else []
+    # Filter out any phantom dummy tasks
+    all_items = [
+        it for it in all_items
+        if (it.get("title") or "").strip().lower() not in ["pending task", "untitled", "task", "undefined", "null"]
+    ]
 
-    # Upcoming deadlines
-    upcoming_resp = sb_get("schedule_items", {
-        "user_id": f"eq.{user_id}",
-        "deadline": f"gte.{now.isoformat()}",
-        "deadline": f"lte.{week_end.isoformat()}",
-        "status": "neq.completed",
-        "order": "deadline.asc",
-        "limit": "10",
-    })
-    upcoming_deadlines = upcoming_resp.json() if upcoming_resp.status_code == 200 else []
+    # Today's schedule: items scheduled on today's local date
+    today_items = []
+    for it in all_items:
+        s = _parse_dt(it.get("start_time"), user_tz)
+        if s and today_start <= s < today_end and it.get("status") in ["scheduled", "rescheduled", "completed"]:
+            today_items.append(it)
+    today_items.sort(key=lambda x: _parse_dt(x.get("start_time"), user_tz) or now)
+
+    # This week's schedule
+    week_items = []
+    for it in all_items:
+        s = _parse_dt(it.get("start_time"), user_tz)
+        if s and today_start <= s < week_end and it.get("status") in ["scheduled", "rescheduled", "completed"]:
+            week_items.append(it)
+    week_items.sort(key=lambda x: _parse_dt(x.get("start_time"), user_tz) or now)
+
+    # Pending tasks: tasks not yet assigned a specific time slot
+    pending = [
+        it for it in all_items
+        if it.get("status") == "pending" and not it.get("start_time")
+    ]
+    pending.sort(key=lambda x: int(x.get("priority") or 3))
+
+    # Overdue tasks: past uncompleted items
+    overdue = []
+    for it in all_items:
+        e = _parse_dt(it.get("end_time"), user_tz)
+        if e and e < now and it.get("status") in ["scheduled", "pending", "rescheduled"]:
+            overdue.append(it)
+    overdue.sort(key=lambda x: _parse_dt(x.get("end_time"), user_tz) or now)
+
+    # Upcoming deadlines: tasks that have an explicit deadline in the future
+    upcoming_deadlines = []
+    for it in all_items:
+        d_str = it.get("deadline")
+        if d_str and it.get("status") != "completed":
+            d_dt = _parse_dt(d_str, user_tz)
+            if d_dt and now <= d_dt <= week_end:
+                upcoming_deadlines.append(it)
+    upcoming_deadlines.sort(key=lambda x: _parse_dt(x.get("deadline"), user_tz) or now)
 
     return {
         "profile": profile,
@@ -3330,6 +3565,13 @@ async def startup():
     print(f"   Groq:     {'✅' if groq_client else '❌'}")
     print(f"   Redis:    {'✅' if UPSTASH_REDIS_URL else '⚡ memory fallback'}")
     print(f"   EDF:      {'✅' if _scheduling_available else '⚠️ AI fallback'}")
+
+    # Purge any dummy phantom tasks from memory
+    if "schedule_items" in _in_memory_db:
+        _in_memory_db["schedule_items"] = [
+            it for it in _in_memory_db["schedule_items"]
+            if (it.get("title") or "").strip().lower() not in ["pending task", "untitled", "task", "undefined", "null"]
+        ]
 
 if __name__ == "__main__":
     import uvicorn

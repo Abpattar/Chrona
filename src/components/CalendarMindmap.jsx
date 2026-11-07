@@ -918,12 +918,15 @@ export default function CalendarMindmap({ onOpenRepair }) {
         status: e.status || 'scheduled',
       }))
 
-      // Deduplicate by title/id
-      const combined = [...schedItems]
-      const existingTitles = new Set(schedItems.map(s => (s.title || '').toLowerCase().trim()))
-      for (const ev of evtItems) {
-        if (!existingTitles.has((ev.title || '').toLowerCase().trim())) {
-          combined.push(ev)
+      // Deduplicate by title/id and filter phantom dummy tasks
+      const combined = []
+      const existingTitles = new Set()
+      for (const it of [...schedItems, ...evtItems]) {
+        const t = (it.title || '').trim().toLowerCase()
+        if (!t || ['pending task', 'untitled', 'task', 'undefined', 'null'].includes(t)) continue
+        if (!existingTitles.has(t)) {
+          existingTitles.add(t)
+          combined.push(it)
         }
       }
 

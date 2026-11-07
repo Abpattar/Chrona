@@ -731,6 +731,211 @@ class TestChronaScenarios:
             # Local end must be <= 22:30
             assert (e_loc.hour < 22 or (e_loc.hour == 22 and e_loc.minute <= 30)), f"Slot end {e_loc} violates bedtime 22:30!"
 
+    def test_date_at_9pm_rescheduled_to_sunday_at_9pm_not_11am(self):
+        """
+        User Problem Reported:
+        When user scheduled 'date at 9pm' and Saturday 9pm had a movie,
+        Chrona moved the date to Sunday, but chose 11:00 AM instead of 9:00 PM!
+        Verify that rescheduling preserves the user's requested hour (9:00 PM) on the next day!
+        """
+        from backend.server import find_optimal_reschedule_slot, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        # Saturday Nov 7 already has Dinner (7:30 PM - 8:30 PM) and Movie (9:00 PM - 10:00 PM)
+        sat_dinner = {
+            "id": "din-1",
+            "title": "Dinner",
+            "task_type": "social",
+            "priority": 3,
+            "flexibility": False,
+            "start_time": datetime(2026, 11, 7, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(2026, 11, 7, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+        }
+        # Saturday Nov 7 Movie: 9:00 PM - 10:00 PM (15:30 - 16:30 UTC)
+        sat_movie = {
+            "id": "movie-1",
+            "title": "Movie",
+            "task_type": "fixed",
+            "priority": 1,
+            "flexibility": False,
+            "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+        }
+        # Saturday Nov 7 Date: requested for 9:00 PM - 10:00 PM
+        sat_date = {
+            "id": "date-1",
+            "title": "date",
+            "task_type": "social",
+            "priority": 3,
+            "flexibility": True,
+            "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "duration_minutes": 60,
+        }
+
+        # Saturday evening is completely packed around Movie. Reschedule date.
+        all_sat_items = [sat_dinner, sat_movie]
+        new_start, new_end, note = find_optimal_reschedule_slot(sat_date, sat_movie, all_sat_items, user_tz=ist_tz)
+        res_loc = new_start.astimezone(ist_tz)
+
+        # Must NOT be 11 AM!
+        assert res_loc.hour != 11, f"Rescheduled date should NOT be 11 AM! Got {res_loc.strftime('%I:%M %p')}"
+        # Must be Sunday at 9:00 PM!
+        assert res_loc.weekday() == 6, f"Should be Sunday (weekday 6), got {res_loc.strftime('%A')}"
+        assert res_loc.hour == 21, f"Should preserve requested 9:00 PM hour, got {res_loc.strftime('%I:%M %p')}"
+
+    @pytest.mark.asyncio
+    async def test_chat_move_date_to_sunday_9pm_updates_database(self):
+        """
+        User Problem Reported:
+        'when I asked the chat to move the date of the date to 9pm at night on sunday,
+        it didn't do anything but said it did'
+        Verify that chat move command updates the existing task record in DB and sets start_time to Sunday 9:00 PM!
+        """
+        from backend.server import process_chat_message, _in_memory_db, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-move-date-user"
+
+        # Pre-seed an existing date item in database
+        _in_memory_db["schedule_items"] = [
+            {
+                "id": "date-existing-id",
+                "user_id": user_id,
+                "title": "date",
+                "start_time": datetime(2026, 11, 8, 11, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "end_time": datetime(2026, 11, 8, 12, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "duration_minutes": 60,
+                "status": "scheduled",
+            }
+        ]
+
+        # Execute user chat command
+        res = await process_chat_message(
+            user_id,
+            "move the date of the date to 9pm at night on sunday",
+            user_tz=ist_tz
+        )
+
+        assert res.get("action") == "reschedule"
+        assert len(res.get("tasks", [])) == 1
+
+        # Check DB update
+        updated_item = next((it for it in _in_memory_db["schedule_items"] if it["id"] == "date-existing-id"), None)
+        assert updated_item is not None
+        s_dt = _parse_dt(updated_item["start_time"]).astimezone(ist_tz)
+        assert s_dt.weekday() == 6, f"Should be Sunday, got {s_dt.strftime('%A')}"
+        assert s_dt.hour == 21, f"Should be 9:00 PM, got {s_dt.strftime('%I:%M %p')}"
+
+    @pytest.mark.asyncio
+    async def test_image_upload_without_text_does_not_create_pending_task(self):
+        """
+        User Problem Reported:
+        'I tried to give a image as input, but the task scheduled is called pending task'
+        Verify that uploading an image without detectable text does NOT insert a phantom 'Pending Task' into DB!
+        """
+        from backend.server import chat_upload, _in_memory_db
+        from starlette.requests import Request
+        from unittest.mock import MagicMock
+
+        user_id = "test-image-upload-user"
+        _in_memory_db["schedule_items"] = []
+
+        # Mock request with user timezone
+        req = MagicMock(spec=Request)
+        req.headers = {"x-timezone": "Asia/Kolkata", "x-timezone-offset": "330"}
+
+        # Simulate upload of image where file has no legible text
+        mock_file = MagicMock()
+        mock_file.filename = "WhatsApp Image 2026-10-22 at 19.16.27.jpeg"
+        mock_file.read = MagicMock(return_value=b"fake image bytes")
+
+        res = await chat_upload(
+            req=req,
+            message="",
+            file=mock_file,
+            extracted_text="",
+            user_id=user_id,
+        )
+
+        assert "wasn't able to automatically detect legible text" in res["message"]
+        assert len(res["tasks_saved"]) == 0
+
+        # Verify database has NO dummy 'Pending Task'
+        phantom_tasks = [it for it in _in_memory_db["schedule_items"] if "pending task" in it.get("title", "").lower()]
+        assert len(phantom_tasks) == 0, f"Found phantom tasks in database: {phantom_tasks}"
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_disjoint_partitions_no_duplicates(self):
+        """
+        User Problem Reported:
+        Dashboard repeated Dinner and Movie in UP NEXT, OVERDUE, UPCOMING DEADLINES, and PENDING.
+        Verify /api/context filters disjoint partitions with zero phantom deadlines!
+        """
+        from backend.server import get_user_context, _in_memory_db
+        from starlette.requests import Request
+        from unittest.mock import MagicMock
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-context-user"
+
+        # Today is Nov 7
+        # 1. Dinner tonight (7:30 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
+        # 2. Movie tonight (9:00 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
+        # 3. Flute class (pending, no start time) -> should be in pending, NOT today
+        _in_memory_db["schedule_items"] = [
+            {
+                "id": "din-1",
+                "user_id": user_id,
+                "title": "Dinner",
+                "start_time": datetime(2026, 11, 7, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "end_time": datetime(2026, 11, 7, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "status": "scheduled",
+            },
+            {
+                "id": "mov-1",
+                "user_id": user_id,
+                "title": "Movie",
+                "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "status": "scheduled",
+            },
+            {
+                "id": "flute-1",
+                "user_id": user_id,
+                "title": "Flute practice",
+                "status": "pending",
+                "duration_minutes": 60,
+            }
+        ]
+
+        req = MagicMock(spec=Request)
+        req.headers = {"x-timezone": "Asia/Kolkata", "x-timezone-offset": "330"}
+
+        ctx = await get_user_context(req=req, user_id=user_id)
+
+        # Today should only have Dinner and Movie
+        today_titles = [it["title"] for it in ctx["today"]]
+        assert "Dinner" in today_titles
+        assert "Movie" in today_titles
+        assert "Flute practice" not in today_titles
+
+        # Pending should only have Flute practice
+        pending_titles = [it["title"] for it in ctx["pending_tasks"]]
+        assert "Flute practice" in pending_titles
+        assert "Dinner" not in pending_titles
+        assert "Movie" not in pending_titles
+
+        # Overdue should be empty (both items are in future)
+        assert len(ctx["overdue"]) == 0
+
+        # Upcoming deadlines should be empty (none of these have deadlines!)
+        assert len(ctx["upcoming_deadlines"]) == 0
+
+
 
 
 
