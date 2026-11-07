@@ -358,4 +358,57 @@ class TestChronaScenarios:
         assert auto_rescheduled[0]["auto_rescheduled"] is True
         assert auto_rescheduled[0]["start_time"] == (start + timedelta(days=1, hours=10)).isoformat()
 
+    def test_auto_collision_resolution_exam_vs_dinner(self):
+        """
+        Verify that when a critical fixed exam (Math exam) and a flexible social event
+        (Dinner with friends) are scheduled at the exact same time (Sun 8 PM):
+        1. Math exam is classified Priority 1, flexibility: False.
+        2. Dinner with friends is classified Priority 3, flexibility: True.
+        3. Conflict is detected and Dinner is automatically rescheduled to an optimal free slot.
+        4. No time overlap exists between the two events.
+        """
+        from backend.server import infer_task_properties, find_optimal_reschedule_slot
+
+        exam_raw = {
+            "title": "Math exam",
+            "start_time": "2026-11-08T20:00:00",
+            "end_time": "2026-11-08T22:00:00",
+            "task_type": "fixed",
+            "priority": 1,
+            "duration_minutes": 120,
+        }
+        dinner_raw = {
+            "title": "Dinner with friends",
+            "start_time": "2026-11-08T20:00:00",
+            "end_time": "2026-11-08T21:00:00",
+            "task_type": "fixed",
+            "priority": 1,
+            "duration_minutes": 60,
+        }
+
+        # Verify inference
+        exam = infer_task_properties(exam_raw)
+        dinner = infer_task_properties(dinner_raw)
+
+        assert exam["priority"] == 1
+        assert exam["flexibility"] is False
+        assert exam["task_type"] == "exam"
+
+        assert dinner["priority"] >= 3
+        assert dinner["flexibility"] is True
+        assert dinner["task_type"] == "social"
+
+        # Verify optimal slot auto-rescheduling
+        new_start, new_end = find_optimal_reschedule_slot(dinner, exam, [exam])
+        assert new_start is not None
+        assert new_end is not None
+
+        # Verify no overlap
+        exam_start = datetime.fromisoformat(exam["start_time"]).replace(tzinfo=timezone.utc)
+        exam_end = datetime.fromisoformat(exam["end_time"]).replace(tzinfo=timezone.utc)
+        assert not (new_start < exam_end and new_end > exam_start), "Rescheduled slot must not overlap with exam!"
+        # Verify it was scheduled on the same day (Sunday Nov 8)
+        assert new_start.date() == exam_start.date()
+
+
 

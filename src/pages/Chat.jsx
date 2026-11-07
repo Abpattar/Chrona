@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import dayjs from 'dayjs'
+import Tesseract from 'tesseract.js'
 
 const SUGGESTIONS = [
   'I have college from 9 AM to 4 PM every weekday',
@@ -144,6 +145,7 @@ export default function Chat() {
   const [dragActive, setDragActive] = useState(false)
   const [showUploadPanel, setShowUploadPanel] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  const [ocrStatus, setOcrStatus] = useState('')
   const [sessionId] = useState(() => `session-${Date.now()}`)
 
   // Upload drawer state
@@ -218,10 +220,23 @@ export default function Chat() {
     const currentText = input.trim()
     const currentFile = attachedFile
 
+    let ocrText = ''
+    if (currentFile && (currentFile.type?.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(currentFile.name || ''))) {
+      setOcrStatus('Scanning timetable image with OCR...')
+      try {
+        const ocrRes = await Tesseract.recognize(currentFile, 'eng')
+        ocrText = (ocrRes?.data?.text || '').trim()
+      } catch (err) {
+        console.warn('OCR scan warning:', err)
+      } finally {
+        setOcrStatus('')
+      }
+    }
+
     const userMsg = {
       id: Date.now().toString(),
       role: 'user',
-      content: currentText || (currentFile ? `Uploaded ${currentFile.name} for schedule extraction` : ''),
+      content: currentText || (currentFile ? `Uploaded ${currentFile.name} for schedule extraction${ocrText ? ` (OCR extracted: "${ocrText.slice(0, 100).replace(/\s+/g, ' ')}...")` : ''}` : ''),
       attachedFile: currentFile ? currentFile.name : null,
       timestamp: new Date().toISOString(),
     }
@@ -237,6 +252,7 @@ export default function Chat() {
         const formData = new FormData()
         formData.append('file', currentFile)
         if (currentText) formData.append('message', currentText)
+        if (ocrText) formData.append('extracted_text', ocrText)
         formData.append('session_id', sessionId)
         result = await api.chatUpload(formData)
       } else {
@@ -282,6 +298,21 @@ export default function Chat() {
       if (attachedFile) {
         const formData = new FormData()
         formData.append('file', attachedFile)
+        if (attachedFile.type?.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(attachedFile.name || '')) {
+          setOcrStatus('Scanning timetable image with OCR...')
+          try {
+            const ocrRes = await Tesseract.recognize(attachedFile, 'eng')
+            const ocrText = (ocrRes?.data?.text || '').trim()
+            if (ocrText) {
+              formData.append('extracted_text', ocrText)
+              if (!panelText.trim()) formData.append('text', ocrText)
+            }
+          } catch (err) {
+            console.warn('Panel OCR warning:', err)
+          } finally {
+            setOcrStatus('')
+          }
+        }
         if (panelText.trim()) formData.append('text', panelText.trim())
         res = await api.processEvent(formData)
       } else {
@@ -503,6 +534,14 @@ export default function Chat() {
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {/* OCR Scanning Status Indicator */}
+        {ocrStatus && (
+          <div className="mb-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs animate-pulse font-mono">
+            <div className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+            <span>⚡ {ocrStatus}</span>
           </div>
         )}
 

@@ -20,8 +20,11 @@ import { api, TEST_USER_ID } from '../lib/api'
 export function getNodeTheme(item) {
   const isCompleted = item.status === 'completed'
   const isPending = item.status === 'pending' || !item.start_time
-  const isRescheduled = item.status === 'rescheduled' || item.auto_rescheduled
-  const isFixed = item.task_type === 'fixed' || item.flexibility === false
+  const isRescheduled = item.status === 'rescheduled' || !!item.auto_rescheduled || !!item.completion_note?.includes('Auto-rescheduled')
+  const titleLower = (item.title || '').toLowerCase()
+  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout|movie|gym|workout|flute|practice/i.test(titleLower)
+  const isExamOrClass = item.task_type === 'exam' || item.task_type === 'class' || /exam|midterm|final|quiz|test|lecture/i.test(titleLower)
+  const isFixed = !isRescheduled && !isSocial && (isExamOrClass || item.task_type === 'fixed' || item.flexibility === false)
   const priority = Number(item.priority || 3)
 
   if (isCompleted) {
@@ -49,13 +52,18 @@ export function getNodeTheme(item) {
   }
 
   if (isFixed) {
+    const fixedLabel = (item.task_type === 'exam' || /exam|midterm|final/i.test(titleLower))
+      ? '🔒 FIXED EXAM'
+      : (item.task_type === 'class' || /lecture|class/i.test(titleLower))
+        ? '🔒 FIXED CLASS'
+        : '🔒 FIXED'
     return {
       border: '#a855f7',
       bg: 'rgba(168, 85, 247, 0.14)',
       glow: '0 0 18px rgba(168, 85, 247, 0.35)',
       badgeBg: 'rgba(168, 85, 247, 0.22)',
       badgeText: '#c084fc',
-      label: '🔒 FIXED',
+      label: fixedLabel,
       textStyle: 'text-white font-semibold',
     }
   }
@@ -69,7 +77,7 @@ export function getNodeTheme(item) {
         glow: '0 0 22px rgba(239, 68, 68, 0.45)',
         badgeBg: 'rgba(239, 68, 68, 0.25)',
         badgeText: '#f87171',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (CRITICAL)' : '⚡ CRITICAL',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED (CRITICAL)' : '⚡ CRITICAL (P1)',
         textStyle: 'text-red-100 font-bold',
       }
     case 2:
@@ -79,7 +87,7 @@ export function getNodeTheme(item) {
         glow: '0 0 18px rgba(249, 115, 22, 0.35)',
         badgeBg: 'rgba(249, 115, 22, 0.24)',
         badgeText: '#fb923c',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : '★ HIGH PRIORITY',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : '★ HIGH (P2)',
         textStyle: 'text-orange-100 font-semibold',
       }
     case 3:
@@ -89,7 +97,7 @@ export function getNodeTheme(item) {
         glow: '0 0 16px rgba(6, 182, 212, 0.3)',
         badgeBg: 'rgba(6, 182, 212, 0.22)',
         badgeText: '#38bdf8',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED' : '● NORMAL',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED' : '● NORMAL (P3)',
         textStyle: 'text-cyan-100 font-semibold',
       }
     default:
@@ -99,7 +107,7 @@ export function getNodeTheme(item) {
         glow: '0 0 12px rgba(139, 92, 246, 0.25)',
         badgeBg: 'rgba(139, 92, 246, 0.2)',
         badgeText: '#a78bfa',
-        label: isRescheduled ? '↻ RESCHEDULED' : '○ LOW',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED (LOW)' : '○ LOW (P4)',
         textStyle: 'text-slate-200',
       }
   }
@@ -183,6 +191,12 @@ function ScheduleTaskNode({ data }) {
         {item.deadline && (
           <div className="text-[9px] text-slate-400 font-mono truncate">
             Due: {dayjs(item.deadline).format('MMM D, h:mm A')}
+          </div>
+        )}
+
+        {(item.completion_note || item.reschedule_reason) && (
+          <div className="text-[9px] text-amber-300/90 font-mono truncate" title={item.completion_note || item.reschedule_reason}>
+            ↻ {item.completion_note || item.reschedule_reason}
           </div>
         )}
       </div>

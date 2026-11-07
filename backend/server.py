@@ -630,6 +630,315 @@ def compute_free_slots(
     return free
 
 # ==============================
+# INTELLIGENT TASK INFERENCE & CONFLICT RESOLUTION ENGINE
+# ==============================
+
+def infer_task_properties(task_dict: dict) -> dict:
+    """
+    Intelligently infer task type, priority, and flexibility based on title and context.
+    Exams, classes, tests, appointments, flights are hard commitments (Priority 1, flexibility: False).
+    Dinners, social hangouts, workouts, and personal tasks are flexible (Priority 3/4, flexibility: True).
+    """
+    title = (task_dict.get("title") or "").strip().lower()
+    task_type = (task_dict.get("task_type") or "").strip().lower()
+
+    hard_keywords = [
+        "exam", "midterm", "final", "quiz", "test", "lecture", "class",
+        "doctor", "dentist", "flight", "interview", "presentation", "lab", "surgery"
+    ]
+    is_hard = any(k in title for k in hard_keywords) or task_type in ["exam", "class", "lecture", "quiz"]
+
+    social_keywords = [
+        "dinner", "lunch", "breakfast", "brunch", "coffee", "drinks",
+        "hang out", "hangout", "friends", "party", "movie", "game", "meet friends", "eating", "restaurant", "club"
+    ]
+    is_social = any(k in title for k in social_keywords)
+
+    workout_keywords = [
+        "gym", "workout", "exercise", "run", "running", "yoga", "swimming", "flute", "practice", "piano", "guitar"
+    ]
+    is_workout = any(k in title for k in workout_keywords)
+
+    res = dict(task_dict)
+
+    if is_hard:
+        res["task_type"] = res.get("task_type") if res.get("task_type") in ["exam", "class", "quiz"] else "exam"
+        res["priority"] = 1
+        res["flexibility"] = False
+    elif is_social:
+        res["task_type"] = "social"
+        res["priority"] = max(int(res.get("priority") or 3), 3)
+        res["flexibility"] = True
+    elif is_workout:
+        res["task_type"] = "workout"
+        res["priority"] = int(res.get("priority") or 3)
+        res["flexibility"] = True
+    else:
+        if "flexibility" not in res:
+            res["flexibility"] = True
+        if "priority" not in res:
+            res["priority"] = int(res.get("priority") or 3)
+
+    return res
+
+def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list) -> tuple:
+    """
+    Find the best, optimal, non-overlapping free slot on the same day for a flexible task.
+    Prefers:
+    1. Before the anchor event (e.g. 6:30 PM - 7:30 PM before an 8:00 PM exam).
+    2. After the anchor event (e.g. 10:00 PM - 11:00 PM after exam).
+    3. Next closest free slot on that day.
+    """
+    dur = int(to_reschedule.get("duration_minutes") or 60)
+    anchor_start = _parse_dt(anchor.get("start_time"))
+    anchor_end = _parse_dt(anchor.get("end_time"))
+    if not anchor_start or not anchor_end:
+        now = _now_utc()
+        c_s = now.replace(hour=14, minute=0, second=0, microsecond=0)
+        return c_s, c_s + timedelta(minutes=dur)
+
+    def has_conflict(c_start, c_end):
+        for it in all_items:
+            if it.get("id") and to_reschedule.get("id") and it.get("id") == to_reschedule.get("id"):
+                continue
+            if (it.get("title") or "").strip().lower() == (to_reschedule.get("title") or "").strip().lower():
+                continue
+            it_s = _parse_dt(it.get("start_time"))
+            it_e = _parse_dt(it.get("end_time"))
+            if it_s and it_e:
+                if c_start < it_e and c_end > it_s:
+                    return True
+        return False
+
+    # Candidate 1: Before anchor event (clean buffer of 15-30m)
+    pre_end = anchor_start - timedelta(minutes=15)
+    pre_start = pre_end - timedelta(minutes=dur)
+    if pre_start.minute not in [0, 30]:
+        pre_start = pre_start.replace(minute=0 if pre_start.minute < 30 else 30, second=0, microsecond=0)
+        pre_end = pre_start + timedelta(minutes=dur)
+
+    if pre_start.hour >= 8 and (pre_end + timedelta(minutes=10)) <= anchor_start:
+        if not has_conflict(pre_start, pre_end):
+            return pre_start, pre_end
+
+    # Candidate 2: After anchor event
+    post_start = anchor_end + timedelta(minutes=15)
+    if post_start.minute not in [0, 30]:
+        post_start = post_start.replace(minute=30 if post_start.minute < 30 else 0, second=0, microsecond=0)
+        if post_start < anchor_end:
+            post_start += timedelta(minutes=30)
+    post_end = post_start + timedelta(minutes=dur)
+
+    if post_end.hour < 23 or (post_end.hour == 23 and post_end.minute == 0):
+        if not has_conflict(post_start, post_end):
+            return post_start, post_end
+
+    # Candidate 3: Scan candidate slots on the same day from 12:00 to 21:00
+    base_date = anchor_start.date()
+    for hour in [18, 19, 17, 13, 12, 14, 15, 16, 11, 10]:
+        c_start = datetime(base_date.year, base_date.month, base_date.day, hour, 0, tzinfo=timezone.utc)
+        c_end = c_start + timedelta(minutes=dur)
+        if not has_conflict(c_start, c_end):
+            return c_start, c_end
+
+    # Fallback: next day at 14:00
+    next_day = _ensure_utc(anchor_start + timedelta(days=1))
+    c_start = next_day.replace(hour=14, minute=0, second=0, microsecond=0)
+    return c_start, c_start + timedelta(minutes=dur)
+
+def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list) -> tuple:
+    """
+    Save or update a task item while automatically detecting collisions
+    and rescheduling any conflicting flexible tasks to optimal non-overlapping slots.
+    Returns (saved_item, optional_explanation_note).
+    """
+    inferred = infer_task_properties(task_data)
+    dur = int(inferred.get("duration_minutes") or 60)
+
+    item = {
+        "user_id": user_id,
+        "title": inferred.get("title", "Untitled"),
+        "task_type": inferred.get("task_type", "task"),
+        "duration_minutes": dur,
+        "priority": inferred.get("priority", 3),
+        "flexibility": inferred.get("flexibility", True),
+        "status": "pending",
+    }
+    if task_data.get("deadline"):
+        item["deadline"] = task_data["deadline"]
+
+    raw_start = task_data.get("fixed_start") or task_data.get("start_time")
+    if raw_start:
+        s_dt = _parse_dt(raw_start)
+        if s_dt:
+            item["start_time"] = s_dt.isoformat()
+            if task_data.get("fixed_end") or task_data.get("end_time"):
+                item["end_time"] = task_data.get("fixed_end") or task_data.get("end_time")
+            else:
+                item["end_time"] = (s_dt + timedelta(minutes=dur)).isoformat()
+            item["status"] = "scheduled"
+
+    reschedule_note = None
+
+    # Check for collisions with existing scheduled items or items in this batch
+    if item.get("start_time") and item.get("end_time"):
+        item_s = _parse_dt(item["start_time"])
+        item_e = _parse_dt(item["end_time"])
+
+        existing_resp = sb_get("schedule_items", {
+            "user_id": f"eq.{user_id}",
+            "status": "neq.cancelled",
+        })
+        existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
+        combined = list(existing_list) + list(in_flight_items)
+
+        for other in combined:
+            if (other.get("title") or "").strip().lower() == item["title"].strip().lower():
+                continue
+            o_s = _parse_dt(other.get("start_time"))
+            o_e = _parse_dt(other.get("end_time"))
+            if o_s and o_e and (item_s < o_e and item_e > o_s):
+                # Overlap collision detected!
+                other_prop = infer_task_properties(other)
+                item_score = (item["priority"], 0 if not item["flexibility"] else 1)
+                other_score = (other_prop["priority"], 0 if not other_prop["flexibility"] else 1)
+
+                if item_score > other_score:
+                    # item yields and is auto-rescheduled!
+                    new_s, new_e = find_optimal_reschedule_slot(item, other, combined)
+                    orig_fmt = item_s.strftime("%I:%M %p")
+                    new_s_fmt = new_s.strftime("%I:%M %p")
+                    new_e_fmt = new_e.strftime("%I:%M %p")
+                    item["start_time"] = new_s.isoformat()
+                    item["end_time"] = new_e.isoformat()
+                    item["status"] = "rescheduled"
+                    item["auto_rescheduled"] = True
+                    item["flexibility"] = True
+                    reason = f"Auto-rescheduled from {orig_fmt} to {new_s_fmt} due to collision with '{other.get('title')}'."
+                    item["completion_note"] = reason
+                    reschedule_note = (
+                        f"⚡ Auto-Rescheduled: '{item['title']}' conflicted with '{other.get('title')}' at {orig_fmt}. "
+                        f"Chrona automatically scheduled '{item['title']}' to {new_s_fmt} – {new_e_fmt}."
+                    )
+                else:
+                    # other yields and is auto-rescheduled!
+                    new_s, new_e = find_optimal_reschedule_slot(other, item, combined)
+                    orig_fmt = o_s.strftime("%I:%M %p")
+                    new_s_fmt = new_s.strftime("%I:%M %p")
+                    new_e_fmt = new_e.strftime("%I:%M %p")
+                    reason = f"Auto-rescheduled from {orig_fmt} to {new_s_fmt} due to collision with '{item['title']}'."
+                    patch_data = {
+                        "start_time": new_s.isoformat(),
+                        "end_time": new_e.isoformat(),
+                        "status": "rescheduled",
+                        "auto_rescheduled": True,
+                        "flexibility": True,
+                        "completion_note": reason,
+                    }
+                    if other.get("id"):
+                        sb_patch("schedule_items", patch_data, params={"id": f"eq.{other['id']}", "user_id": f"eq.{user_id}"})
+                    other.update(patch_data)
+                    reschedule_note = (
+                        f"⚡ Auto-Rescheduled: '{other.get('title')}' conflicted with '{item['title']}' at {orig_fmt}. "
+                        f"Chrona automatically moved '{other.get('title')}' to {new_s_fmt} – {new_e_fmt}."
+                    )
+
+    # Deduplication check
+    existing_resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
+    existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
+    match = None
+    t_lower = (item.get("title") or "").strip().lower()
+    for ex in existing_list:
+        ex_title = (ex.get("title") or "").strip().lower()
+        if ex_title == t_lower or (t_lower and (t_lower in ex_title or ex_title in t_lower)):
+            match = ex
+            break
+
+    saved = None
+    if match:
+        sb_patch("schedule_items", item, params={"id": f"eq.{match['id']}", "user_id": f"eq.{user_id}"})
+        match.update(item)
+        saved = match
+    else:
+        resp = sb_post("schedule_items", item)
+        if resp.status_code in [200, 201]:
+            try:
+                res_json = resp.json()
+                saved = res_json[0] if isinstance(res_json, list) else res_json
+            except Exception:
+                saved = item
+        else:
+            saved = item
+
+    return saved, reschedule_note
+
+def auto_repair_existing_conflicts(user_id: str) -> list:
+    """
+    Scan all active scheduled items for the user, detect any time overlaps,
+    and automatically reschedule lower-priority/flexible items.
+    """
+    resp = sb_get("schedule_items", {
+        "user_id": f"eq.{user_id}",
+        "status": "neq.cancelled",
+        "order": "start_time.asc"
+    })
+    if resp.status_code != 200 or not resp.json():
+        return []
+
+    scheduled_items = [it for it in resp.json() if it.get("start_time") and it.get("end_time")]
+    repaired = []
+
+    for i in range(len(scheduled_items)):
+        for j in range(i + 1, len(scheduled_items)):
+            it1 = scheduled_items[i]
+            it2 = scheduled_items[j]
+            s1 = _parse_dt(it1.get("start_time"))
+            e1 = _parse_dt(it1.get("end_time"))
+            s2 = _parse_dt(it2.get("start_time"))
+            e2 = _parse_dt(it2.get("end_time"))
+
+            if s1 and e1 and s2 and e2 and (s1 < e2 and e1 > s2):
+                prop1 = infer_task_properties(it1)
+                prop2 = infer_task_properties(it2)
+
+                score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
+                score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
+
+                if score1 <= score2:
+                    anchor, loser = it1, it2
+                    loser_prop = prop2
+                else:
+                    anchor, loser = it2, it1
+                    loser_prop = prop1
+
+                new_s, new_e = find_optimal_reschedule_slot(loser, anchor, scheduled_items)
+                orig_str = _parse_dt(loser.get("start_time")).strftime("%I:%M %p")
+                new_s_str = new_s.strftime("%I:%M %p")
+                new_e_str = new_e.strftime("%I:%M %p")
+
+                reason = f"Auto-rescheduled from {orig_str} to {new_s_str} due to collision with '{anchor.get('title')}'."
+
+                patch_data = {
+                    "start_time": new_s.isoformat(),
+                    "end_time": new_e.isoformat(),
+                    "status": "rescheduled",
+                    "priority": loser_prop["priority"],
+                    "flexibility": True,
+                    "completion_note": reason,
+                }
+
+                sb_patch("schedule_items", patch_data, params={"id": f"eq.{loser['id']}", "user_id": f"eq.{user_id}"})
+                loser.update(patch_data)
+                repaired.append({
+                    "task_id": loser.get("id"),
+                    "title": loser.get("title"),
+                    "rescheduled_to": f"{new_s_str} – {new_e_str}",
+                    "reason": reason
+                })
+
+    return repaired
+
+# ==============================
 # TASK DECOMPOSITION ENGINE
 # ==============================
 
@@ -716,6 +1025,19 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - Extract tasks into the "tasks" array.
    - Only set clarification_needed if a truly essential detail is missing (e.g. user says "I have an exam" with no subject, date, or timeframe).
    - If user says "My exam is next Friday at 2 PM", that is completely sufficient! Extract it immediately with duration=120 min.
+4. CONFLICT DETECTION & IMMOVABLE VS FLEXIBLE COMMITMENTS:
+   - NEVER schedule two events at the exact same start time!
+   - Distinguish strictly IMMOVABLE commitments vs FLEXIBLE commitments:
+     * IMMOVABLE (flexibility: false, priority: 1): Exams, Midterms, Finals, Quizzes, University/College Lectures & Classes, Flights, Doctor/Dentist Appointments, Job Interviews.
+     * FLEXIBLE (flexibility: true, priority: 3 or 4): Dinner with friends, Lunch, Coffee, Social hangouts, Workouts, Gym, Reading, Personal study sessions. Even if the user specifies a time (e.g. "dinner with friends at 8 PM"), social and personal activities are ALWAYS flexible!
+   - CONFLICT RESOLUTION: When two events conflict at the same time:
+     * The fixed exam or class ALWAYS keeps the slot (e.g. 8:00 PM - 10:00 PM).
+     * The flexible event (e.g. Dinner with friends) MUST be auto-rescheduled to an adjacent non-overlapping slot (e.g. 6:30 PM - 7:30 PM before the exam, or 10:00 PM - 11:00 PM after the exam).
+     * Explain this clearly in your response: "Conflict detected: 'Dinner with friends' conflicted with 'Math exam' (8:00 PM). Since your exam is fixed (Priority 1), I scheduled your Math exam for 8:00 PM - 10:00 PM and automatically moved 'Dinner with friends' to 6:30 PM - 7:30 PM so you won't miss either!"
+5. TIMETABLE & SYLLABUS EXTRACTION:
+   - When extracted text from an uploaded timetable or syllabus image/document is provided:
+     * Extract ALL classes, lectures, labs, exams, and assignments.
+     * Keep college lectures and exams as fixed (priority 1), and workouts/study as flexible (priority 3).
 
 When extracting tasks/events, return valid JSON in this exact structure:
 {
@@ -1052,50 +1374,18 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
                 except Exception as e:
                     print(f"⚠️ Decomposition error: {e}")
             else:
-                # Deduplication & Context Modification: Check for existing commitment
-                dur = task_data.get("duration_minutes", 60)
-                item = {
-                    "user_id": user_id,
-                    "title": task_data.get("title", "Untitled"),
-                    "task_type": task_data.get("task_type", "task"),
-                    "duration_minutes": dur,
-                    "priority": task_data.get("priority", 3),
-                    "flexibility": task_data.get("flexibility", True),
-                    "status": "pending",
-                }
-                if task_data.get("fixed_start") and task_data.get("fixed_end"):
-                    item["start_time"] = task_data["fixed_start"]
-                    item["end_time"] = task_data["fixed_end"]
-                    item["flexibility"] = False
-                    item["status"] = "scheduled"
-                if task_data.get("deadline"):
-                    item["deadline"] = task_data["deadline"]
+                saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks)
+                if saved_item:
+                    inserted_tasks.append(saved_item)
+                if conflict_note:
+                    reschedule_notes.append(conflict_note)
 
-                # Check if this commitment already exists to update instead of duplicate
-                existing_resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
-                existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
-                match = None
-                t_lower = (task_data.get("title") or "").strip().lower()
-                for ex in existing_list:
-                    ex_title = (ex.get("title") or "").strip().lower()
-                    if ex_title == t_lower or (t_lower and (t_lower in ex_title or ex_title in t_lower)):
-                        match = ex
-                        break
-
-                if match:
-                    sb_patch("schedule_items", item, params={"id": f"eq.{match['id']}", "user_id": f"eq.{user_id}"})
-                    match.update(item)
-                    inserted_tasks.append(match)
-                else:
-                    resp = sb_post("schedule_items", item)
-                    if resp.status_code in [200, 201]:
-                        try:
-                            inserted_tasks.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
-                        except Exception:
-                            pass
+    final_msg = result.get("message", "I understand. Let me help you with that.")
+    if reschedule_notes:
+        final_msg = final_msg.strip() + "\n\n" + "\n".join(reschedule_notes)
 
     return {
-        "message": result.get("message", "I understand. Let me help you with that."),
+        "message": final_msg,
         "action": result.get("action"),
         "tasks_extracted": result.get("tasks", []),
         "tasks_saved": inserted_tasks,
@@ -1108,21 +1398,26 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
 async def chat_upload(
     message: Optional[str] = Form(""),
     file: Optional[UploadFile] = File(None),
+    extracted_text: Optional[str] = Form(None),
     user_id: str = Depends(get_user_id),
     session_id: Optional[str] = Form(None)
 ):
     """
     Unified Chat + Upload endpoint.
-    Accepts text message, uploaded timetable/syllabus/document, or both.
-    Extracts events/commitments, auto-plans them, and returns conversational response.
+    Accepts text message, uploaded timetable/syllabus/document, or OCR extracted text.
+    Extracts events/commitments, auto-plans them, detects collisions, and returns response.
     """
     file_text = ""
     file_name = ""
+    is_image = False
     if file:
         file_name = file.filename or "uploaded_file"
+        is_image = file_name.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp"))
         try:
             content = await file.read()
-            if file_name.lower().endswith(".pdf") or content.startswith(b"%PDF"):
+            if extracted_text and extracted_text.strip():
+                file_text = extracted_text.strip()
+            elif file_name.lower().endswith(".pdf") or content.startswith(b"%PDF"):
                 file_text = extract_text_from_pdf(content)
             else:
                 try:
@@ -1131,11 +1426,15 @@ async def chat_upload(
                     file_text = extract_text_from_pdf(content)
         except Exception as e:
             print(f"⚠️ Error reading file: {e}")
+    elif extracted_text and extracted_text.strip():
+        file_text = extracted_text.strip()
 
     full_user_input = message.strip() if message else ""
-    if file_name:
-        attachment_context = f"\n[Document Extracted Content ({file_name})]:\n{file_text[:4000]}"
+    if file_name and file_text:
+        attachment_context = f"\n[Document / Timetable Extracted Content ({file_name})]:\n{file_text[:5000]}"
         full_user_input = f"{full_user_input}\n{attachment_context}".strip()
+    elif is_image and not file_text and not full_user_input:
+        full_user_input = f"I uploaded timetable image {file_name}. Please help me extract my schedule."
 
     if not full_user_input:
         full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
@@ -1143,41 +1442,26 @@ async def chat_upload(
     result = await process_chat_message(user_id, full_user_input, session_id=session_id)
 
     inserted_tasks = []
+    reschedule_notes = []
     if result.get("tasks"):
         for task_data in result["tasks"]:
-            dur = int(task_data.get("duration_minutes") or 60)
-            item = {
-                "user_id": user_id,
-                "title": task_data.get("title", "Untitled"),
-                "task_type": task_data.get("task_type", "task"),
-                "duration_minutes": dur,
-                "priority": task_data.get("priority", 3),
-                "flexibility": task_data.get("flexibility", True),
-                "status": "pending",
-            }
-            if task_data.get("fixed_start"):
-                item["start_time"] = task_data["fixed_start"]
-                if task_data.get("fixed_end"):
-                    item["end_time"] = task_data["fixed_end"]
-                else:
-                    s_dt = _parse_dt(task_data["fixed_start"])
-                    if s_dt:
-                        item["end_time"] = (s_dt + timedelta(minutes=dur)).isoformat()
-                item["flexibility"] = False
-                item["status"] = "scheduled"
+            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks)
+            if saved_item:
+                inserted_tasks.append(saved_item)
+            if conflict_note:
+                reschedule_notes.append(conflict_note)
 
-            if task_data.get("deadline"):
-                item["deadline"] = task_data["deadline"]
-
-            resp = sb_post("schedule_items", item)
-            if resp.status_code in [200, 201]:
-                try:
-                    inserted_tasks.extend(resp.json() if isinstance(resp.json(), list) else [resp.json()])
-                except Exception:
-                    pass
+    final_msg = result.get("message", "I analyzed your document and extracted the relevant tasks.")
+    if is_image and not file_text and not inserted_tasks:
+        final_msg = (
+            f"I received your image '{file_name}'. If the text in the image wasn't scanned automatically, "
+            f"you can also paste the course codes or schedule text directly into chat, and I'll organize your entire calendar!"
+        )
+    elif reschedule_notes:
+        final_msg = final_msg.strip() + "\n\n" + "\n".join(reschedule_notes)
 
     return {
-        "message": result.get("message", "I analyzed your document and extracted the relevant tasks."),
+        "message": final_msg,
         "action": result.get("action"),
         "tasks_extracted": result.get("tasks", []),
         "tasks_saved": inserted_tasks,
@@ -1522,7 +1806,7 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
 
 @app.post("/api/schedule/auto-reschedule")
 async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str = Depends(get_user_id)):
-    """Automatically find and apply the next best free slot for impossible/missed/overdue tasks."""
+    """Automatically find and apply the next best free slot for impossible/missed/overdue tasks and resolve conflicts."""
     if request.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
@@ -1530,6 +1814,9 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
     profile = await get_behavior_profile(user_id)
     wake = profile.get("wake_time", "07:00")
     sleep = profile.get("sleep_time", "23:00")
+
+    # First auto-repair any overlapping conflicts
+    conflicts_repaired = auto_repair_existing_conflicts(user_id)
 
     target_tasks = []
     if request.task_id:
@@ -1545,11 +1832,20 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
         if resp.status_code == 200 and resp.json():
             target_tasks = resp.json()
 
-    if not target_tasks:
+    if not target_tasks and not conflicts_repaired:
         raise HTTPException(404, "No tasks found to reschedule")
 
     slots = compute_free_slots(user_id, now, now + timedelta(days=14), wake, sleep)
     rescheduled_items = []
+
+    for cr in conflicts_repaired:
+        rescheduled_items.append({
+            "task_id": cr.get("task_id"),
+            "title": cr.get("title", "Untitled"),
+            "rescheduled_to": cr.get("rescheduled_to"),
+            "auto_rescheduled": True,
+            "reason": cr.get("reason"),
+        })
 
     for task in target_tasks:
         dur = int(task.get("duration_minutes") or 60)
@@ -1573,6 +1869,8 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
             "start_time": new_start.isoformat(),
             "end_time": new_end.isoformat(),
             "status": "rescheduled",
+            "auto_rescheduled": True,
+            "flexibility": True,
         }
         sb_patch("schedule_items", update_data, params={"id": f"eq.{task['id']}", "user_id": f"eq.{user_id}"})
         rescheduled_items.append({
@@ -1656,7 +1954,12 @@ async def schedule_items(
     end: Optional[str] = None,
     status: Optional[str] = None,
 ):
-    """Get schedule items for the user."""
+    """Get schedule items for the user with automatic conflict detection and repair."""
+    try:
+        auto_repair_existing_conflicts(user_id)
+    except Exception as e:
+        print(f"⚠️ Conflict auto-repair warning: {e}")
+
     params = {"user_id": f"eq.{user_id}", "order": "start_time.asc"}
     if start:
         params["start_time"] = f"gte.{start}"
@@ -1671,6 +1974,17 @@ async def schedule_items(
     if resp.status_code == 200:
         return {"items": resp.json() or [], "count": len(resp.json() or [])}
     raise HTTPException(500, resp.text)
+
+@app.post("/api/schedule/resolve-conflicts")
+async def schedule_resolve_conflicts(user_id: str = Depends(get_user_id)):
+    """Detect and auto-reschedule all conflicting overlapping tasks for user."""
+    repaired = auto_repair_existing_conflicts(user_id)
+    return {
+        "success": True,
+        "repaired_count": len(repaired),
+        "repaired": repaired,
+        "message": f"Successfully resolved {len(repaired)} schedule conflict(s)." if repaired else "No schedule conflicts detected."
+    }
 
 @app.post("/api/schedule/fixed")
 async def schedule_fixed_create(item: FixedCommitmentCreate, user_id: str = Depends(get_user_id)):
@@ -2077,6 +2391,122 @@ async def command(request: Request, user_id: str = Depends(get_user_id)):
 
     result = await process_chat_message(user_id, message)
     return {"success": True, **result}
+
+# ---- AI-ASSISTED TASK EXECUTION (SECTION 4H) ----
+
+@app.post("/api/agents/execute")
+async def execute_agent(request: AgentExecuteRequest, user_id: str = Depends(get_user_id)):
+    """
+    Delegate a task to a specialized AI Execution Agent (Section 4H).
+    Generates study guides, research briefings, executive summaries, or checklists.
+    """
+    if request.user_id != user_id:
+        raise HTTPException(403, "User mismatch")
+
+    # Fetch task
+    resp = sb_get("schedule_items", {"id": f"eq.{request.task_id}", "user_id": f"eq.{user_id}"})
+    if resp.status_code != 200 or not resp.json():
+        raise HTTPException(404, "Task not found")
+    task = resp.json()[0]
+
+    title = task.get("title", "Untitled")
+    desc = task.get("description", "")
+    action = request.action.lower()
+
+    system_prompt = """You are Chrona's specialized AI Execution Agent.
+You execute delegated work for the user's personal time management system.
+Produce high-quality, practical, well-formatted markdown output."""
+
+    if action == "research":
+        prompt = f"""Conduct a thorough, structured research briefing on: "{title}".
+Additional context: {desc}
+User instructions: {request.instructions or "Cover core concepts, current best practices, key challenges, and actionable steps."}
+
+Provide a well-structured markdown briefing with:
+1. Executive Summary
+2. Key Concepts & Architecture
+3. Important Resources / Tools
+4. Recommended Next Steps"""
+    elif action == "study_guide":
+        prompt = f"""Create a comprehensive, exam-ready study guide for: "{title}".
+Context: {desc}
+Instructions: {request.instructions or "Focus on high-yield concepts, core principles, likely exam questions, and memory aids."}
+
+Provide markdown with:
+1. Core Concepts & Definitions
+2. Key Principles / Formulas
+3. High-Yield Practice Questions & Answers
+4. Summary Flashcard Review"""
+    elif action == "summary":
+        prompt = f"""Generate an executive summary and high-impact key points for: "{title}".
+Context: {desc}
+Instructions: {request.instructions or "Make it concise, actionable, and structured."}"""
+    else:  # checklist
+        prompt = f"""Create an actionable step-by-step checklist to complete: "{title}".
+Context: {desc}
+Instructions: {request.instructions or "Break into 5-8 concrete, achievable steps with time estimates."}"""
+
+    result_text = _ai_complete(prompt, json_mode=False, system=system_prompt)
+
+    execution_data = {
+        "action": action,
+        "content": result_text,
+        "completed_at": _now_utc().isoformat(),
+        "task_id": request.task_id,
+        "title": title,
+    }
+
+    # Store execution result on task
+    sb_patch("schedule_items", {
+        "execution_status": "completed",
+        "execution_result": execution_data,
+        "completion_note": f"Executed by AI agent ({action})",
+    }, params={"id": f"eq.{request.task_id}", "user_id": f"eq.{user_id}"})
+
+    return {
+        "success": True,
+        "task_id": request.task_id,
+        "action": action,
+        "result": execution_data,
+    }
+
+# ---- SCHEDULE DECISION EXPLANATIONS (SECTION 4E) ----
+
+@app.get("/api/schedule/explain/{task_id}")
+async def explain_schedule_decision(task_id: str, user_id: str = Depends(get_user_id)):
+    """Explain why Chrona scheduled this task at its assigned time (Section 4E)."""
+    resp = sb_get("schedule_items", {"id": f"eq.{task_id}", "user_id": f"eq.{user_id}"})
+    if resp.status_code != 200 or not resp.json():
+        raise HTTPException(404, "Task not found")
+    task = resp.json()[0]
+
+    profile = await get_behavior_profile(user_id)
+    start_time = task.get("start_time")
+    if not start_time:
+        return {
+            "task_id": task_id,
+            "title": task.get("title"),
+            "explanation": "This task is flexible/pending and will be placed in your next optimal focus window during schedule generation.",
+        }
+
+    st = _parse_dt(start_time)
+    slot_name = _slot_for_hour(st.hour) if st else "afternoon"
+    archetype = profile.get("archetype", "student_balanced")
+
+    explanation = (
+        f"Chrona scheduled '{task.get('title')}' for {st.strftime('%A at %I:%M %p')} because "
+        f"your productivity archetype ({archetype}) has high energy during the {slot_name}. "
+        f"It avoids conflicts with your fixed commitments and preserves buffer time before your deadline."
+    )
+
+    return {
+        "task_id": task_id,
+        "title": task.get("title"),
+        "scheduled_time": start_time,
+        "slot": slot_name,
+        "archetype": archetype,
+        "explanation": explanation,
+    }
 
 # ==============================
 # STARTUP
