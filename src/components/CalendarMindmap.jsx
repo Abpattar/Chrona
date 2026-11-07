@@ -22,10 +22,11 @@ export function getNodeTheme(item) {
   const isPending = item.status === 'pending' || !item.start_time
   const isRescheduled = item.status === 'rescheduled' || !!item.auto_rescheduled || !!item.completion_note?.includes('Auto-rescheduled')
   const titleLower = (item.title || '').toLowerCase()
-  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout|movie|gym|workout|flute|practice/i.test(titleLower)
+  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout/i.test(titleLower)
+  const isMovieOrShow = /movie|cinema|film|theater|theatre|concert|show|match/i.test(titleLower)
   const isExamOrClass = item.task_type === 'exam' || item.task_type === 'class' || /exam|midterm|final|quiz|test|lecture/i.test(titleLower)
   const isStrictTime = !!item.strict_time || !!item.skip_recovery_buffer || !!item.completion_note?.includes('Strict')
-  const isFixed = !isRescheduled && !isStrictTime && !isSocial && (isExamOrClass || item.task_type === 'fixed' || item.flexibility === false)
+  const isFixed = !isRescheduled && !isStrictTime && (isExamOrClass || isMovieOrShow || item.task_type === 'fixed' || (item.flexibility === false && !isSocial))
   const priority = Number(item.priority || 3)
 
   if (isCompleted) {
@@ -69,7 +70,9 @@ export function getNodeTheme(item) {
       ? '🔒 FIXED EXAM'
       : (item.task_type === 'class' || /lecture|class/i.test(titleLower))
         ? '🔒 FIXED CLASS'
-        : '🔒 FIXED'
+        : (isMovieOrShow)
+          ? '🎬 FIXED MOVIE'
+          : '🔒 FIXED'
     return {
       border: '#a855f7',
       bg: 'rgba(168, 85, 247, 0.14)',

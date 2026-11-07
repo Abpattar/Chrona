@@ -15,7 +15,9 @@ const PRIORITY_COLORS = {
 function TaskCard({ item, onComplete, onSkip, onRepair }) {
   const pc = PRIORITY_COLORS[item.priority] || PRIORITY_COLORS[3]
   const start = item.start_time ? dayjs(item.start_time) : null
-  const end = item.end_time ? dayjs(item.end_time) : null
+  const rawEnd = item.end_time ? dayjs(item.end_time) : null
+  const dur = Number(item.duration_minutes || 60)
+  const end = (start && rawEnd && rawEnd.isAfter(start)) ? rawEnd : (start ? start.add(dur, 'minute') : null)
   const isPast = end && end.isBefore(dayjs())
   const isNow = start && end && start.isBefore(dayjs()) && end.isAfter(dayjs())
 

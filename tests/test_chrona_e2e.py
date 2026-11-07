@@ -628,6 +628,109 @@ class TestChronaScenarios:
         assert lunch_local_s.hour == 19 and lunch_local_s.minute == 35, f"Lunch should be at 7:35 PM, got {lunch_local_s.strftime('%I:%M %p')}"
         assert lunch_e > lunch_s
 
+    def test_movie_is_fixed_never_moved_and_dinner_placed_before_movie(self):
+        """
+        User Problem Reported:
+        'If movie starts at 8 then why would you move it ? its a movie not somthing you skip it cause youll miss it...
+        There is alot of time after move and before movie comparing to current time... I want this to behave like how a human thinks.'
+
+        Verify:
+        1. 'Movie' at 8:00 PM (20:00 - 22:00) is classified as Priority 1, flexibility: False (Fixed).
+        2. When 'Dinner with friends' collides at 8:00 PM, Movie is NEVER moved.
+        3. Dinner is rescheduled TODAY before the movie at 6:30 PM - 7:30 PM with breathing room,
+           NOT pushed to tomorrow or 2:15 AM!
+        """
+        from backend.server import infer_task_properties, resolve_and_save_schedule_item, _parse_dt
+        from datetime import timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-movie-user"
+
+        movie_task = {
+            "title": "Movie",
+            "task_type": "fixed",
+            "fixed_start": "2026-11-07T20:00:00",
+            "fixed_end": "2026-11-07T22:00:00",
+            "duration_minutes": 120,
+        }
+        movie_prop = infer_task_properties(movie_task)
+        assert movie_prop["flexibility"] is False, "Movie showtimes are ticketed and strictly fixed!"
+        assert movie_prop["priority"] == 1
+
+        saved_movie, _ = resolve_and_save_schedule_item(user_id, movie_task, [], user_tz=ist_tz)
+        assert saved_movie is not None
+        m_s = _parse_dt(saved_movie["start_time"]).astimezone(ist_tz)
+        assert m_s.hour == 20 and m_s.minute == 0
+
+        # Submit Dinner at 8 PM (same time as movie)
+        dinner_task = {
+            "title": "Dinner with friends",
+            "task_type": "social",
+            "fixed_start": "2026-11-07T20:00:00",
+            "duration_minutes": 60,
+        }
+        saved_dinner, note = resolve_and_save_schedule_item(user_id, dinner_task, [saved_movie], user_tz=ist_tz)
+        assert saved_dinner is not None
+        assert saved_dinner.get("auto_rescheduled") is True
+
+        d_s = _parse_dt(saved_dinner["start_time"]).astimezone(ist_tz)
+        d_e = _parse_dt(saved_dinner["end_time"]).astimezone(ist_tz)
+
+        # Dinner must be on the SAME Saturday (2026-11-07) BEFORE the 8 PM movie
+        assert d_s.day == 7, f"Dinner should be scheduled today before movie, got day {d_s.day}"
+        assert d_s.hour in [18, 19], f"Dinner should be at 6:30 or 6:45 PM before movie, got {d_s.strftime('%I:%M %p')}"
+        assert d_e <= m_s, f"Dinner end ({d_e}) must be before movie start ({m_s})!"
+
+    def test_flute_class_every_sunday_strictly_on_sunday(self):
+        """
+        User Problem Reported:
+        'a flute class every Sunday' was placed on Saturday at 10:30 PM.
+        Verify:
+        - Any task specifying 'Sunday' or 'every Sunday' must strictly be placed on Sunday!
+        - It must never be placed during bedtime (10:30 PM to 08:00 AM).
+        """
+        from backend.server import resolve_and_save_schedule_item, _parse_dt
+        from datetime import timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-flute-user"
+
+        flute_task = {
+            "title": "a flute class every Sunday",
+            "task_type": "class",
+            "duration_minutes": 60,
+            "fixed_start": "2026-11-07T22:30:00",  # Submitted with Saturday night timestamp
+        }
+        saved_flute, _ = resolve_and_save_schedule_item(user_id, flute_task, [], user_tz=ist_tz)
+        assert saved_flute is not None
+
+        f_s = _parse_dt(saved_flute["start_time"]).astimezone(ist_tz)
+        assert f_s.weekday() == 6, f"Flute class every Sunday must be on Sunday (weekday 6), got {f_s.strftime('%A')}"
+        assert 8 <= f_s.hour < 22, f"Flute class must be in daytime waking hours, got {f_s.strftime('%I:%M %p')}"
+
+    def test_no_free_slots_in_sleep_hours(self):
+        """
+        Verify that compute_free_slots with wake_time=08:00 and sleep_time=22:30
+        in user local timezone (+05:30) never produces slots in the middle of the night (e.g. 1 AM, 2 AM, 4 AM).
+        """
+        from backend.server import compute_free_slots, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        start_utc = datetime(2026, 11, 7, 0, 0, 0, tzinfo=timezone.utc)
+        end_utc = datetime(2026, 11, 9, 23, 59, 59, tzinfo=timezone.utc)
+
+        slots = compute_free_slots("empty-user", start_utc, end_utc, wake_time="08:00", sleep_time="22:30", user_tz=ist_tz)
+        assert len(slots) > 0
+
+        for s in slots:
+            s_loc = _parse_dt(s["start"]).astimezone(ist_tz)
+            e_loc = _parse_dt(s["end"]).astimezone(ist_tz)
+            # Local start must be >= 08:00
+            assert s_loc.hour >= 8, f"Slot start {s_loc} violates wake time 08:00!"
+            # Local end must be <= 22:30
+            assert (e_loc.hour < 22 or (e_loc.hour == 22 and e_loc.minute <= 30)), f"Slot end {e_loc} violates bedtime 22:30!"
+
 
 
 

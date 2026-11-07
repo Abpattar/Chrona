@@ -612,22 +612,26 @@ def compute_free_slots(
     user_id: str,
     start: datetime,
     end: datetime,
-    wake_time: str = "07:00",
-    sleep_time: str = "23:00",
+    wake_time: str = "08:00",
+    sleep_time: str = "22:30",
     buffer_minutes: int = 15,
+    user_tz: Optional[timezone] = None,
 ) -> List[dict]:
     """
     Compute actual free time slots for a user between start and end.
     Uses their current schedule (fixed + flexible items) and wake/sleep times.
+    All wake/sleep day intervals are calculated in the user's local timezone (e.g. Asia/Kolkata)
+    to prevent tasks from ever being scheduled during human sleep hours (10:30 PM to 08:00 AM).
     Returns list of {start, end} dicts with ISO strings.
     """
     existing = get_user_schedule(user_id, start, end)
+    tz = user_tz or _get_default_tz()
 
     # Build busy intervals
     busy = []
     for item in existing:
-        s = _parse_dt(item.get("start_time"))
-        e = _parse_dt(item.get("end_time"))
+        s = _parse_dt(item.get("start_time"), user_tz)
+        e = _parse_dt(item.get("end_time"), user_tz)
         if s and e:
             # Add buffer around non-fixed items
             buf = timedelta(minutes=buffer_minutes if item.get("flexibility", True) else 0)
@@ -642,20 +646,27 @@ def compute_free_slots(
         else:
             merged.append(list(b))
 
-    # Chop to wake/sleep windows per day
+    # Chop to wake/sleep windows per day in user local time
     free = []
-    current = start
-    while current.date() <= end.date():
-        # Wake and sleep times for this day
-        wh, wm = int(wake_time.split(":")[0]), int(wake_time.split(":")[1])
-        sh, sm = int(sleep_time.split(":")[0]), int(sleep_time.split(":")[1])
+    start_local = _ensure_utc(start).astimezone(tz)
+    end_local = _ensure_utc(end).astimezone(tz)
 
-        day_start = current.replace(hour=wh, minute=wm, second=0, microsecond=0)
-        day_end   = current.replace(hour=sh, minute=sm, second=0, microsecond=0)
+    current_date = start_local.date()
+    end_date = end_local.date()
 
-        # Clamp to overall window
-        day_start = max(day_start, start)
-        day_end   = min(day_end, end)
+    wh, wm = int(wake_time.split(":")[0]), int(wake_time.split(":")[1])
+    sh, sm = int(sleep_time.split(":")[0]), int(sleep_time.split(":")[1])
+
+    while current_date <= end_date:
+        day_start_local = datetime(current_date.year, current_date.month, current_date.day, wh, wm, 0, tzinfo=tz)
+        day_end_local   = datetime(current_date.year, current_date.month, current_date.day, sh, sm, 0, tzinfo=tz)
+
+        day_start_utc = day_start_local.astimezone(timezone.utc)
+        day_end_utc   = day_end_local.astimezone(timezone.utc)
+
+        # Clamp to overall query window
+        day_start = max(day_start_utc, _ensure_utc(start))
+        day_end   = min(day_end_utc, _ensure_utc(end))
 
         if day_start < day_end:
             # Subtract busy intervals
@@ -681,8 +692,7 @@ def compute_free_slots(
                         "duration_minutes": int(dur),
                     })
 
-        current = current + timedelta(days=1)
-        current = current.replace(hour=0, minute=0, second=0, microsecond=0)
+        current_date += timedelta(days=1)
 
     return free
 
@@ -763,13 +773,15 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
 
     hard_keywords = [
         "exam", "midterm", "final", "quiz", "test", "lecture", "class",
-        "doctor", "dentist", "flight", "interview", "presentation", "lab", "surgery"
+        "doctor", "dentist", "flight", "interview", "presentation", "lab", "surgery",
+        "movie", "cinema", "film", "theater", "theatre", "concert", "show", "match",
+        "train", "bus", "wedding", "ceremony", "appointment"
     ]
-    is_hard = any(k in title for k in hard_keywords) or task_type in ["exam", "class", "lecture", "quiz"]
+    is_hard = any(k in title for k in hard_keywords) or task_type in ["exam", "class", "lecture", "quiz", "movie"]
 
     social_keywords = [
         "dinner", "lunch", "breakfast", "brunch", "coffee", "drinks",
-        "hang out", "hangout", "friends", "party", "movie", "game", "meet friends", "eating", "restaurant", "club"
+        "hang out", "hangout", "friends", "party", "meet friends", "eating", "restaurant", "club"
     ]
     is_social = any(k in title for k in social_keywords)
 
@@ -788,7 +800,14 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
         res["priority"] = 2
         res["flexibility"] = not is_hard
     elif is_hard:
-        res["task_type"] = res.get("task_type") if res.get("task_type") in ["exam", "class", "quiz"] else "exam"
+        if any(k in title for k in ["movie", "cinema", "film", "theater", "theatre"]):
+            res["task_type"] = "movie"
+        elif any(k in title for k in ["exam", "midterm", "final", "quiz", "test"]):
+            res["task_type"] = "exam"
+        elif any(k in title for k in ["class", "lecture", "lab"]):
+            res["task_type"] = "class"
+        else:
+            res["task_type"] = res.get("task_type") or "fixed"
         res["priority"] = 1
         res["flexibility"] = False
     elif is_social:
@@ -810,6 +829,7 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
     """
     Check if two tasks collide or have an insufficient cognitive recovery gap.
     Returns (has_conflict, anchor, loser, gap_minutes).
+    Fixed ticketed events (Movies, Exams, Flights, Classes) can NEVER be displaced by flexible items.
     """
     s1 = _parse_dt(it1.get("start_time"))
     e1 = _parse_dt(it1.get("end_time"))
@@ -821,15 +841,22 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
     prop1 = infer_task_properties(it1)
     prop2 = infer_task_properties(it2)
 
-    score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
-    score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
-
-    if score1 <= score2:
+    # Fixed tasks (flexibility: False) ALWAYS anchor and cannot be moved by flexible tasks
+    if not prop1["flexibility"] and prop2["flexibility"]:
         anchor, loser = it1, it2
         anchor_prop, loser_prop = prop1, prop2
-    else:
+    elif prop1["flexibility"] and not prop2["flexibility"]:
         anchor, loser = it2, it1
         anchor_prop, loser_prop = prop2, prop1
+    else:
+        score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
+        score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
+        if score1 <= score2:
+            anchor, loser = it1, it2
+            anchor_prop, loser_prop = prop1, prop2
+        else:
+            anchor, loser = it2, it1
+            anchor_prop, loser_prop = prop2, prop1
 
     # 1. Direct Overlap: simultaneous physical presence clash
     if s1 < e2 and e1 > s2:
@@ -855,23 +882,54 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
 
     return False, None, None, 0
 
-def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "23:00", user_tz: Optional[timezone] = None) -> tuple:
+    return False, None, None, 0
+
+def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: list, wake_time: str = "08:00", sleep_time: str = "22:30", user_tz: Optional[timezone] = None) -> tuple:
     """
-    Find optimal slot for to_reschedule enforcing dynamic cognitive buffers based on task exertion.
-    If strict time was requested, places immediately adjacent to anchor with zero decompression wait.
-    If target day is packed, searches subsequent days (day + 1, weekend, next week).
-    All calendar calculations and bedtime/wake-up hours are evaluated in the user's local timezone.
+    Find optimal slot for to_reschedule enforcing dynamic cognitive buffers, circadian human habits, and sane sleep boundaries.
+    1. Sleep hours: NO event scheduled outside wake/sleep window (default 08:00 to 22:30 local).
+    2. Uses today's remaining hours (e.g. pre-movie gap) before ever moving to subsequent days.
+    3. Respects circadian meal windows (Dinner in evening 18:30-20:30, Lunch in afternoon 12:00-14:00).
+    4. Day-of-week matching: 'every Sunday' / 'Sunday' strictly stays on Sunday.
     Returns (start_dt, end_dt, reason_note).
     """
+    import re
     tz = user_tz or _get_default_tz()
+    now_local = datetime.now(tz)
+    now_utc = now_local.astimezone(timezone.utc)
     dur = int(to_reschedule.get("duration_minutes") or 60)
-    anchor_start = _parse_dt(anchor.get("start_time"), user_tz)
-    anchor_end = _parse_dt(anchor.get("end_time"), user_tz)
+
+    anchor_start = _parse_dt(anchor.get("start_time"), user_tz) if anchor else None
+    anchor_end = _parse_dt(anchor.get("end_time"), user_tz) if anchor else None
+
+    # Determine target date
+    title_lower = (to_reschedule.get("title") or "").lower()
+    day_match = re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', title_lower)
+    day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+
+    if day_match:
+        target_idx = day_names.index(day_match.group(1))
+        diff = (target_idx - now_local.weekday()) % 7
+        target_date = now_local.date() + timedelta(days=diff)
+    elif anchor_start:
+        target_date = anchor_start.astimezone(tz).date()
+    else:
+        target_date = now_local.date()
+
+    wh, wm = [int(x) for x in wake_time.split(":")]
+    sh, sm = [int(x) for x in sleep_time.split(":")]
+    wake_local = datetime(target_date.year, target_date.month, target_date.day, wh, wm, 0, tzinfo=tz)
+    sleep_local = datetime(target_date.year, target_date.month, target_date.day, sh, sm, 0, tzinfo=tz)
+    wake_dt = wake_local.astimezone(timezone.utc)
+    sleep_dt = sleep_local.astimezone(timezone.utc)
+
     if not anchor_start or not anchor_end:
-        now_local = datetime.now(tz)
-        c_s_local = now_local.replace(hour=19, minute=0, second=0, microsecond=0)
+        # Fallback to evening focus hour on target date
+        c_s_local = datetime(target_date.year, target_date.month, target_date.day, 18, 30, 0, tzinfo=tz)
+        if c_s_local.astimezone(timezone.utc) < now_utc:
+            c_s_local = datetime(target_date.year, target_date.month, target_date.day, 10, 0, 0, tzinfo=tz) + timedelta(days=1)
         c_s = c_s_local.astimezone(timezone.utc)
-        return c_s, c_s + timedelta(minutes=dur), "fallback"
+        return c_s, c_s + timedelta(minutes=dur), "Placed in available daytime hours."
 
     # Calculate dynamic recovery buffers
     post_anchor_buffer = calculate_recovery_buffer_minutes(anchor, to_reschedule)
@@ -887,8 +945,6 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             it_s = _parse_dt(it.get("start_time"), user_tz)
             it_e = _parse_dt(it.get("end_time"), user_tz)
             if it_s and it_e:
-                # If checking against the anchor task itself, do not apply the generic 10-minute buffer
-                # because the anchor spacing is explicitly handled by the scheduling strategies
                 is_anchor = False
                 if anchor:
                     if it.get("id") and anchor.get("id") and it.get("id") == anchor.get("id"):
@@ -897,7 +953,6 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
                         is_anchor = True
 
                 if is_anchor:
-                    # Strict boundary overlap check only
                     if c_start < it_e and c_end > it_s:
                         return False
                 else:
@@ -906,11 +961,16 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
                         return False
         return True
 
-    anchor_local = anchor_start.astimezone(tz)
-    target_date = anchor_local.date()
-    sh, sm = [int(x) for x in sleep_time.split(":")]
-    sleep_local = datetime(target_date.year, target_date.month, target_date.day, sh, sm, tzinfo=tz)
-    sleep_dt = sleep_local.astimezone(timezone.utc)
+    def is_candidate_valid(c_start, c_end, is_today=False):
+        if c_end > sleep_dt or c_start < wake_dt:
+            return False  # Strict human sleep window violation
+        if is_today and c_start < now_utc:
+            return False  # Cannot schedule in the past
+        return is_slot_free(c_start, c_end)
+
+    is_today = (target_date == now_local.date())
+    is_dinner = "dinner" in title_lower
+    is_lunch = "lunch" in title_lower
 
     # Strict Time Override: Place immediately after anchor without decompression break
     skip_recovery = (
@@ -926,66 +986,101 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             note = f"Placed strictly at {time_display} right after '{anchor.get('title')}' as requested (decompression break skipped)."
             return post_start, post_end, note
 
-    # Strategy 1: Post-anchor slot on the same day with stress recovery buffer
+    # Circadian Meal Prioritization:
+    # If the task is Dinner, humans prefer 18:30 - 20:30.
+    # If the anchor is an 8:00 PM Movie / Exam, having dinner BEFORE the anchor is the natural human choice!
+    if is_dinner:
+        # Check pre-anchor dinner gap (e.g. 18:30 - 19:30 before 20:00 Movie)
+        pre_end = anchor_start - timedelta(minutes=max(pre_anchor_buffer, 15))
+        pre_start = pre_end - timedelta(minutes=dur)
+        if pre_start.minute not in [0, 30]:
+            pre_start = pre_start.replace(minute=30 if pre_start.minute >= 30 else 0, second=0, microsecond=0)
+            pre_end = pre_start + timedelta(minutes=dur)
+        if (pre_end + timedelta(minutes=15)) <= anchor_start and is_candidate_valid(pre_start, pre_end, is_today):
+            s_disp = pre_start.astimezone(tz).strftime('%I:%M %p')
+            note = f"Scheduled Dinner at {s_disp} before '{anchor.get('title')}' with transition breathing room."
+            return pre_start, pre_end, note
+
+        # Check post-anchor dinner if anchor ends early enough before bedtime
+        post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
+        rem = post_start.minute % 5
+        if rem != 0:
+            post_start += timedelta(minutes=(5 - rem))
+        post_start = post_start.replace(second=0, microsecond=0)
+        post_end = post_start + timedelta(minutes=dur)
+        if is_candidate_valid(post_start, post_end, is_today):
+            note = f"Added a {post_anchor_buffer}-minute decompression break after '{anchor.get('title')}' so you don't feel rushed."
+            return post_start, post_end, note
+
+    # Strategy 1: Post-anchor slot on target day (with stress recovery buffer)
     post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
-    # Ensure post_start is rounded to clean 5-minute interval
     rem = post_start.minute % 5
     if rem != 0:
         post_start += timedelta(minutes=(5 - rem))
     post_start = post_start.replace(second=0, microsecond=0)
     post_end = post_start + timedelta(minutes=dur)
 
-    if post_end <= (sleep_dt + timedelta(minutes=60)) and is_slot_free(post_start, post_end):
+    if is_candidate_valid(post_start, post_end, is_today):
         note = f"Added a {post_anchor_buffer}-minute decompression break after '{anchor.get('title')}' so you don't feel rushed."
         return post_start, post_end, note
 
-    # Strategy 2: Pre-anchor slot on the same day (giving breathing room before exam)
+    # Strategy 2: Pre-anchor slot on target day (giving breathing room before anchor)
     pre_end = anchor_start - timedelta(minutes=pre_anchor_buffer)
     pre_start = pre_end - timedelta(minutes=dur)
     if pre_start.minute not in [0, 30]:
         pre_start = pre_start.replace(minute=0 if pre_start.minute < 30 else 30, second=0, microsecond=0)
         pre_end = pre_start + timedelta(minutes=dur)
 
-    wh, wm = [int(x) for x in wake_time.split(":")]
-    wake_local = datetime(target_date.year, target_date.month, target_date.day, wh, wm, tzinfo=tz)
-    wake_dt = wake_local.astimezone(timezone.utc)
-
-    if pre_start >= wake_dt and (pre_end + timedelta(minutes=pre_anchor_buffer)) <= anchor_start and is_slot_free(pre_start, pre_end):
+    if (pre_end + timedelta(minutes=pre_anchor_buffer)) <= anchor_start and is_candidate_valid(pre_start, pre_end, is_today):
         note = f"Scheduled before '{anchor.get('title')}' with a {pre_anchor_buffer}-minute transition buffer."
         return pre_start, pre_end, note
 
-    # Strategy 3: Scan other optimal focus/social windows on the same day
-    for hour in [19, 18, 17, 13, 12, 14, 15, 16, 20]:
+    # Strategy 3: Scan other optimal daytime focus/social windows on the target day
+    day_scan_hours = [19, 18, 17, 16, 15, 14, 11, 10, 20] if not is_lunch else [12, 13, 14, 11]
+    for hour in day_scan_hours:
         c_s_local = datetime(target_date.year, target_date.month, target_date.day, hour, 0, tzinfo=tz)
         c_s = c_s_local.astimezone(timezone.utc)
         c_e = c_s + timedelta(minutes=dur)
-        if is_slot_free(c_s, c_e):
-            note = f"Placed in an open focus window on {c_s_local.strftime('%A')} with plenty of breathing room."
+        if is_candidate_valid(c_s, c_e, is_today):
+            time_str = c_s_local.strftime('%I:%M %p')
+            note = f"Placed at {time_str} in an open focus window on {c_s_local.strftime('%A')} with plenty of breathing room."
             return c_s, c_e, note
 
     # Strategy 4: If target day is packed, spillover to subsequent days (Day + 1 to Day + 14)
-    preferred_hour = 19 if "dinner" in to_reschedule.get("title", "").lower() else (13 if "lunch" in to_reschedule.get("title", "").lower() else 14)
+    # Strictly in daytime waking hours!
+    preferred_hour = 19 if is_dinner else (13 if is_lunch else 11)
     for day_offset in range(1, 15):
         next_day = target_date + timedelta(days=day_offset)
-        for h in [preferred_hour, preferred_hour + 1, preferred_hour - 1, 18, 20, 13]:
+        # If task has day of week (e.g. Sunday), only check matching day of week
+        if day_match and next_day.weekday() != target_idx:
+            continue
+
+        for h in [preferred_hour, preferred_hour + 1, preferred_hour - 1, 18, 15, 14, 11, 10]:
             c_s_local = datetime(next_day.year, next_day.month, next_day.day, h, 0, tzinfo=tz)
             c_s = c_s_local.astimezone(timezone.utc)
             c_e = c_s + timedelta(minutes=dur)
-            if is_slot_free(c_s, c_e):
+            n_sleep = datetime(next_day.year, next_day.month, next_day.day, sh, sm, 0, tzinfo=tz).astimezone(timezone.utc)
+            n_wake = datetime(next_day.year, next_day.month, next_day.day, wh, wm, 0, tzinfo=tz).astimezone(timezone.utc)
+            if c_s >= n_wake and c_e <= n_sleep and is_slot_free(c_s, c_e):
                 time_str = c_s_local.strftime('%A, %b %d at %I:%M %p')
-                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {time_str} to prevent overload."
+                note = f"Your day around '{anchor.get('title')}' is packed. Rescheduled to {time_str} in optimal daytime hours."
                 return c_s, c_e, note
 
-    fallback_s_local = datetime(target_date.year, target_date.month, target_date.day, 19, 0, 0, tzinfo=tz) + timedelta(days=1)
+    # Sane daytime fallback (tomorrow morning or dinner time, never at night!)
+    fallback_day = target_date + timedelta(days=1)
+    fb_hour = 19 if is_dinner else (13 if is_lunch else 10)
+    fallback_s_local = datetime(fallback_day.year, fallback_day.month, fallback_day.day, fb_hour, 0, 0, tzinfo=tz)
     fallback_s = fallback_s_local.astimezone(timezone.utc)
-    return fallback_s, fallback_s + timedelta(minutes=dur), "Rescheduled to next day."
+    return fallback_s, fallback_s + timedelta(minutes=dur), f"Rescheduled to {fallback_s_local.strftime('%A at %I:%M %p')}."
 
 def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list, user_text: str = "", user_tz: Optional[timezone] = None) -> tuple:
     """
     Save or update a task item while automatically detecting collisions
     and insufficient recovery gaps, rescheduling flexible tasks to optimal non-overlapping slots.
+    Enforces day-of-week integrity and daytime wake/sleep boundaries.
     Returns (saved_item, optional_explanation_note).
     """
+    tz = user_tz or _get_default_tz()
     inferred = infer_task_properties(task_data, user_text=user_text)
     dur = int(inferred.get("duration_minutes") or 60)
 
@@ -1017,6 +1112,29 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
             item["end_time"] = e_dt.isoformat()
             item["status"] = "scheduled"
 
+    # Day-of-week and daytime safeguard:
+    # E.g. 'a flute class every Sunday' MUST be placed on Sunday during waking hours!
+    if item.get("start_time"):
+        t_title_lower = (item.get("title") or "").lower()
+        day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        cur_dt = _parse_dt(item["start_time"], user_tz).astimezone(tz)
+        for d_idx, d_name in enumerate(day_names):
+            if d_name in t_title_lower:
+                if cur_dt.weekday() != d_idx:
+                    diff = (d_idx - cur_dt.weekday()) % 7
+                    if diff == 0:
+                        diff = 7
+                    cur_dt = cur_dt + timedelta(days=diff)
+                break
+
+        # Sane daytime clamp: no activity at 1:00 AM or 10:30 PM unless strict
+        if not item.get("strict_time") and (cur_dt.hour >= 22 or cur_dt.hour < 8):
+            f_h = 19 if "dinner" in t_title_lower else (13 if "lunch" in t_title_lower else 11)
+            cur_dt = cur_dt.replace(hour=f_h, minute=0, second=0, microsecond=0)
+
+        item["start_time"] = cur_dt.astimezone(timezone.utc).isoformat()
+        item["end_time"] = (cur_dt + timedelta(minutes=dur)).astimezone(timezone.utc).isoformat()
+
     reschedule_note = None
 
     # Check for collisions or insufficient recovery gaps with existing scheduled items or items in this batch
@@ -1034,7 +1152,6 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
             has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other)
             if has_conflict:
-                tz = user_tz or _get_default_tz()
                 orig_s_fmt = _parse_dt(loser.get("start_time"), user_tz).astimezone(tz).strftime("%I:%M %p")
                 new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined, user_tz=user_tz)
                 new_s_fmt = new_s.astimezone(tz).strftime("%I:%M %p")
@@ -1120,7 +1237,7 @@ def auto_repair_existing_conflicts(user_id: str, user_tz: Optional[timezone] = N
 
     scheduled_items = [it for it in resp.json() if it.get("start_time")]
 
-    # 1. Sanitize naive, missing, or inverted timestamps
+    # 1. Sanitize naive, missing, or inverted timestamps, and correct night-time anomalies
     for it in scheduled_items:
         s_dt = _parse_dt(it.get("start_time"), user_tz)
         dur = int(it.get("duration_minutes") or 60)
@@ -1131,6 +1248,28 @@ def auto_repair_existing_conflicts(user_id: str, user_tz: Optional[timezone] = N
             e_dt = s_dt + timedelta(minutes=dur)
             patch["end_time"] = e_dt.isoformat()
             needs_patch = True
+
+        # Check day-of-week integrity (e.g. 'flute class every Sunday' placed on Saturday)
+        t_title = (it.get("title") or "").lower()
+        if s_dt and "sunday" in t_title and s_dt.astimezone(tz).weekday() != 6:
+            diff = (6 - s_dt.astimezone(tz).weekday()) % 7
+            if diff == 0:
+                diff = 7
+            s_dt = s_dt + timedelta(days=diff)
+            e_dt = s_dt + timedelta(minutes=dur)
+            patch["start_time"] = s_dt.isoformat()
+            patch["end_time"] = e_dt.isoformat()
+            needs_patch = True
+
+        # Clamp middle-of-the-night tasks (e.g. 1:00 AM or 2:15 AM) into daytime focus hours
+        if s_dt and not it.get("strict_time") and (s_dt.astimezone(tz).hour >= 22 or s_dt.astimezone(tz).hour < 8):
+            f_h = 19 if "dinner" in t_title else (13 if "lunch" in t_title else 11)
+            s_dt = s_dt.astimezone(tz).replace(hour=f_h, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+            e_dt = s_dt + timedelta(minutes=dur)
+            patch["start_time"] = s_dt.isoformat()
+            patch["end_time"] = e_dt.isoformat()
+            needs_patch = True
+
         if s_dt and it.get("start_time") != s_dt.isoformat():
             patch["start_time"] = s_dt.isoformat()
             needs_patch = True
@@ -1239,30 +1378,70 @@ Break this down into realistic, actionable subtasks.
 # ==============================
 
 def extract_context_hints(text: str) -> dict:
-    """Extract quick hints like 'at 9 PM', 'Sunday 8pm', 'for 2 hours', '45 min' from user utterance."""
+    """Extract quick hints like 'at 9 PM', 'Sunday 8pm', 'for 2 hours', '8 to 10 PM', 'Math exam' from user utterance."""
     import re
     t_lower = text.lower()
     hints = {}
-    time_m = re.search(r'\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower)
-    if time_m:
-        hints["time_str"] = time_m.group(1).upper()
+
+    # 1. Time range check e.g. '8 to 10 PM', '8-10 PM', '8:00 to 10:00 PM', '8 and ends at 9'
+    range_m = re.search(r'\b(\d{1,2}(?::\d{2})?)\s*(?:am|pm)?\s*(?:to|-|until|and\s+ends\s+at)\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)\b', t_lower)
+    if range_m:
+        s_part, e_part, ampm = range_m.groups()
+        hints["time_str"] = f"{s_part} {ampm.upper()}"
+        try:
+            s_hr = int(s_part.split(":")[0])
+            s_mn = int(s_part.split(":")[1]) if ":" in s_part else 0
+            e_hr = int(e_part.split(":")[0])
+            e_mn = int(e_part.split(":")[1]) if ":" in e_part else 0
+            if ampm == "pm" and e_hr < 12:
+                e_hr += 12
+                if s_hr < 12:
+                    s_hr += 12
+            diff_m = (e_hr * 60 + e_mn) - (s_hr * 60 + s_mn)
+            if diff_m > 0:
+                hints["duration_minutes"] = diff_m
+        except Exception:
+            pass
+    else:
+        time_m = re.search(r'\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower)
+        if time_m:
+            hints["time_str"] = time_m.group(1).upper()
+
     day_m = re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b', t_lower)
     if day_m:
         hints["day_str"] = day_m.group(1).capitalize()
-    dur_h = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', t_lower)
-    if dur_h:
-        hints["duration_minutes"] = int(dur_h.group(1)) * 60
-    else:
-        dur_m = re.search(r'(\d+)\s*(?:minutes?|mins?|m)\b', t_lower)
-        if dur_m:
-            hints["duration_minutes"] = int(dur_m.group(1))
+
+    if "duration_minutes" not in hints:
+        dur_h = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', t_lower)
+        if dur_h:
+            hints["duration_minutes"] = int(dur_h.group(1)) * 60
+        else:
+            dur_m = re.search(r'(\d+)\s*(?:minutes?|mins?|m)\b', t_lower)
+            if dur_m:
+                hints["duration_minutes"] = int(dur_m.group(1))
 
     # Look for task title
-    title_m = re.search(r'\b(?:schedule|add|have|plan|for|about)\s+([a-zA-Z0-9\s]{3,35}?)(?:\s+at|\s+on|\s+tomorrow|\s+next|\s+for|\.|\?|$)', text, re.IGNORECASE)
+    # Pattern A: explicit intent words
+    title_m = re.search(r'\b(?:schedule|add|have|plan|for|about|task is|event is|it is for|it\'s for|its for)\s+([a-zA-Z0-9\s]{3,35}?)(?:\s+at|\s+on|\s+tomorrow|\s+next|\s+for|\.|\?|$)', text, re.IGNORECASE)
     if title_m:
         cand = title_m.group(1).strip()
+        cand = re.sub(r'^(my|the|a|an)\s+', '', cand, flags=re.IGNORECASE).strip()
         if cand.lower() not in ["it", "that", "this", "something", "a task", "me", "my schedule"]:
             hints["title"] = cand
+
+    # Pattern B: standalone domain titles e.g. "Math exam", "Dinner with friends", "Chemistry quiz"
+    if "title" not in hints:
+        keywords = ["exam", "test", "quiz", "midterm", "final", "dinner", "lunch", "movie", "cinema", "workout", "gym", "flute", "piano", "class", "lecture"]
+        for kw in keywords:
+            if kw in t_lower:
+                m_kw = re.search(rf'([a-zA-Z0-9\s]{{2,25}}?\b{kw}\b[a-zA-Z0-9\s]{{0,15}})', text, re.IGNORECASE)
+                if m_kw:
+                    cand = m_kw.group(1).strip()
+                    cand = re.sub(r'^(for|about|my|the|a|an)\s+', '', cand, flags=re.IGNORECASE).strip()
+                    cand = re.sub(r'\s+(at|on|tomorrow|next).*$', '', cand, flags=re.IGNORECASE).strip()
+                    if cand and len(cand) >= 3:
+                        hints["title"] = cand
+                        break
 
     return hints
 
@@ -1514,13 +1693,14 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
         t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Sunday"
         dt_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
         dur = int(draft_dict.get("duration_minutes") or 60)
+        t_prop = infer_task_properties({"title": t_title})
 
         synth_task = {
             "title": t_title,
             "duration_minutes": dur,
-            "task_type": "social" if any(s in t_title.lower() for s in ["dinner", "lunch", "coffee", "friends", "party"]) else "task",
-            "priority": 3,
-            "flexibility": True,
+            "task_type": t_prop.get("task_type", "task"),
+            "priority": t_prop.get("priority", 3),
+            "flexibility": t_prop.get("flexibility", True),
             "fixed_start": dt_start.isoformat(),
             "fixed_end": (dt_start + timedelta(minutes=dur)).isoformat(),
         }
@@ -2273,18 +2453,24 @@ async def schedule_generate(request: ScheduleGenerateRequest, user_id: str = Dep
     }
 
 @app.post("/api/schedule/auto-reschedule")
-async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str = Depends(get_user_id)):
+async def schedule_auto_reschedule(request: AutoRescheduleRequest, req: Request, user_id: str = Depends(get_user_id)):
     """Automatically find and apply the next best free slot for impossible/missed/overdue tasks and resolve conflicts."""
     if request.user_id != user_id:
         raise HTTPException(403, "User mismatch")
 
-    now = _now_utc()
+    user_tz = get_user_timezone(req)
+    tz = user_tz or _get_default_tz()
+    now_local = datetime.now(tz)
+    now = now_local.astimezone(timezone.utc)
     profile = await get_behavior_profile(user_id)
-    wake = profile.get("wake_time", "07:00")
-    sleep = profile.get("sleep_time", "23:00")
+    wake = profile.get("wake_time", "08:00")
+    sleep = profile.get("sleep_time", "22:30")
 
-    # First auto-repair any overlapping conflicts
-    conflicts_repaired = auto_repair_existing_conflicts(user_id)
+    # If rescheduling ALL unplaced, run repair.
+    # But if user requested a specific task_id, ONLY reschedule that specific task!
+    conflicts_repaired = []
+    if not request.task_id:
+        conflicts_repaired = auto_repair_existing_conflicts(user_id, user_tz=user_tz)
 
     target_tasks = []
     if request.task_id:
@@ -2303,7 +2489,7 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
     if not target_tasks and not conflicts_repaired:
         raise HTTPException(404, "No tasks found to reschedule")
 
-    slots = compute_free_slots(user_id, now, now + timedelta(days=14), wake, sleep)
+    slots = compute_free_slots(user_id, now, now + timedelta(days=14), wake, sleep, user_tz=user_tz)
     rescheduled_items = []
 
     for cr in conflicts_repaired:
@@ -2317,28 +2503,78 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
 
     for task in target_tasks:
         dur = int(task.get("duration_minutes") or 60)
+        t_title = (task.get("title") or "").lower()
+        is_dinner = "dinner" in t_title
+        is_lunch = "lunch" in t_title
+
         chosen_slot = None
-        for s in slots:
-            s_start = _parse_dt(s["start"])
-            s_end = _parse_dt(s["end"])
-            if s_start and s_end and s_start > now:
-                avail_min = (s_end - s_start).total_seconds() / 60
-                if avail_min >= min(dur, 30):
-                    chosen_slot = (s_start, min(s_end, s_start + timedelta(minutes=dur)))
-                    s["start"] = (s_start + timedelta(minutes=dur + 15)).isoformat()
+        # Check meal circadian windows first
+        if is_dinner:
+            for d_off in range(0, 14):
+                chk_d = now_local.date() + timedelta(days=d_off)
+                for hr, mn in [(18, 30), (19, 0), (19, 30), (20, 0)]:
+                    s_loc = datetime(chk_d.year, chk_d.month, chk_d.day, hr, mn, 0, tzinfo=tz)
+                    s_utc = s_loc.astimezone(timezone.utc)
+                    e_utc = s_utc + timedelta(minutes=dur)
+                    if s_utc >= now:
+                        for fs in slots:
+                            fs_s = _parse_dt(fs["start"])
+                            fs_e = _parse_dt(fs["end"])
+                            if fs_s and fs_e and fs_s <= s_utc and fs_e >= e_utc:
+                                chosen_slot = (s_utc, e_utc)
+                                break
+                    if chosen_slot:
+                        break
+                if chosen_slot:
+                    break
+        elif is_lunch:
+            for d_off in range(0, 14):
+                chk_d = now_local.date() + timedelta(days=d_off)
+                for hr, mn in [(12, 30), (13, 0), (13, 30)]:
+                    s_loc = datetime(chk_d.year, chk_d.month, chk_d.day, hr, mn, 0, tzinfo=tz)
+                    s_utc = s_loc.astimezone(timezone.utc)
+                    e_utc = s_utc + timedelta(minutes=dur)
+                    if s_utc >= now:
+                        for fs in slots:
+                            fs_s = _parse_dt(fs["start"])
+                            fs_e = _parse_dt(fs["end"])
+                            if fs_s and fs_e and fs_s <= s_utc and fs_e >= e_utc:
+                                chosen_slot = (s_utc, e_utc)
+                                break
+                    if chosen_slot:
+                        break
+                if chosen_slot:
                     break
 
         if not chosen_slot:
-            tomorrow = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
-            chosen_slot = (tomorrow, tomorrow + timedelta(minutes=dur))
+            for s in slots:
+                s_start = _parse_dt(s["start"])
+                s_end = _parse_dt(s["end"])
+                if s_start and s_end and s_start >= now:
+                    avail_min = (s_end - s_start).total_seconds() / 60
+                    if avail_min >= min(dur, 30):
+                        chosen_slot = (s_start, min(s_end, s_start + timedelta(minutes=dur)))
+                        s["start"] = (s_start + timedelta(minutes=dur + 15)).isoformat()
+                        break
+
+        if not chosen_slot:
+            tom = now_local.date() + timedelta(days=1)
+            f_h = 19 if is_dinner else (12 if is_lunch else 10)
+            tom_dt_local = datetime(tom.year, tom.month, tom.day, f_h, 0, 0, tzinfo=tz)
+            tom_s = tom_dt_local.astimezone(timezone.utc)
+            chosen_slot = (tom_s, tom_s + timedelta(minutes=dur))
 
         new_start, new_end = chosen_slot
+        s_disp = new_start.astimezone(tz).strftime('%a, %b %d at %I:%M %p')
+        e_disp = new_end.astimezone(tz).strftime('%I:%M %p')
+        reason_msg = f"Auto-rescheduled to {s_disp} – {e_disp} in available daytime hours."
         update_data = {
             "start_time": new_start.isoformat(),
             "end_time": new_end.isoformat(),
             "status": "rescheduled",
             "auto_rescheduled": True,
             "flexibility": True,
+            "completion_note": reason_msg,
         }
         sb_patch("schedule_items", update_data, params={"id": f"eq.{task['id']}", "user_id": f"eq.{user_id}"})
         rescheduled_items.append({
@@ -2347,6 +2583,7 @@ async def schedule_auto_reschedule(request: AutoRescheduleRequest, user_id: str 
             "new_start": new_start.isoformat(),
             "new_end": new_end.isoformat(),
             "auto_rescheduled": True,
+            "reason": reason_msg,
         })
 
     return {
