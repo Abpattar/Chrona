@@ -148,17 +148,45 @@ function Message({ msg, onNavigateTimeline, onQuickAction }) {
   )
 }
 
+const CHAT_MESSAGES_KEY = 'chrona_chat_messages_v1'
+const CHAT_SESSION_KEY = 'chrona_chat_session_id_v1'
+
+const createWelcomeMessage = () => ({
+  id: '0',
+  role: 'assistant',
+  content:
+    "Hi! I'm Chrona, your personal AI time-management assistant.\n\nYou can chat with me naturally, describe tasks, or upload your syllabus/timetable directly using the 📎 button or drag-and-drop.\n\nTry: \"I have college 9 AM to 4 PM every weekday, need to study OS for 2 hours daily, and exercise 4 days a week.\"",
+  timestamp: new Date().toISOString(),
+})
+
+function loadStoredMessages() {
+  try {
+    const raw = localStorage.getItem(CHAT_MESSAGES_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    }
+  } catch (e) {
+    console.warn('Could not load saved chat history:', e)
+  }
+  return [createWelcomeMessage()]
+}
+
+function getOrCreateSessionId() {
+  try {
+    const existing = localStorage.getItem(CHAT_SESSION_KEY)
+    if (existing) return existing
+    const fresh = `session-${Date.now()}`
+    localStorage.setItem(CHAT_SESSION_KEY, fresh)
+    return fresh
+  } catch {
+    return `session-${Date.now()}`
+  }
+}
+
 export default function Chat() {
   const navigate = useNavigate()
-  const [messages, setMessages] = useState([
-    {
-      id: '0',
-      role: 'assistant',
-      content:
-        "Hi! I'm Chrona, your personal AI time-management assistant.\n\nYou can chat with me naturally, describe tasks, or upload your syllabus/timetable directly using the 📎 button or drag-and-drop.\n\nTry: \"I have college 9 AM to 4 PM every weekday, need to study OS for 2 hours daily, and exercise 4 days a week.\"",
-      timestamp: new Date().toISOString(),
-    },
-  ])
+  const [messages, setMessages] = useState(loadStoredMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [attachedFile, setAttachedFile] = useState(null)
@@ -166,7 +194,35 @@ export default function Chat() {
   const [showUploadPanel, setShowUploadPanel] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [ocrStatus, setOcrStatus] = useState('')
-  const [sessionId] = useState(() => `session-${Date.now()}`)
+  const [sessionId, setSessionId] = useState(getOrCreateSessionId)
+
+  // Persist chat history & session ID across tab navigation and page reloads
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(messages.slice(-80)))
+    } catch (e) {
+      console.warn('Could not persist chat history:', e)
+    }
+  }, [messages])
+
+  useEffect(() => {
+    try {
+      if (sessionId) localStorage.setItem(CHAT_SESSION_KEY, sessionId)
+    } catch {}
+  }, [sessionId])
+
+  const handleClearChat = async () => {
+    const oldSession = sessionId
+    const newSession = `session-${Date.now()}`
+    const freshWelcome = [createWelcomeMessage()]
+    setMessages(freshWelcome)
+    setSessionId(newSession)
+    try {
+      localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(freshWelcome))
+      localStorage.setItem(CHAT_SESSION_KEY, newSession)
+    } catch {}
+    api.clearChatHistory(oldSession).catch(() => {})
+  }
 
   // Upload drawer state
   const [panelText, setPanelText] = useState('')
@@ -461,6 +517,17 @@ export default function Chat() {
         </div>
 
         <div className="flex items-center gap-2">
+          {messages.length > 1 && (
+            <button
+              onClick={handleClearChat}
+              className="text-xs px-2.5 py-1.5 rounded-xl font-semibold bg-white/5 hover:bg-red-500/15 hover:text-red-300 text-slate-300 border border-white/10 hover:border-red-500/30 flex items-center gap-1 transition-all"
+              title="Clear chat history and start fresh"
+            >
+              <span>🗑️</span>
+              <span className="hidden sm:inline">New Chat</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowUploadPanel((v) => !v)}
             className={`text-xs px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${

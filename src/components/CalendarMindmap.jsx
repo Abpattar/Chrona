@@ -336,7 +336,7 @@ function DateBranchNode({ data }) {
 
 // ── Custom Node: Center Timeline Core ─────────────────────────────────────────
 function CenterTimelineNode({ data }) {
-  const { total, completed, pending, onAutoRescheduleAll, onLoadSamples } = data
+  const { total, completed, pending, onAutoRescheduleAll } = data
 
   return (
     <div
@@ -370,16 +370,10 @@ function CenterTimelineNode({ data }) {
         </span>
       </div>
 
-      {total === 0 && onLoadSamples && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onLoadSamples()
-          }}
-          className="mt-3 text-[10px] font-bold px-3 py-1.5 rounded-xl transition-all shadow-glow text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110"
-        >
-          ✦ Load Sample Student Schedule
-        </button>
+      {total === 0 && (
+        <p className="mt-2.5 text-[10px] text-slate-400 font-mono">
+          No tasks yet — use Chrona Chat to plan
+        </p>
       )}
 
       {pending > 0 && onAutoRescheduleAll && (
@@ -408,7 +402,7 @@ const nodeTypes = {
 }
 
 // ── Layout Generator ─────────────────────────────────────────────────────────
-function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll, onLoadSamples, onOverrideBreak, onExplain }) {
+function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoRescheduleAll, onOverrideBreak, onExplain }) {
   const nodes = []
   const edges = []
 
@@ -426,7 +420,6 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
       completed: completedCount,
       pending: pendingCount,
       onAutoRescheduleAll,
-      onLoadSamples,
     },
     draggable: true,
   })
@@ -589,7 +582,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
 }
 
 // ── Inner Flow Canvas Component ───────────────────────────────────────────────
-function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
+function MindmapFlow({ items, loadSchedule }) {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [canvasHeight, setCanvasHeight] = useState(0)
@@ -705,7 +698,6 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
       onReschedule: handleReschedule,
       onDelete: handleDelete,
       onAutoRescheduleAll: handleAutoRescheduleAll,
-      onLoadSamples,
       onOverrideBreak: handleOverrideBreak,
       onExplain: handleExplain,
     })
@@ -715,7 +707,7 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
     setTimeout(() => {
       rfInstance.current?.fitView({ padding: 0.25, duration: 400 })
     }, 200)
-  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, onLoadSamples, handleOverrideBreak, handleExplain, setNodes, setEdges])
+  }, [filteredItems, handleComplete, handleReschedule, handleDelete, handleAutoRescheduleAll, handleOverrideBreak, handleExplain, setNodes, setEdges])
 
   const onInit = useCallback((instance) => {
     rfInstance.current = instance
@@ -764,15 +756,6 @@ function MindmapFlow({ items, onLoadSamples, loadSchedule }) {
             onChange={(e) => setSearch(e.target.value)}
             className="text-xs px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 w-28 sm:w-36"
           />
-
-          {items.length === 0 && (
-            <button
-              onClick={onLoadSamples}
-              className="text-xs px-3 py-1 rounded-lg bg-cyan-500 text-white font-bold hover:brightness-110 shadow-glow"
-            >
-              ✦ Load Sample Plan
-            </button>
-          )}
 
           <button
             onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400 })}
@@ -950,57 +933,6 @@ export default function CalendarMindmap({ onOpenRepair }) {
     loadSchedule()
   }, [loadSchedule])
 
-  const handleLoadSamples = useCallback(async () => {
-    const today = dayjs()
-    const samples = [
-      {
-        title: 'College Lectures (Mon-Fri)',
-        start_time: today.hour(9).minute(0).second(0).toISOString(),
-        end_time: today.hour(16).minute(0).second(0).toISOString(),
-        task_type: 'fixed',
-        priority: 1,
-        flexibility: false,
-      },
-      {
-        title: 'Operating Systems Midterm Prep',
-        start_time: today.add(1, 'day').hour(17).minute(0).toISOString(),
-        end_time: today.add(1, 'day').hour(19).minute(0).toISOString(),
-        task_type: 'study',
-        priority: 1,
-        duration_minutes: 120,
-      },
-      {
-        title: 'Flute Practice Session',
-        start_time: today.add(2, 'day').hour(17).minute(0).toISOString(),
-        end_time: today.add(2, 'day').hour(18).minute(0).toISOString(),
-        task_type: 'practice',
-        priority: 3,
-        duration_minutes: 60,
-      },
-      {
-        title: 'Gym & Fitness Workout',
-        start_time: today.hour(18).minute(30).toISOString(),
-        end_time: today.hour(19).minute(30).toISOString(),
-        task_type: 'workout',
-        priority: 2,
-        duration_minutes: 60,
-      },
-      {
-        title: 'Finish E-Commerce Project Module',
-        deadline: today.add(3, 'day').hour(23).minute(59).toISOString(),
-        task_type: 'task',
-        priority: 2,
-        status: 'pending',
-        duration_minutes: 90,
-      },
-    ]
-
-    for (const s of samples) {
-      await api.scheduleFixedCreate(s).catch(() => {})
-    }
-    loadSchedule()
-  }, [loadSchedule])
-
   if (loading && items.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -1016,7 +948,6 @@ export default function CalendarMindmap({ onOpenRepair }) {
     <ReactFlowProvider>
       <MindmapFlow
         items={items}
-        onLoadSamples={handleLoadSamples}
         loadSchedule={loadSchedule}
       />
     </ReactFlowProvider>

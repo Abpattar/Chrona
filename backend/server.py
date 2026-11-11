@@ -1387,6 +1387,51 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
     fallback_s = fallback_s_local.astimezone(timezone.utc)
     return fallback_s, fallback_s + timedelta(minutes=dur), f"Rescheduled to {fallback_s_local.strftime('%A at %I:%M %p')}."
 
+def _find_existing_schedule_item(
+    existing_list: list,
+    task_id=None,
+    original_title: str = "",
+    new_title: str = "",
+    expected_type: str = "",
+) -> Optional[dict]:
+    """Locate an existing non-cancelled schedule item by ID, original title, or matching title."""
+    if task_id:
+        tid_str = str(task_id).strip()
+        for ex in existing_list:
+            if str(ex.get("id") or "").strip() == tid_str:
+                return ex
+
+    o_lower = (original_title or "").strip().lower()
+    if o_lower:
+        for ex in existing_list:
+            if (ex.get("title") or "").strip().lower() == o_lower:
+                return ex
+        for ex in existing_list:
+            ex_title = (ex.get("title") or "").strip().lower()
+            if ex_title and (o_lower in ex_title or ex_title in o_lower):
+                return ex
+
+    t_lower = (new_title or "").strip().lower()
+    if t_lower:
+        for ex in existing_list:
+            if (ex.get("title") or "").strip().lower() == t_lower:
+                return ex
+        exp_t = (expected_type or "").strip().lower()
+        for ex in existing_list:
+            ex_title = (ex.get("title") or "").strip().lower()
+            ex_t = (ex.get("task_type") or "").strip().lower()
+            same_category = (
+                not exp_t
+                or not ex_t
+                or exp_t == ex_t
+                or exp_t in ("task", "fixed")
+                or ex_t in ("task", "fixed")
+            )
+            if same_category and ex_title and (t_lower in ex_title or ex_title in t_lower):
+                return ex
+
+    return None
+
 def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_items: list, user_text: str = "", user_tz: Optional[timezone] = None) -> tuple:
     """
     Save or update a task item while automatically detecting collisions
@@ -1405,8 +1450,27 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
     existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
     combined_existing = list(existing_list) + list(in_flight_items)
 
-    inferred = infer_task_properties(task_data, user_text=user_text, existing_items=combined_existing)
-    dur = int(inferred.get("duration_minutes") or 60)
+    req_task_id = task_data.get("task_id") or task_data.get("id")
+    orig_title = (task_data.get("original_title") or "").strip()
+    raw_title = (task_data.get("title") or "").strip()
+    is_explicit_edit = bool(req_task_id or orig_title)
+
+    # Identify existing target upfront when editing/moving so unchanged fields are preserved
+    pre_match = _find_existing_schedule_item(
+        existing_list,
+        task_id=req_task_id,
+        original_title=orig_title,
+        new_title=raw_title,
+    ) if (is_explicit_edit or raw_title) else None
+
+    task_input = dict(task_data)
+    if pre_match and not task_input.get("duration_minutes") and pre_match.get("duration_minutes"):
+        task_input["duration_minutes"] = pre_match["duration_minutes"]
+    if (not task_input.get("title") or str(task_input.get("title")).strip().lower() in ["pending task", "untitled", "task"]) and pre_match:
+        task_input["title"] = pre_match.get("title")
+
+    inferred = infer_task_properties(task_input, user_text=user_text, existing_items=combined_existing)
+    dur = int(inferred.get("duration_minutes") or (pre_match.get("duration_minutes") if pre_match else 60) or 60)
     t_clean = (inferred.get("title") or "").strip()
     if not t_clean or t_clean.lower() in ["pending task", "untitled", "task", "undefined", "null"]:
         return None, None
@@ -1427,15 +1491,19 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
     if task_data.get("deadline"):
         item["deadline"] = task_data["deadline"]
+    elif is_explicit_edit and pre_match and pre_match.get("deadline"):
+        item["deadline"] = pre_match["deadline"]
 
     raw_start = task_data.get("fixed_start") or task_data.get("start_time")
+    if not raw_start and is_explicit_edit and pre_match and pre_match.get("start_time"):
+        raw_start = pre_match["start_time"]
     if raw_start:
         s_dt = _parse_dt(raw_start, user_tz)
         if s_dt:
             item["start_time"] = s_dt.isoformat()
             raw_end = task_data.get("fixed_end") or task_data.get("end_time")
             e_dt = _parse_dt(raw_end, user_tz) if raw_end else None
-            if not e_dt or e_dt <= s_dt:
+            if not e_dt or e_dt <= s_dt or task_data.get("duration_minutes"):
                 e_dt = s_dt + timedelta(minutes=dur)
             item["end_time"] = e_dt.isoformat()
             item["status"] = "scheduled"
@@ -1470,7 +1538,12 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         combined = list(combined_existing)
 
         for other in combined:
-            if (other.get("title") or "").strip().lower() == item["title"].strip().lower():
+            if pre_match and pre_match.get("id") and other.get("id") and str(other.get("id")) == str(pre_match.get("id")):
+                continue
+            other_title_low = (other.get("title") or "").strip().lower()
+            if other_title_low == item["title"].strip().lower():
+                continue
+            if orig_title and other_title_low == orig_title.lower():
                 continue
 
             has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other, existing_items=combined)
@@ -1499,7 +1572,11 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                     item["end_time"] = new_e.isoformat()
                     item["status"] = "rescheduled"
                     item["auto_rescheduled"] = True
-                    item["flexibility"] = True
+                    item["flexibility"] = (
+                        inferred.get("flexibility", False)
+                        if inferred.get("controllability") == "external"
+                        else True
+                    )
                     item["completion_note"] = reason
                     reschedule_note = note_msg
                 else:
@@ -1511,7 +1588,11 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                         "auto_rescheduled": True,
                         "task_type": loser_prop["task_type"],
                         "priority": loser_prop["priority"],
-                        "flexibility": True,
+                        "flexibility": (
+                            loser_prop.get("flexibility", False)
+                            if loser_prop.get("controllability") == "external"
+                            else True
+                        ),
                         "controllability": loser_prop.get("controllability", "personal"),
                         "completion_note": reason,
                     }
@@ -1524,16 +1605,19 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         s_dt = _parse_dt(item.get("start_time"))
         reschedule_note = f"⚡ Strict Schedule: '{item['title']}' was placed strictly at {s_dt.strftime('%I:%M %p')} as requested (decompression break skipped)."
 
-    # Deduplication check
-    existing_resp = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"})
-    existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
-    match = None
-    t_lower = (item.get("title") or "").strip().lower()
-    for ex in existing_list:
-        ex_title = (ex.get("title") or "").strip().lower()
-        if ex_title == t_lower or (t_lower and (t_lower in ex_title or ex_title in t_lower)):
-            match = ex
-            break
+    # Deduplication check: prioritize explicit task_id / original_title, then same-category title match
+    match = _find_existing_schedule_item(
+        existing_list,
+        task_id=req_task_id,
+        original_title=orig_title,
+        new_title=item["title"],
+        expected_type=item.get("task_type", ""),
+    )
+
+    if match and not item.get("auto_rescheduled"):
+        item["auto_rescheduled"] = False
+        if "completion_note" not in item:
+            item["completion_note"] = task_data.get("completion_note")
 
     saved = None
     if match:
@@ -1720,39 +1804,72 @@ Break this down into realistic, actionable subtasks.
 # CHRONA CHAT ENGINE
 # ==============================
 
+def _parse_time_str_hm(time_str: str) -> Optional[tuple]:
+    """Parse a clock string like '8:30 PM' or '6pm' into 24-hour (hour, minute)."""
+    import re
+    if not time_str:
+        return None
+    m = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', time_str.lower())
+    if not m:
+        return None
+    hr = int(m.group(1))
+    mn = int(m.group(2) or 0)
+    ampm = m.group(3)
+    if ampm == 'pm' and hr < 12:
+        hr += 12
+    elif ampm == 'am' and hr == 12:
+        hr = 0
+    return hr, mn
+
 def extract_context_hints(text: str) -> dict:
-    """Extract quick hints like 'at 9 PM', 'Sunday 8pm', 'for 2 hours', '8 to 10 PM', 'Math exam' from user utterance."""
+    """Extract quick hints like 'at 9 PM', 'Sunday 8pm', 'for 2 hours', '8 to 10 PM', 'day after tomorrow' from user utterance."""
     import re
     t_lower = text.lower()
     hints = {}
 
-    # 1. Time range check e.g. '8 to 10 PM', '8-10 PM', '8:00 to 10:00 PM', '8 and ends at 9'
-    range_m = re.search(r'\b(\d{1,2}(?::\d{2})?)\s*(?:am|pm)?\s*(?:to|-|until|and\s+ends\s+at)\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)\b', t_lower)
-    if range_m:
-        s_part, e_part, ampm = range_m.groups()
-        hints["time_str"] = f"{s_part} {ampm.upper()}"
-        try:
-            s_hr = int(s_part.split(":")[0])
-            s_mn = int(s_part.split(":")[1]) if ":" in s_part else 0
-            e_hr = int(e_part.split(":")[0])
-            e_mn = int(e_part.split(":")[1]) if ":" in e_part else 0
-            if ampm == "pm" and e_hr < 12:
-                e_hr += 12
-                if s_hr < 12:
-                    s_hr += 12
-            diff_m = (e_hr * 60 + e_mn) - (s_hr * 60 + s_mn)
-            if diff_m > 0:
-                hints["duration_minutes"] = diff_m
-        except Exception:
-            pass
-    else:
-        time_m = re.search(r'\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower)
-        if time_m:
-            hints["time_str"] = time_m.group(1).upper()
+    is_shift_phrase = bool(re.search(r'\b(?:move|reschedule|shift|change|update|postpone|push|correct|put)\b', t_lower))
 
-    day_m = re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b', t_lower)
+    # 1. Distinguish rescheduling 'from X to Y' (Y is destination time) vs event duration 'from 8 to 10 PM'
+    shift_m = None
+    if is_shift_phrase:
+        shift_m = re.search(
+            r'\bfrom\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:to|into)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b',
+            t_lower,
+        )
+
+    if shift_m:
+        hints["time_str"] = shift_m.group(2).upper()
+    else:
+        range_m = re.search(
+            r'\b(\d{1,2}(?::\d{2})?)\s*(am|pm)?\s*(?:to|-|until|and\s+ends\s+at)\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)\b',
+            t_lower,
+        )
+        if range_m:
+            s_part, s_ampm, e_part, e_ampm = range_m.groups()
+            s_ap = s_ampm or e_ampm
+            hints["time_str"] = f"{s_part} {s_ap.upper()}"
+            try:
+                s_parsed = _parse_time_str_hm(f"{s_part} {s_ap}")
+                e_parsed = _parse_time_str_hm(f"{e_part} {e_ampm}")
+                if s_parsed and e_parsed:
+                    diff_m = (e_parsed[0] * 60 + e_parsed[1]) - (s_parsed[0] * 60 + s_parsed[1])
+                    if diff_m > 0:
+                        hints["duration_minutes"] = diff_m
+            except Exception:
+                pass
+        else:
+            dest_m = re.search(r'\bto\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower) if is_shift_phrase else None
+            time_m = dest_m or re.search(r'\b(?:at|for|around)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b', t_lower)
+            if time_m:
+                hints["time_str"] = time_m.group(1).upper()
+
+    day_m = re.search(
+        r'\b(day\s+after\s+tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b',
+        t_lower,
+    )
     if day_m:
-        hints["day_str"] = day_m.group(1).capitalize()
+        matched_day = re.sub(r'\s+', ' ', day_m.group(1).strip())
+        hints["day_str"] = "Day after tomorrow" if matched_day == "day after tomorrow" else matched_day.capitalize()
 
     if "duration_minutes" not in hints:
         dur_h = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', t_lower)
@@ -1765,11 +1882,11 @@ def extract_context_hints(text: str) -> dict:
 
     # Look for task title
     # Pattern A: explicit intent words
-    title_m = re.search(r'\b(?:schedule|add|have|plan|for|about|task is|event is|it is for|it\'s for|its for)\s+([a-zA-Z0-9\s]{3,35}?)(?:\s+at|\s+on|\s+tomorrow|\s+next|\s+for|\.|\?|$)', text, re.IGNORECASE)
+    title_m = re.search(r'\b(?:schedule|add|have|plan|for|about|task is|event is|it is for|it\'s for|its for)\s+([a-zA-Z0-9\s]{3,35}?)(?:\s+at|\s+on|\s+today|\s+tomorrow|\s+day after tomorrow|\s+next|\s+for|\.|\?|$)', text, re.IGNORECASE)
     if title_m:
         cand = title_m.group(1).strip()
         cand = re.sub(r'^(my|the|a|an)\s+', '', cand, flags=re.IGNORECASE).strip()
-        if cand.lower() not in ["it", "that", "this", "something", "a task", "me", "my schedule"]:
+        if cand.lower() not in ["it", "that", "this", "something", "a task", "me", "my schedule", "today", "tomorrow", "day after tomorrow"]:
             hints["title"] = cand
 
     # Pattern B: standalone domain titles e.g. "Math exam", "Dinner with friends", "Chemistry quiz", "Family function"
@@ -1781,7 +1898,7 @@ def extract_context_hints(text: str) -> dict:
                 if m_kw:
                     cand = m_kw.group(1).strip()
                     cand = re.sub(r'^(for|about|my|the|a|an)\s+', '', cand, flags=re.IGNORECASE).strip()
-                    cand = re.sub(r'\s+(at|on|tomorrow|next).*$', '', cand, flags=re.IGNORECASE).strip()
+                    cand = re.sub(r'\s+(at|on|today|tomorrow|day after tomorrow|next).*$', '', cand, flags=re.IGNORECASE).strip()
                     if cand and len(cand) >= 3:
                         hints["title"] = cand
                         break
@@ -1789,33 +1906,28 @@ def extract_context_hints(text: str) -> dict:
     return hints
 
 def compute_datetime_from_day_and_time(day_str: str, time_str: str, user_tz: Optional[timezone] = None) -> datetime:
-    """Compute offset-aware UTC datetime given day name and time string in user's timezone (e.g. 'Sunday', '6 PM')."""
-    import re
+    """Compute offset-aware UTC datetime given day name/relative day and time string in user's timezone."""
     tz = user_tz or _get_default_tz()
     now_local = datetime.now(tz)
-    hr, mn = 18, 0  # default 6 PM
-    if time_str:
-        m = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', time_str.lower())
-        if m:
-            hr = int(m.group(1))
-            mn = int(m.group(2) or 0)
-            ampm = m.group(3)
-            if ampm == 'pm' and hr < 12:
-                hr += 12
-            elif ampm == 'am' and hr == 12:
-                hr = 0
+    parsed_hm = _parse_time_str_hm(time_str)
+    hr, mn = parsed_hm if parsed_hm else (18, 0)  # default 6 PM if omitted
 
     days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
     target_date = now_local.date()
-    if day_str and day_str.lower() in days:
-        target_idx = days.index(day_str.lower())
+    d_low = (day_str or "").strip().lower()
+    if d_low in days:
+        target_idx = days.index(d_low)
         current_idx = now_local.weekday()
         diff = (target_idx - current_idx) % 7
         if diff == 0 and hr < now_local.hour:
             diff = 7
         target_date = now_local.date() + timedelta(days=diff)
-    elif day_str and day_str.lower() == 'tomorrow':
+    elif d_low == 'tomorrow':
         target_date = now_local.date() + timedelta(days=1)
+    elif d_low == 'day after tomorrow':
+        target_date = now_local.date() + timedelta(days=2)
+    elif d_low == 'today':
+        target_date = now_local.date()
 
     local_dt = datetime(target_date.year, target_date.month, target_date.day, hr, mn, 0, tzinfo=tz)
     return local_dt.astimezone(timezone.utc)
@@ -1859,11 +1971,17 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - When extracted text from an uploaded timetable or syllabus image/document is provided:
      * Extract ALL classes, lectures, labs, exams, and assignments.
      * Keep college lectures and exams as fixed (priority 1), and workouts/study as flexible (priority 3).
-6. RESCHEDULING & MOVING EXISTING TASKS (CRITICAL):
-   - When the user asks to move, reschedule, postpone, or change the time/date of an existing task (e.g. "move the date to 9pm on sunday", "reschedule math exam to 10am"):
-   - You MUST include the updated task in the "tasks" array!
-   - Set fixed_start to the new requested ISO time (e.g. Sunday 9:00 PM), fixed_end to fixed_start + duration, and set action to "reschedule".
-   - NEVER leave "tasks" empty when the user tells you to move or reschedule a task! If "tasks" is empty, the database cannot be updated!
+6. RESCHEDULING, EDITING & MOVING EXISTING TASKS (CRITICAL):
+   - When the user asks to move, reschedule, postpone, edit, rename, correct, or change the time/date/duration of an existing task (including follow-up corrections like "make it 8pm", "change it to tomorrow", "I said family function tomorrow but you put day after tomorrow", "move it from 6pm to 8pm"):
+   - Inspect "User's current schedule context" (which lists existing items with `[id=...]`, exact local time, duration, and controllability) and "ACTIVE TASKS CURRENTLY IN DISCUSSION".
+   - You MUST return the updated task in the "tasks" array and set "action": "reschedule"!
+   - Set "task_id" to the existing item's exact `id` and "original_title" to its existing title so the database updates the existing record IN PLACE instead of creating a duplicate!
+   - CRITICAL PRESERVATION RULE WHEN EDITING:
+     * If the user only changes the DATE/DAY (e.g. "move it to tomorrow", "I meant tomorrow"): KEEP the existing task's original local clock time (NEVER invent 12:00 PM or 9:00 PM)!
+     * If the user only changes the TIME (e.g. "change to 8 PM", "move from 6pm to 8pm"): KEEP the existing task's original date and duration!
+     * If the user only changes DURATION or TITLE: KEEP the existing task's original `fixed_start`!
+     * Set `fixed_end` = `fixed_start` + `duration_minutes`.
+   - NEVER leave "tasks" empty when the user asks to move, edit, or correct a task! If "tasks" is empty, the database cannot be updated!
 7. LOCUS OF CONTROL & TASK PRIORITIZATION (CRITICAL):
    - EXTERNAL COMMITMENTS (NOT in user's control):
      Events where the timing is governed externally by third parties, organizations, or tickets (Family functions, weddings, ceremonies, doctor appointments, interviews, live classes/lectures, formal exams, movies/shows, flights).
@@ -1879,7 +1997,7 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
      * The PERSONAL task is the one that gets RESCHEDULED to an optimal free slot (e.g. earlier daytime focus window before the event, or next available slot).
    - CONTEXTUAL EXAM-AWARE STUDY PRIORITY:
      * Differentiate between an ACTUAL EXAM (task_type: "exam", priority: 1, controllability: "external") and STUDYING FOR AN EXAM (task_type: "study", controllability: "personal").
-     * If the user has an upcoming exam in their schedule or mentions an upcoming exam, study sessions for that exam have elevated priority (Priority 2, High/Important), but remain personal/controllable (yielding to immovable external events, but prioritized over low-priority personal tasks like gaming/workouts).
+     * If the user has an upcoming exam in their schedule or mentions an upcoming exam, study sessions for that exam have elevated priority (Priority 2, High/Important), but remain personal/controllability="personal" (yielding to immovable external events, but prioritized over low-priority personal tasks like gaming/workouts).
      * If there is no upcoming exam, self-study is standard priority (Priority 3, Normal).
 
 When extracting tasks/events, return valid JSON in this exact structure:
@@ -1888,6 +2006,8 @@ When extracting tasks/events, return valid JSON in this exact structure:
   "message": "Your friendly, conversational response explaining what you did or scheduled",
   "tasks": [
     {
+      "task_id": "existing item id when editing/moving/rescheduling, else null",
+      "original_title": "existing item title when editing/renaming, else null",
       "title": "string",
       "duration_minutes": number,
       "deadline": "ISO string or null",
@@ -1907,6 +2027,27 @@ When extracting tasks/events, return valid JSON in this exact structure:
   "schedule_trigger": false
 }
 """
+
+def _merge_recent_tasks(existing_recent: list, updates: list) -> list:
+    """Merge new or updated tasks into recent session context without duplicates."""
+    merged = [dict(x) for x in (existing_recent or []) if isinstance(x, dict)]
+    for upd in (updates or []):
+        if not isinstance(upd, dict):
+            continue
+        u_id = str(upd.get("id") or upd.get("task_id") or "").strip()
+        u_orig = (upd.get("original_title") or "").strip().lower()
+        u_title = (upd.get("title") or "").strip().lower()
+        replaced = False
+        for idx, cur in enumerate(merged):
+            c_id = str(cur.get("id") or cur.get("task_id") or "").strip()
+            c_title = (cur.get("title") or "").strip().lower()
+            if (u_id and c_id and u_id == c_id) or (u_orig and c_title == u_orig) or (u_title and c_title == u_title):
+                merged[idx] = {**cur, **upd}
+                replaced = True
+                break
+        if not replaced:
+            merged.append(dict(upd))
+    return merged[-6:]
 
 async def process_chat_message(user_id: str, message: str, session_id: str = None, context: dict = None, user_tz: Optional[timezone] = None) -> dict:
     """
@@ -1963,26 +2104,58 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
                 draft_dict = {"title": pending_draft}
 
     current_hints = extract_context_hints(message)
-    for k, v in current_hints.items():
-        if v:
-            draft_dict[k] = v
+    msg_lower = message.lower()
+    is_move_cmd = bool(re.search(r'\b(move|reschedule|shift|postpone|push|change\s+time|change\s+date|set\s+time)\b', msg_lower))
+    has_negation_or_correction = bool(re.search(r'\b(but|not|instead|wrong|should\s+be|actually|supposed\s+to|why\s+did\s+you)\b', msg_lower))
+    has_duration_or_rename = bool(re.search(r'\b(rename|call\s+it|duration|minutes?|mins?|hours?|hrs?|longer|shorter)\b', msg_lower))
 
-    # If title is missing, search backwards in history turns
-    if not draft_dict.get("title"):
-        for turn in reversed(history_turns):
-            if turn.get("role") == "user":
-                h_prev = extract_context_hints(turn.get("content", ""))
-                if h_prev.get("title"):
-                    draft_dict["title"] = h_prev["title"]
-                    break
+    if pending_draft or (not recent_tasks and not is_move_cmd and not has_negation_or_correction):
+        for k, v in current_hints.items():
+            if v:
+                draft_dict[k] = v
 
-    # Get user's existing schedule context
-    week_start = _now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
-    week_end = week_start + timedelta(days=14)
-    existing = get_user_schedule(user_id, week_start, week_end)
-    schedule_summary = f"User has {len(existing)} scheduled items in the next 2 weeks."
-    if existing[:5]:
-        schedule_summary += " Recent: " + ", ".join([f"{e['title']} at {e.get('start_time','?')[:16]}" for e in existing[:5]])
+        # If title is missing, search backwards in history turns for incomplete draft
+        if not draft_dict.get("title") and (pending_draft or current_hints.get("time_str") or current_hints.get("day_str") or current_hints.get("duration_minutes")):
+            for turn in reversed(history_turns):
+                if turn.get("role") == "user":
+                    h_prev = extract_context_hints(turn.get("content", ""))
+                    if h_prev.get("title"):
+                        draft_dict["title"] = h_prev["title"]
+                        break
+
+    # Fetch user's complete active schedule formatted in their local timezone
+    all_sched_resp = sb_get("schedule_items", {
+        "user_id": f"eq.{user_id}",
+        "status": "neq.cancelled",
+        "order": "start_time.asc",
+    })
+    all_user_items = (all_sched_resp.json() if all_sched_resp.status_code == 200 else []) or []
+
+    sched_lines = []
+    for it in all_user_items:
+        it_title = (it.get("title") or "").strip()
+        if not it_title or it_title.lower() in ["pending task", "untitled", "task"]:
+            continue
+        s_dt = _parse_dt(it.get("start_time"), user_tz) if it.get("start_time") else None
+        e_dt = _parse_dt(it.get("end_time"), user_tz) if it.get("end_time") else None
+        if s_dt:
+            s_loc = s_dt.astimezone(tz)
+            if e_dt:
+                e_loc = e_dt.astimezone(tz)
+                when_str = f"{s_loc.strftime('%Y-%m-%d (%a) %I:%M %p')} – {e_loc.strftime('%I:%M %p')}"
+            else:
+                when_str = s_loc.strftime('%Y-%m-%d (%a) %I:%M %p')
+        else:
+            when_str = "Unscheduled/Pending"
+        sched_lines.append(
+            f"- [id={it.get('id')}] \"{it_title}\" | {when_str} | {it.get('duration_minutes', 60)}m | "
+            f"type={it.get('task_type', 'task')} | control={it.get('controllability', 'personal')} | status={it.get('status', 'scheduled')}"
+        )
+
+    if sched_lines:
+        schedule_summary = f"User has {len(sched_lines)} active schedule items (all times in local {tz}):\n" + "\n".join(sched_lines)
+    else:
+        schedule_summary = "User currently has 0 scheduled items."
 
     # Build dialogue history string
     history_str = ""
@@ -1996,16 +2169,24 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
     if recent_tasks:
         recent_tasks_str = "ACTIVE TASKS CURRENTLY IN DISCUSSION:\n"
         for rt in recent_tasks[-4:]:
-            recent_tasks_str += f"- Title: \"{rt.get('title')}\", Scheduled: {rt.get('fixed_start') or rt.get('start_time')}, Duration: {rt.get('duration_minutes')}m, Deadline: {rt.get('deadline')}\n"
-        recent_tasks_str += "\nCRITICAL RULE: If the user provides durations, prep time, or adjustments (e.g. 'it will be 45 minutes long', '2 hours prep beforehand', 'make it 30 mins'), they are modifying the active task above! DO NOT ASK FOR TITLE OR DATE AGAIN! Update the active task and/or add the prep block immediately in the 'tasks' array!\n"
+            rt_raw_s = rt.get('fixed_start') or rt.get('start_time')
+            rt_dt = _parse_dt(rt_raw_s, user_tz) if rt_raw_s else None
+            rt_when = rt_dt.astimezone(tz).strftime('%Y-%m-%d (%a) %I:%M %p') if rt_dt else "Pending"
+            rt_id = rt.get('id') or rt.get('task_id')
+            recent_tasks_str += (
+                f"- [id={rt_id}] Title: \"{rt.get('title')}\", Scheduled (local): {rt_when}, "
+                f"Duration: {rt.get('duration_minutes')}m, Deadline: {rt.get('deadline')}\n"
+            )
+        recent_tasks_str += (
+            "\nCRITICAL RULE: If the user asks to edit, fix, move, or adjust one of these tasks "
+            "(e.g. 'it will be 45 minutes', 'move it to tomorrow', 'I meant tomorrow'), "
+            "update the existing task using its task_id and original_title rather than creating a duplicate!\n"
+        )
 
-    # Check move / reschedule intent for an existing task
-    is_move_cmd = bool(re.search(r'\b(move|reschedule|shift|postpone|push|change\s+time|set\s+time)\b', message.lower()))
-    if is_move_cmd:
-        all_user_items = sb_get("schedule_items", {"user_id": f"eq.{user_id}", "status": "neq.cancelled"}).json() or []
+    # Fast-path move / reschedule ONLY for unambiguous commands without negation/correction clauses
+    if is_move_cmd and not has_negation_or_correction and not has_duration_or_rename and (current_hints.get("day_str") or current_hints.get("time_str")):
         sorted_existing = sorted(all_user_items, key=lambda x: len(x.get("title") or ""), reverse=True)
         matched_item = None
-        msg_lower = message.lower()
         for ex in sorted_existing:
             ex_title = (ex.get("title") or "").strip().lower()
             if not ex_title or ex_title in ["pending task", "untitled", "task"]:
@@ -2015,10 +2196,34 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
                 matched_item = ex
                 break
 
+        # Pronoun fallback against recent session tasks
+        if not matched_item and re.search(r'\b(it|that|this|the\s+task|the\s+event|the\s+session|the\s+function)\b', msg_lower):
+            for rt in reversed(recent_tasks):
+                matched_item = _find_existing_schedule_item(
+                    all_user_items,
+                    task_id=rt.get("id") or rt.get("task_id"),
+                    new_title=rt.get("title") or "",
+                )
+                if matched_item:
+                    break
+
         if matched_item:
-            t_day = current_hints.get("day_str") or "Sunday"
-            t_time = current_hints.get("time_str") or "9:00 PM"
-            target_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
+            orig_utc = _parse_dt(matched_item.get("start_time"), user_tz) if matched_item.get("start_time") else None
+            orig_local = orig_utc.astimezone(tz) if orig_utc else None
+
+            has_day = bool(current_hints.get("day_str"))
+            has_time = bool(current_hints.get("time_str"))
+            time_for_calc = current_hints.get("time_str") or (orig_local.strftime("%I:%M %p") if orig_local else "6:00 PM")
+
+            if has_day:
+                target_start = compute_datetime_from_day_and_time(current_hints["day_str"], time_for_calc, user_tz)
+            else:
+                parsed_hm = _parse_time_str_hm(time_for_calc)
+                hr, mn = parsed_hm if parsed_hm else (18, 0)
+                base_date = orig_local.date() if orig_local else datetime.now(tz).date()
+                target_local = datetime(base_date.year, base_date.month, base_date.day, hr, mn, 0, tzinfo=tz)
+                target_start = target_local.astimezone(timezone.utc)
+
             dur = int(matched_item.get("duration_minutes") or 60)
             target_end = target_start + timedelta(minutes=dur)
 
@@ -2037,6 +2242,8 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
             resp_msg = f"I've moved '{matched_item.get('title')}' to {time_display}."
 
             await cache_del(draft_cache_key)
+            recent_tasks = _merge_recent_tasks(recent_tasks, [matched_item])
+            await cache_set(recent_tasks_cache_key, json.dumps(recent_tasks), ex=7200)
             history_turns.append({"role": "user", "content": message})
             history_turns.append({"role": "assistant", "content": resp_msg})
             await cache_set(history_cache_key, json.dumps(history_turns[-10:]), ex=7200)
@@ -2045,13 +2252,14 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
                 "action": "reschedule",
                 "message": resp_msg,
                 "tasks": [matched_item],
+                "already_saved": True,
                 "clarification_needed": None,
                 "schedule_trigger": True
             }
 
     pending_draft_str = ""
     clean_draft_title = (draft_dict.get("title") or "").strip()
-    if clean_draft_title and clean_draft_title.lower() not in ["pending task", "untitled", "task"]:
+    if pending_draft and clean_draft_title and clean_draft_title.lower() not in ["pending task", "untitled", "task"]:
         pending_draft_str = (
             f"\nACCUMULATED TASK IN PROGRESS ACROSS TURNS:\n"
             f"- Event Title: \"{clean_draft_title}\"\n"
@@ -2073,14 +2281,29 @@ async def process_chat_message(user_id: str, message: str, session_id: str = Non
 User's current schedule context: {schedule_summary}
 User's latest message: "{message}"
 
-Extract any tasks/commitments and respond helpfully. Return valid JSON.
+Extract any tasks/commitments (including updates/reschedules to existing items using task_id/original_title) and respond helpfully. Return valid JSON.
 """
 
     result = _ai_json(prompt, system=system)
 
-    # Post-process extracted tasks to guarantee no null duration
+    # Post-process extracted tasks: preserve existing duration/id on edits and guarantee non-null duration
     extracted_tasks = result.get("tasks") or []
+    is_edit_action = result.get("action") in ("reschedule", "update")
     for t in extracted_tasks:
+        existing_match = _find_existing_schedule_item(
+            all_user_items,
+            task_id=t.get("task_id") or t.get("id"),
+            original_title=t.get("original_title") or "",
+            new_title=t.get("title") or "",
+        )
+        if existing_match and (is_edit_action or t.get("task_id") or t.get("original_title")):
+            if not t.get("task_id") and existing_match.get("id"):
+                t["task_id"] = existing_match["id"]
+            if not t.get("original_title") and existing_match.get("title"):
+                t["original_title"] = existing_match["title"]
+            if not t.get("duration_minutes") and existing_match.get("duration_minutes"):
+                t["duration_minutes"] = existing_match["duration_minutes"]
+
         if not t.get("duration_minutes"):
             ttype = (t.get("task_type") or "").lower()
             if "exam" in ttype or "exam" in t.get("title", "").lower():
@@ -2103,11 +2326,11 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
                     e_dt = s_dt + timedelta(minutes=dur_m)
                 t["fixed_end"] = e_dt.isoformat()
 
-    # Deterministic fallback: If user provided title & time across turns but LLM hesitated
+    # Deterministic fallback: If user provided title & time across turns for an incomplete draft
     if not extracted_tasks and draft_dict.get("title") and (draft_dict.get("time_str") or current_hints.get("time_str")):
         t_title = draft_dict["title"]
         t_time = draft_dict.get("time_str") or current_hints.get("time_str")
-        t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Sunday"
+        t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Today"
         dt_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
         dur = int(draft_dict.get("duration_minutes") or 60)
         t_prop = infer_task_properties({"title": t_title})
@@ -2118,6 +2341,7 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
             "task_type": t_prop.get("task_type", "task"),
             "priority": t_prop.get("priority", 3),
             "flexibility": t_prop.get("flexibility", True),
+            "controllability": t_prop.get("controllability", "personal"),
             "fixed_start": dt_start.isoformat(),
             "fixed_end": (dt_start + timedelta(minutes=dur)).isoformat(),
         }
@@ -2132,7 +2356,7 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
         "very important at that time", "important at that time", "no break", "skip break",
         "skip decompression", "without break", "don't need a break", "no decompression"
     ]
-    if any(k in message.lower() for k in strict_keywords):
+    if any(k in msg_lower for k in strict_keywords):
         for t in extracted_tasks:
             t["strict_time"] = True
             t["skip_recovery_buffer"] = True
@@ -2143,8 +2367,8 @@ Extract any tasks/commitments and respond helpfully. Return valid JSON.
     # Memory update: Track active recent tasks and draft
     if extracted_tasks:
         await cache_del(draft_cache_key)
-        recent_tasks.extend(extracted_tasks)
-        await cache_set(recent_tasks_cache_key, json.dumps(recent_tasks[-6:]), ex=7200)
+        recent_tasks = _merge_recent_tasks(recent_tasks, extracted_tasks)
+        await cache_set(recent_tasks_cache_key, json.dumps(recent_tasks), ex=7200)
     elif result.get("clarification_needed") or draft_dict.get("title"):
         draft_dict["last_question"] = result.get("message", "")
         draft_dict["clarification_needed"] = result.get("clarification_needed")
@@ -2297,6 +2521,48 @@ async def onboarding(request: OnboardingRequest, user_id: str = Depends(get_user
 
 # ---- CHAT / NATURAL LANGUAGE ----
 
+async def _sync_recent_tasks_cache(user_id: str, session_id: Optional[str], saved_items: list):
+    """Persist the saved schedule IDs and latest times back into session recent_tasks memory."""
+    if not saved_items:
+        return
+    session_key = session_id or "default"
+    recent_key = f"chrona:recent_tasks:{user_id}:{session_key}"
+    existing = []
+    cached = await cache_get(recent_key)
+    if cached:
+        try:
+            existing = json.loads(cached)
+        except Exception:
+            existing = []
+    merged = _merge_recent_tasks(existing, saved_items)
+    await cache_set(recent_key, json.dumps(merged), ex=7200)
+
+@app.get("/api/chat/history")
+async def get_chat_history(
+    session_id: Optional[str] = "default",
+    user_id: str = Depends(get_user_id),
+):
+    session_key = session_id or "default"
+    history_json = await cache_get(f"chrona:history:{user_id}:{session_key}")
+    messages = []
+    if history_json:
+        try:
+            messages = json.loads(history_json)
+        except Exception:
+            messages = []
+    return {"session_id": session_key, "messages": messages}
+
+@app.delete("/api/chat/history")
+async def clear_chat_history(
+    session_id: Optional[str] = "default",
+    user_id: str = Depends(get_user_id),
+):
+    session_key = session_id or "default"
+    await cache_del(f"chrona:history:{user_id}:{session_key}")
+    await cache_del(f"chrona:draft:{user_id}:{session_key}")
+    await cache_del(f"chrona:recent_tasks:{user_id}:{session_key}")
+    return {"cleared": True, "session_id": session_key}
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest, req: Request, user_id: str = Depends(get_user_id)):
     """
@@ -2312,10 +2578,12 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(get_us
         user_id, request.message, request.session_id, request.context, user_tz=user_tz
     )
 
-    # Auto-process extracted tasks if present
+    # Auto-process extracted tasks if present (skip re-saving if fast-path already patched DB)
     inserted_tasks = []
     reschedule_notes = []
-    if result.get("tasks"):
+    if result.get("already_saved"):
+        inserted_tasks = list(result.get("tasks") or [])
+    elif result.get("tasks"):
         for task_data in result["tasks"]:
             if task_data.get("is_project"):
                 # Decompose project
@@ -2349,6 +2617,9 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(get_us
                     inserted_tasks.append(saved_item)
                 if conflict_note:
                     reschedule_notes.append(conflict_note)
+
+    if inserted_tasks and not result.get("already_saved"):
+        await _sync_recent_tasks_cache(user_id, request.session_id, inserted_tasks)
 
     final_msg = result.get("message", "I understand. Let me help you with that.")
     if reschedule_notes:
@@ -2487,13 +2758,18 @@ async def chat_upload(
 
     inserted_tasks = []
     reschedule_notes = []
-    if result.get("tasks"):
+    if result.get("already_saved"):
+        inserted_tasks = list(result.get("tasks") or [])
+    elif result.get("tasks"):
         for task_data in result["tasks"]:
             saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=full_user_input, user_tz=user_tz)
             if saved_item:
                 inserted_tasks.append(saved_item)
             if conflict_note:
                 reschedule_notes.append(conflict_note)
+
+    if inserted_tasks and not result.get("already_saved"):
+        await _sync_recent_tasks_cache(user_id, session_id, inserted_tasks)
 
     final_msg = result.get("message", "I analyzed your document and extracted the relevant tasks.")
     if is_image and not file_text and not inserted_tasks:

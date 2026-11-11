@@ -112,6 +112,12 @@ export const api = {
     }),
   }),
 
+  chatHistory: (sessionId) => request(`/api/chat/history?session_id=${encodeURIComponent(sessionId)}`),
+
+  clearChatHistory: (sessionId) => request(`/api/chat/history?session_id=${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  }),
+
   // ── Process Event (file/text extraction) ─────────────────
   processEvent: (textOrFormData) => {
     if (typeof textOrFormData === 'string') {

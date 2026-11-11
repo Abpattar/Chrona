@@ -1181,6 +1181,199 @@ class TestChronaScenarios:
         workout_start = _parse_dt(saved_workout["start_time"], ist_tz).astimezone(ist_tz)
         assert not (workout_start.hour == 18 and workout_start.minute == 30)
 
+    def test_extract_context_hints_move_ranges_and_relative_days(self):
+        """
+        Verify extract_context_hints parses reschedule 'from X to Y' ranges as destination time Y
+        and supports 'day after tomorrow' / 'today' cleanly.
+        """
+        from backend.server import extract_context_hints, compute_datetime_from_day_and_time
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+
+        h1 = extract_context_hints("Move family function from 6pm to 8pm")
+        assert h1.get("time_str") == "8PM" or h1.get("time_str") == "8 PM"
+        assert "duration_minutes" not in h1
+
+        h2 = extract_context_hints("Shift dinner to day after tomorrow")
+        assert h2.get("day_str") == "Day after tomorrow"
+
+        dt = compute_datetime_from_day_and_time("Day after tomorrow", "8 PM", ist_tz).astimezone(ist_tz)
+        expected_date = datetime.now(ist_tz).date() + timedelta(days=2)
+        assert dt.date() == expected_date
+        assert dt.hour == 20 and dt.minute == 0
+
+    def test_move_task_to_tomorrow_preserves_original_time_and_updates_in_place(self):
+        """
+        Verify moving an existing task to 'tomorrow' without repeating the clock time
+        preserves the original 8:00 PM clock time and updates the existing DB row in place.
+        """
+        from fastapi.testclient import TestClient
+        from backend.server import app, _in_memory_db, _mem_cache, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "00000000-0000-0000-0000-000000000001"
+        _in_memory_db["schedule_items"] = []
+        _mem_cache.clear()
+
+        now_local = datetime.now(ist_tz)
+        day_after = now_local.date() + timedelta(days=2)
+        orig_start = datetime(day_after.year, day_after.month, day_after.day, 20, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+
+        _in_memory_db["schedule_items"].append({
+            "id": "fam-func-1",
+            "user_id": user_id,
+            "title": "Family function",
+            "task_type": "family",
+            "priority": 2,
+            "flexibility": False,
+            "controllability": "external",
+            "duration_minutes": 90,
+            "start_time": orig_start.isoformat(),
+            "end_time": (orig_start + timedelta(minutes=90)).isoformat(),
+            "status": "scheduled",
+        })
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/chat",
+            json={
+                "user_id": user_id,
+                "message": "Move family function to tomorrow",
+                "session_id": "sess-preserve-time",
+                "timezone": "Asia/Kolkata",
+                "timezone_offset": "-330",
+            },
+            headers={"X-User-ID": user_id, "X-Timezone": "Asia/Kolkata", "X-Timezone-Offset": "-330"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["action"] == "reschedule"
+
+        fam_items = [it for it in _in_memory_db["schedule_items"] if it["user_id"] == user_id]
+        assert len(fam_items) == 1, f"Expected in-place update without duplicates, got {len(fam_items)}"
+        assert fam_items[0]["id"] == "fam-func-1"
+
+        moved_local = _parse_dt(fam_items[0]["start_time"], ist_tz).astimezone(ist_tz)
+        assert moved_local.date() == now_local.date() + timedelta(days=1)
+        assert moved_local.hour == 20 and moved_local.minute == 0, f"Expected preserved 8:00 PM, got {moved_local}"
+        assert fam_items[0]["duration_minutes"] == 90
+
+    def test_multiturn_edit_with_persisted_session_and_history_endpoints(self):
+        """
+        Simulate switching away and back to Chat while reusing session_id:
+        1. Create task in turn 1 -> saved with DB ID and history cached.
+        2. GET /api/chat/history returns conversation turns for persisted session_id.
+        3. Turn 2 edit/correction updates the existing task in-place via task_id/original_title
+           (with full schedule + chat history passed to LLM), without duplicating rows.
+        4. DELETE /api/chat/history clears the session cleanly.
+        """
+        from unittest.mock import patch
+        from fastapi.testclient import TestClient
+        from backend.server import app, _in_memory_db, _mem_cache, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "00000000-0000-0000-0000-000000000001"
+        session_id = "persisted-tab-session"
+        headers = {"X-User-ID": user_id, "X-Timezone": "Asia/Kolkata", "X-Timezone-Offset": "-330"}
+
+        _in_memory_db["schedule_items"] = []
+        _mem_cache.clear()
+
+        now_local = datetime.now(ist_tz)
+        day_after = now_local.date() + timedelta(days=2)
+        tomorrow = now_local.date() + timedelta(days=1)
+
+        turn1_ai = {
+            "action": "add_tasks",
+            "message": "Scheduled Family function for day after tomorrow at 8:00 PM.",
+            "tasks": [{
+                "title": "Family function",
+                "duration_minutes": 60,
+                "task_type": "family",
+                "priority": 2,
+                "flexibility": False,
+                "controllability": "external",
+                "fixed_start": f"{day_after.isoformat()}T20:00:00",
+                "fixed_end": f"{day_after.isoformat()}T21:00:00",
+            }],
+            "clarification_needed": None,
+            "schedule_trigger": False,
+        }
+
+        client = TestClient(app)
+        with patch("backend.server._ai_json", return_value=turn1_ai):
+            r1 = client.post(
+                "/api/chat",
+                json={"user_id": user_id, "message": "I have a family function day after tomorrow at 8pm", "session_id": session_id},
+                headers=headers,
+            )
+        assert r1.status_code == 200
+        assert len(_in_memory_db["schedule_items"]) == 1
+        created_id = _in_memory_db["schedule_items"][0]["id"]
+
+        # Simulate tab switch away and return to Chrona Chat
+        hist_resp = client.get(f"/api/chat/history?session_id={session_id}", headers=headers)
+        assert hist_resp.status_code == 200
+        hist_data = hist_resp.json()
+        assert len(hist_data["messages"]) == 2
+        assert "family function" in hist_data["messages"][0]["content"].lower()
+
+        captured_prompts = []
+
+        def fake_turn2_ai(prompt, system=""):
+            captured_prompts.append(prompt)
+            return {
+                "action": "reschedule",
+                "message": "Updated Family function to tomorrow at 8:00 PM.",
+                "tasks": [{
+                    "task_id": created_id,
+                    "original_title": "Family function",
+                    "title": "Family function",
+                    "duration_minutes": 60,
+                    "task_type": "family",
+                    "priority": 2,
+                    "flexibility": False,
+                    "controllability": "external",
+                    "fixed_start": f"{tomorrow.isoformat()}T20:00:00",
+                    "fixed_end": f"{tomorrow.isoformat()}T21:00:00",
+                }],
+                "clarification_needed": None,
+                "schedule_trigger": True,
+            }
+
+        with patch("backend.server._ai_json", side_effect=fake_turn2_ai):
+            r2 = client.post(
+                "/api/chat",
+                json={
+                    "user_id": user_id,
+                    "message": "I said family function tomorrow but you put that to day after tomorrow",
+                    "session_id": session_id,
+                },
+                headers=headers,
+            )
+        assert r2.status_code == 200
+        assert len(captured_prompts) == 1
+        assert created_id in captured_prompts[0]
+        assert "Recent Conversation History" in captured_prompts[0]
+        assert "08:00 PM" in captured_prompts[0]
+
+        assert len(_in_memory_db["schedule_items"]) == 1, "Edit should update existing task without duplicates"
+        updated = _in_memory_db["schedule_items"][0]
+        assert updated["id"] == created_id
+        upd_local = _parse_dt(updated["start_time"], ist_tz).astimezone(ist_tz)
+        assert upd_local.date() == tomorrow
+        assert upd_local.hour == 20 and upd_local.minute == 0
+
+        del_resp = client.delete(f"/api/chat/history?session_id={session_id}", headers=headers)
+        assert del_resp.status_code == 200
+        assert del_resp.json()["cleared"] is True
+        hist_after = client.get(f"/api/chat/history?session_id={session_id}", headers=headers).json()
+        assert hist_after["messages"] == []
+
+
 
 
 
