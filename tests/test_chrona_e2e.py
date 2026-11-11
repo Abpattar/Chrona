@@ -742,40 +742,54 @@ class TestChronaScenarios:
         from datetime import datetime, timezone, timedelta
 
         ist_tz = timezone(timedelta(hours=5, minutes=30))
-        # Saturday Nov 7 already has Dinner (7:30 PM - 8:30 PM) and Movie (9:00 PM - 10:00 PM)
+        today_local = datetime.now(ist_tz).date()
+        diff_sat = (5 - today_local.weekday()) % 7
+        if diff_sat == 0:
+            diff_sat = 7
+        sat_day = today_local + timedelta(days=diff_sat)
+
+        # Saturday has study/gym (5:30 PM - 7:00 PM), Dinner (7:30 PM - 8:30 PM) and Movie (9:00 PM - 10:00 PM)
+        sat_gym = {
+            "id": "gym-1",
+            "title": "Gym",
+            "task_type": "workout",
+            "priority": 3,
+            "flexibility": False,
+            "start_time": datetime(sat_day.year, sat_day.month, sat_day.day, 17, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(sat_day.year, sat_day.month, sat_day.day, 19, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+        }
         sat_dinner = {
             "id": "din-1",
             "title": "Dinner",
             "task_type": "social",
             "priority": 3,
             "flexibility": False,
-            "start_time": datetime(2026, 11, 7, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
-            "end_time": datetime(2026, 11, 7, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "start_time": datetime(sat_day.year, sat_day.month, sat_day.day, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(sat_day.year, sat_day.month, sat_day.day, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
         }
-        # Saturday Nov 7 Movie: 9:00 PM - 10:00 PM (15:30 - 16:30 UTC)
         sat_movie = {
             "id": "movie-1",
             "title": "Movie",
             "task_type": "fixed",
             "priority": 1,
             "flexibility": False,
-            "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
-            "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "start_time": datetime(sat_day.year, sat_day.month, sat_day.day, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(sat_day.year, sat_day.month, sat_day.day, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
         }
-        # Saturday Nov 7 Date: requested for 9:00 PM - 10:00 PM
+        # Saturday Date: requested for 9:00 PM - 10:00 PM
         sat_date = {
             "id": "date-1",
             "title": "date",
             "task_type": "social",
             "priority": 3,
             "flexibility": True,
-            "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
-            "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "start_time": datetime(sat_day.year, sat_day.month, sat_day.day, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+            "end_time": datetime(sat_day.year, sat_day.month, sat_day.day, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
             "duration_minutes": 60,
         }
 
         # Saturday evening is completely packed around Movie. Reschedule date.
-        all_sat_items = [sat_dinner, sat_movie]
+        all_sat_items = [sat_gym, sat_dinner, sat_movie]
         new_start, new_end, note = find_optimal_reschedule_slot(sat_date, sat_movie, all_sat_items, user_tz=ist_tz)
         res_loc = new_start.astimezone(ist_tz)
 
@@ -881,8 +895,8 @@ class TestChronaScenarios:
 
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         user_id = "test-context-user"
+        today_local = datetime.now(ist_tz).date()
 
-        # Today is Nov 7
         # 1. Dinner tonight (7:30 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
         # 2. Movie tonight (9:00 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
         # 3. Flute class (pending, no start time) -> should be in pending, NOT today
@@ -891,16 +905,16 @@ class TestChronaScenarios:
                 "id": "din-1",
                 "user_id": user_id,
                 "title": "Dinner",
-                "start_time": datetime(2026, 11, 7, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
-                "end_time": datetime(2026, 11, 7, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "start_time": datetime(today_local.year, today_local.month, today_local.day, 19, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "end_time": datetime(today_local.year, today_local.month, today_local.day, 20, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
                 "status": "scheduled",
             },
             {
                 "id": "mov-1",
                 "user_id": user_id,
                 "title": "Movie",
-                "start_time": datetime(2026, 11, 7, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
-                "end_time": datetime(2026, 11, 7, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "start_time": datetime(today_local.year, today_local.month, today_local.day, 21, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
+                "end_time": datetime(today_local.year, today_local.month, today_local.day, 22, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc).isoformat(),
                 "status": "scheduled",
             },
             {

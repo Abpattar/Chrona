@@ -1129,8 +1129,21 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
         note = f"Scheduled before '{anchor.get('title')}' with a {pre_anchor_buffer}-minute transition buffer."
         return pre_start, pre_end, note
 
-    # Strategy 3: Scan other optimal daytime focus/social windows on the target day
-    day_scan_hours = [19, 18, 17, 16, 15, 14, 11, 10, 20] if not is_lunch else [12, 13, 14, 11]
+    orig_s = _parse_dt(to_reschedule.get("start_time"), user_tz) or _parse_dt(to_reschedule.get("fixed_start"), user_tz)
+    orig_local = orig_s.astimezone(tz) if orig_s else None
+    orig_hour = orig_local.hour if orig_local else None
+    orig_minute = orig_local.minute if orig_local else 0
+
+    # Strategy 3: Scan other optimal windows on the target day matching the nature of the task
+    is_evening = ("date" in title_lower or "drinks" in title_lower or "party" in title_lower or is_dinner or (orig_hour is not None and orig_hour >= 19))
+    if is_evening:
+        # Evening social events only belong in the evening (18:00 - 20:30), never at 11 AM or 4 PM!
+        day_scan_hours = [19, 20, 18]
+    elif is_lunch:
+        day_scan_hours = [12, 13, 14]
+    else:
+        day_scan_hours = [19, 18, 17, 16, 15, 14, 11, 10, 20]
+
     for hour in day_scan_hours:
         c_s_local = datetime(target_date.year, target_date.month, target_date.day, hour, 0, tzinfo=tz)
         c_s = c_s_local.astimezone(timezone.utc)
@@ -1142,11 +1155,6 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
 
     # Strategy 4: If target day is packed, spillover to subsequent days (Day + 1 to Day + 14)
     # Strictly in daytime waking hours, prioritizing the user's requested hour!
-    orig_s = _parse_dt(to_reschedule.get("start_time"), user_tz) or _parse_dt(to_reschedule.get("fixed_start"), user_tz)
-    orig_local = orig_s.astimezone(tz) if orig_s else None
-    orig_hour = orig_local.hour if orig_local else None
-    orig_minute = orig_local.minute if orig_local else 0
-
     candidate_hours = []
     if orig_hour is not None:
         candidate_hours.append(orig_hour)
