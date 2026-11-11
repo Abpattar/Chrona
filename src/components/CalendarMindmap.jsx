@@ -22,11 +22,15 @@ export function getNodeTheme(item) {
   const isPending = item.status === 'pending' || !item.start_time
   const isRescheduled = item.status === 'rescheduled' || !!item.auto_rescheduled || !!item.completion_note?.includes('Auto-rescheduled')
   const titleLower = (item.title || '').toLowerCase()
-  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout/i.test(titleLower)
-  const isMovieOrShow = /movie|cinema|film|theater|theatre|concert|show|match/i.test(titleLower)
-  const isExamOrClass = item.task_type === 'exam' || item.task_type === 'class' || /exam|midterm|final|quiz|test|lecture/i.test(titleLower)
+  const isStudy = item.task_type === 'study' || /study|prep|prepare|revision|homework|reading/i.test(titleLower)
+  const isFamily = /family|function|wedding|ceremony|reception|gathering|anniversary|puja|pooja|festival|reunion/i.test(titleLower) || item.task_type === 'family'
+  const isAppointment = /doctor|dentist|appointment|clinic|therapy|hospital|surgery|interview|court/i.test(titleLower) || item.task_type === 'appointment'
+  const isMovieOrShow = /movie|cinema|film|theater|theatre|concert|show|match/i.test(titleLower) || item.task_type === 'movie'
+  const isExam = !isStudy && (item.task_type === 'exam' || /exam|midterm|final|quiz|test/i.test(titleLower))
+  const isClass = !isStudy && (item.task_type === 'class' || /lecture|class|lab/i.test(titleLower))
+  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout/i.test(titleLower) && !isFamily
   const isStrictTime = !!item.strict_time || !!item.skip_recovery_buffer || !!item.completion_note?.includes('Strict')
-  const isFixed = !isRescheduled && !isStrictTime && (isExamOrClass || isMovieOrShow || item.task_type === 'fixed' || (item.flexibility === false && !isSocial))
+  const isFixed = !isRescheduled && !isStrictTime && (isExam || isClass || isMovieOrShow || isFamily || isAppointment || item.controllability === 'external' || item.task_type === 'fixed' || (item.flexibility === false && !isSocial && !isStudy))
   const priority = Number(item.priority || 3)
 
   if (isCompleted) {
@@ -66,13 +70,17 @@ export function getNodeTheme(item) {
   }
 
   if (isFixed) {
-    const fixedLabel = (item.task_type === 'exam' || /exam|midterm|final/i.test(titleLower))
+    const fixedLabel = isExam
       ? '🔒 FIXED EXAM'
-      : (item.task_type === 'class' || /lecture|class/i.test(titleLower))
+      : isClass
         ? '🔒 FIXED CLASS'
-        : (isMovieOrShow)
+        : isMovieOrShow
           ? '🎬 FIXED MOVIE'
-          : '🔒 FIXED'
+          : isFamily
+            ? '🔒 FIXED FAMILY'
+            : isAppointment
+              ? '🏥 APPOINTMENT'
+              : '🔒 FIXED'
     return {
       border: '#a855f7',
       bg: 'rgba(168, 85, 247, 0.14)',
@@ -103,7 +111,7 @@ export function getNodeTheme(item) {
         glow: '0 0 18px rgba(249, 115, 22, 0.35)',
         badgeBg: 'rgba(249, 115, 22, 0.24)',
         badgeText: '#fb923c',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : '★ HIGH (P2)',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : (isStudy ? '📚 EXAM PREP (P2)' : '★ HIGH (P2)'),
         textStyle: 'text-orange-100 font-semibold',
       }
     case 3:
@@ -113,7 +121,7 @@ export function getNodeTheme(item) {
         glow: '0 0 16px rgba(6, 182, 212, 0.3)',
         badgeBg: 'rgba(6, 182, 212, 0.22)',
         badgeText: '#38bdf8',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED' : '● NORMAL (P3)',
+        label: isRescheduled ? '↻ AUTO-RESCHEDULED' : (isStudy ? '📚 STUDY (P3)' : '● NORMAL (P3)'),
         textStyle: 'text-cyan-100 font-semibold',
       }
     default:

@@ -882,7 +882,7 @@ class TestChronaScenarios:
         assert len(phantom_tasks) == 0, f"Found phantom tasks in database: {phantom_tasks}"
 
     @pytest.mark.asyncio
-    async def test_context_endpoint_disjoint_partitions_no_duplicates(self):
+    async def test_context_endpoint_disjoint_partitions_no_duplicates(self, monkeypatch):
         """
         User Problem Reported:
         Dashboard repeated Dinner and Movie in UP NEXT, OVERDUE, UPCOMING DEADLINES, and PENDING.
@@ -896,6 +896,10 @@ class TestChronaScenarios:
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         user_id = "test-context-user"
         today_local = datetime.now(ist_tz).date()
+
+        # Mock _now_utc to midday on today_local so dinner (7:30 PM) and movie (9:00 PM) are reliably in the future today
+        fixed_now = datetime(today_local.year, today_local.month, today_local.day, 12, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+        monkeypatch.setattr("backend.server._now_utc", lambda: fixed_now)
 
         # 1. Dinner tonight (7:30 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
         # 2. Movie tonight (9:00 PM) -> should be in today, NOT overdue, NOT upcoming deadlines, NOT pending
@@ -948,6 +952,234 @@ class TestChronaScenarios:
 
         # Upcoming deadlines should be empty (none of these have deadlines!)
         assert len(ctx["upcoming_deadlines"]) == 0
+
+    def test_infer_task_properties_controllability_and_exam_context(self):
+        """
+        Verify Locus of Control inference:
+        - Study for math exam (no exam) -> personal, priority 3, flexibility True, task_type study
+        - Study for math exam (with exam) -> personal, priority 2, flexibility True, task_type study
+        - Math exam -> external, priority 1, flexibility False, task_type exam
+        - Family function -> external, priority 2, flexibility False, task_type family
+        - Doctor appointment -> external, priority 2, flexibility False, task_type appointment
+        """
+        from backend.server import infer_task_properties
+
+        # 1. Study without upcoming exam
+        p_study = infer_task_properties({"title": "Study for math exam"}, user_text="", existing_items=[])
+        assert p_study["controllability"] == "personal"
+        assert p_study["task_type"] == "study"
+        assert p_study["priority"] == 3
+        assert p_study["flexibility"] is True
+
+        # 2. Study with upcoming math exam in schedule
+        existing = [{"title": "Math Final Exam", "task_type": "exam", "start_time": "2026-11-20T10:00:00Z"}]
+        p_study_exam = infer_task_properties({"title": "Study for math exam"}, user_text="", existing_items=existing)
+        assert p_study_exam["controllability"] == "personal"
+        assert p_study_exam["task_type"] == "study"
+        assert p_study_exam["priority"] == 2
+        assert p_study_exam["flexibility"] is True
+
+        # 3. Actual Math Exam (NOT a study task)
+        p_exam = infer_task_properties({"title": "Math exam"}, user_text="", existing_items=[])
+        assert p_exam["controllability"] == "external"
+        assert p_exam["task_type"] == "exam"
+        assert p_exam["priority"] == 1
+        assert p_exam["flexibility"] is False
+
+        # 4. Family function (External event not in user control)
+        p_family = infer_task_properties({"title": "Family function"}, user_text="", existing_items=[])
+        assert p_family["controllability"] == "external"
+        assert p_family["task_type"] == "family"
+        assert p_family["priority"] == 2
+        assert p_family["flexibility"] is False
+
+        # 5. Doctor appointment (External commitment)
+        p_doc = infer_task_properties({"title": "Doctor appointment"}, user_text="", existing_items=[])
+        assert p_doc["controllability"] == "external"
+        assert p_doc["task_type"] == "appointment"
+        assert p_doc["priority"] == 2
+        assert p_doc["flexibility"] is False
+
+    def test_control_concept_family_function_vs_study_no_exam(self):
+        """
+        User Problem Reported:
+        'I asked to set study for 8pm and also a family function at 8 pm,
+        The thing is it moved the family function to before and fixed the study part.
+        The family function is not in my control so its time is fixed,
+        but study session is in my control so I can change the time of study session.'
+
+        Verify that when Family Function at 8 PM and Study for math exam at 8 PM collide:
+        1. Family Function remains fixed at 8:00 PM (anchor, uncontrollable external event).
+        2. Study for math exam is rescheduled (loser, controllable personal task).
+        3. Clear explanation note is provided about external control vs personal control.
+        """
+        from backend.server import resolve_and_save_schedule_item, _in_memory_db, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-control-user-no-exam"
+        _in_memory_db["schedule_items"] = []
+
+        now_local = datetime.now(ist_tz)
+        target_day = now_local.date() + timedelta(days=2)
+
+        # 1. Family function at 8:00 PM (20:00 - 21:00 local)
+        s_fam = datetime(target_day.year, target_day.month, target_day.day, 20, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+        fam_task = {
+            "title": "Family function",
+            "start_time": s_fam.isoformat(),
+            "end_time": (s_fam + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_fam, _ = resolve_and_save_schedule_item(user_id, fam_task, [], user_tz=ist_tz)
+        assert saved_fam is not None
+        assert saved_fam["controllability"] == "external"
+
+        # 2. Study for math exam at 8:00 PM (same time!)
+        study_task = {
+            "title": "Study for math exam",
+            "start_time": s_fam.isoformat(),
+            "end_time": (s_fam + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_study, note = resolve_and_save_schedule_item(user_id, study_task, [], user_tz=ist_tz)
+
+        assert saved_study is not None
+        assert saved_study["controllability"] == "personal"
+        assert saved_study["status"] == "rescheduled"
+        assert saved_study["auto_rescheduled"] is True
+
+        # Family function MUST stay at 8:00 PM!
+        fam_in_db = next(it for it in _in_memory_db["schedule_items"] if it["title"] == "Family function")
+        fam_start_local = _parse_dt(fam_in_db["start_time"], ist_tz).astimezone(ist_tz)
+        assert fam_start_local.hour == 20
+        assert fam_start_local.minute == 0
+
+        # Study session MUST have been moved (e.g. to 6:30 PM before Family function)
+        study_start_local = _parse_dt(saved_study["start_time"], ist_tz).astimezone(ist_tz)
+        assert not (study_start_local.hour == 20 and study_start_local.minute == 0), "Study session should NOT be at 8:00 PM!"
+        assert "not in your control" in (saved_study.get("completion_note") or "").lower() or "external" in (saved_study.get("completion_note") or "").lower()
+
+    def test_control_concept_family_function_vs_study_with_upcoming_exam(self):
+        """
+        Verify that when user HAS an upcoming Math exam:
+        1. Study for math exam has elevated priority 2.
+        2. BUT Family function is STILL the anchor (external events cannot be moved by study).
+        3. Study is rescheduled to prime focus slot (6:30 PM before Family function).
+        """
+        from backend.server import resolve_and_save_schedule_item, _in_memory_db, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-control-user-with-exam"
+        _in_memory_db["schedule_items"] = []
+
+        now_local = datetime.now(ist_tz)
+        target_day = now_local.date() + timedelta(days=2)
+        exam_day = target_day + timedelta(days=3)
+
+        # Pre-seed upcoming Math exam in database
+        exam_s = datetime(exam_day.year, exam_day.month, exam_day.day, 10, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+        _in_memory_db["schedule_items"].append({
+            "id": "math-exam-1",
+            "user_id": user_id,
+            "title": "Math Final Exam",
+            "task_type": "exam",
+            "priority": 1,
+            "flexibility": False,
+            "controllability": "external",
+            "start_time": exam_s.isoformat(),
+            "end_time": (exam_s + timedelta(hours=2)).isoformat(),
+            "status": "scheduled",
+        })
+
+        # 1. Family function at 8:00 PM
+        s_fam = datetime(target_day.year, target_day.month, target_day.day, 20, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+        fam_task = {
+            "title": "Family function",
+            "start_time": s_fam.isoformat(),
+            "end_time": (s_fam + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_fam, _ = resolve_and_save_schedule_item(user_id, fam_task, [], user_tz=ist_tz)
+
+        # 2. Study for math exam at 8:00 PM
+        study_task = {
+            "title": "Study for math exam",
+            "start_time": s_fam.isoformat(),
+            "end_time": (s_fam + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_study, note = resolve_and_save_schedule_item(user_id, study_task, [], user_tz=ist_tz)
+
+        # Priority of study is elevated to 2 due to upcoming exam
+        assert saved_study["priority"] == 2
+        # BUT Family function still anchors because it is external!
+        assert saved_study["status"] == "rescheduled"
+        study_start_local = _parse_dt(saved_study["start_time"], ist_tz).astimezone(ist_tz)
+        assert study_start_local.hour == 18 and study_start_local.minute == 30, f"Expected 6:30 PM, got {study_start_local}"
+
+    def test_control_concept_study_with_exam_vs_workout(self):
+        """
+        Verify that between two personal tasks:
+        Study for upcoming exam (Priority 2, personal) anchors over Gym workout (Priority 3, personal).
+        """
+        from backend.server import resolve_and_save_schedule_item, _in_memory_db, _parse_dt
+        from datetime import datetime, timezone, timedelta
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        user_id = "test-study-vs-workout"
+        _in_memory_db["schedule_items"] = []
+
+        now_local = datetime.now(ist_tz)
+        target_day = now_local.date() + timedelta(days=2)
+        exam_day = target_day + timedelta(days=3)
+
+        # Pre-seed upcoming Math exam
+        exam_s = datetime(exam_day.year, exam_day.month, exam_day.day, 10, 0, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+        _in_memory_db["schedule_items"].append({
+            "id": "math-exam-1",
+            "user_id": user_id,
+            "title": "Math Final Exam",
+            "task_type": "exam",
+            "priority": 1,
+            "flexibility": False,
+            "controllability": "external",
+            "start_time": exam_s.isoformat(),
+            "end_time": (exam_s + timedelta(hours=2)).isoformat(),
+            "status": "scheduled",
+        })
+
+        s_slot = datetime(target_day.year, target_day.month, target_day.day, 18, 30, 0, tzinfo=ist_tz).astimezone(timezone.utc)
+
+        # Add Study for math exam first (P2)
+        study_task = {
+            "title": "Study for math exam",
+            "start_time": s_slot.isoformat(),
+            "end_time": (s_slot + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_study, _ = resolve_and_save_schedule_item(user_id, study_task, [], user_tz=ist_tz)
+        assert saved_study["priority"] == 2
+
+        # Add Gym workout at the same time (P3)
+        workout_task = {
+            "title": "Gym workout",
+            "start_time": s_slot.isoformat(),
+            "end_time": (s_slot + timedelta(hours=1)).isoformat(),
+            "duration_minutes": 60,
+        }
+        saved_workout, note = resolve_and_save_schedule_item(user_id, workout_task, [], user_tz=ist_tz)
+
+        # Study remains at 18:30 (anchor)
+        study_in_db = next(it for it in _in_memory_db["schedule_items"] if it["title"] == "Study for math exam")
+        study_start = _parse_dt(study_in_db["start_time"], ist_tz).astimezone(ist_tz)
+        assert study_start.hour == 18 and study_start.minute == 30
+
+        # Workout is rescheduled (loser)
+        assert saved_workout["status"] == "rescheduled"
+        workout_start = _parse_dt(saved_workout["start_time"], ist_tz).astimezone(ist_tz)
+        assert not (workout_start.hour == 18 and workout_start.minute == 30)
 
 
 

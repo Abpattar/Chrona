@@ -804,17 +804,21 @@ def calculate_recovery_buffer_minutes(preceding_task: dict, succeeding_task: dic
     p_title = (preceding_task.get("title") or "").lower()
     p_type = (preceding_task.get("task_type") or "").lower()
 
-    # High stress / cognitive exhaustion
+    # Differentiate actual exams from self-study sessions
+    study_kws = ["study", "prep", "prepare", "revision", "revise", "homework", "reading"]
+    p_is_study = any(k in p_title for k in study_kws) or p_type == "study"
+
+    # High stress / cognitive exhaustion from actual test, interview, presentation, or surgery
     stressful_keywords = ["exam", "midterm", "final", "test", "quiz", "interview", "presentation", "defense", "surgery", "oral"]
-    is_stressful = any(k in p_title for k in stressful_keywords) or p_type in ["exam", "quiz"]
+    is_stressful = not p_is_study and (any(k in p_title for k in stressful_keywords) or p_type in ["exam", "quiz"])
 
     # Physical exhaustion / workouts
     workout_keywords = ["gym", "workout", "exercise", "run", "running", "swimming", "sports"]
     is_workout = any(k in p_title for k in workout_keywords) or p_type == "workout"
 
     # Deep focus
-    focus_keywords = ["lecture", "class", "coding", "project", "assignment", "lab"]
-    is_focus = any(k in p_title for k in focus_keywords) or p_type in ["class", "lecture", "study"]
+    focus_keywords = ["lecture", "class", "coding", "project", "assignment", "lab", "study"]
+    is_focus = any(k in p_title for k in focus_keywords) or p_type in ["class", "lecture", "study"] or p_is_study
 
     if is_stressful:
         buffer_min = 35  # 30-45 min relaxation after stressful exam
@@ -833,14 +837,89 @@ def calculate_recovery_buffer_minutes(preceding_task: dict, succeeding_task: dic
 
     return buffer_min
 
-def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
+def check_upcoming_exam_context(subject_or_title: str, user_text: str = "", existing_items: list = None) -> dict:
     """
-    Intelligently infer task type, priority, and flexibility based on description and context.
-    Rule: Unless the user explicitly says a task is 'very important' / 'high priority' / 'urgent',
-    tasks default to Normal or Low priority (Priority 3/4).
-    Hard commitments (Exams, tests, finals) default to Priority 1 (Critical) and flexibility: False.
-    Strict time override: If user specifies 'at that time only', 'strictly at', 'no break', etc.,
-    marks strict_time=True and skip_recovery_buffer=True.
+    Check if the user has an upcoming actual exam related to this study task,
+    either mentioned in conversation or scheduled in existing items.
+    Returns: {"has_upcoming_exam": bool, "exam_title": Optional[str], "reason": str}
+    """
+    import re
+    s_title = (subject_or_title or "").lower()
+    u_text = (user_text or "").lower()
+
+    # Academic subjects
+    subjects = [
+        "math", "mathematics", "calculus", "algebra", "geometry", "physics",
+        "chemistry", "biology", "history", "english", "literature", "computer science",
+        "cs", "os", "operating systems", "algorithms", "dsa", "database", "sql",
+        "economics", "microeconomics", "macroeconomics", "statistics", "stats",
+        "science", "philosophy", "psychology", "sociology"
+    ]
+    matched_subjects = [sub for sub in subjects if re.search(r'\b' + re.escape(sub) + r'\b', s_title)]
+
+    # 1. Check user utterance / conversation text for upcoming exam mentions
+    exam_mention = re.search(r'\b(?:have|got|upcoming|scheduled)?\s*(?:an?|[a-z]+)?\s*exam\s+(?:on|in|next|tomorrow|this|at)\b', u_text)
+    if exam_mention:
+        return {
+            "has_upcoming_exam": True,
+            "exam_title": exam_mention.group(0),
+            "reason": f"Upcoming exam mentioned in conversation: '{exam_mention.group(0)}'"
+        }
+
+    # 2. Check existing items in database for actual exams (task_type == 'exam' and not study)
+    if existing_items:
+        study_kws = ["study", "prep", "prepare", "revision", "revise", "homework", "reading"]
+        for it in existing_items:
+            it_title = (it.get("title") or "").lower()
+            it_type = (it.get("task_type") or "").lower()
+            it_is_study = any(k in it_title for k in study_kws) or it_type == "study"
+            is_actual_exam = not it_is_study and (it_type in ["exam", "quiz"] or any(k in it_title for k in ["exam", "midterm", "final", "quiz", "test"]))
+            if is_actual_exam:
+                if matched_subjects:
+                    if any(sub in it_title for sub in matched_subjects):
+                        return {
+                            "has_upcoming_exam": True,
+                            "exam_title": it.get("title"),
+                            "reason": f"Upcoming scheduled exam: '{it.get('title')}'"
+                        }
+                else:
+                    return {
+                        "has_upcoming_exam": True,
+                        "exam_title": it.get("title"),
+                        "reason": f"Upcoming scheduled exam: '{it.get('title')}'"
+                    }
+
+    return {
+        "has_upcoming_exam": False,
+        "exam_title": None,
+        "reason": "No upcoming exam found in schedule or conversation"
+    }
+
+def infer_task_properties(task_dict: dict, user_text: str = "", existing_items: list = None) -> dict:
+    """
+    Intelligently infer task type, priority, flexibility, and LOCUS OF CONTROL based on description and context.
+    
+    LOCUS OF CONTROL HIERARCHY:
+    1. External commitments (Not in user's control):
+       - Family functions, weddings, ceremonies, receptions, anniversaries, parties
+       - Medical & formal appointments (doctor, dentist, clinic, therapy, surgery, interview, court)
+       - Public ticketed events (movies, concerts, theater, flights, trains)
+       - Live college classes & labs
+       - Actual scheduled exams
+       -> controllability: "external", flexibility: False.
+       These are FIXED ANCHORS that can NEVER be moved by personal tasks!
+
+    2. Personal tasks (In user's control):
+       - Study sessions, exam prep, homework, revision
+       - Fitness, workouts, gym, running, instrument practice
+       - Chores, cleaning, cooking
+       - Casual meals & social hangouts (dinner, lunch, coffee)
+       -> controllability: "personal", flexibility: True.
+       These tasks are in the user's control and yield to external events.
+
+    EXAM-AWARE STUDY PRIORITY:
+    - Study sessions for an upcoming exam (present in schedule or mentioned) elevate to Priority 2 (High).
+    - Study sessions without an upcoming exam default to Priority 3 (Normal).
     """
     title = (task_dict.get("title") or "").strip().lower()
     task_type = (task_dict.get("task_type") or "").strip().lower()
@@ -865,24 +944,57 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
     ]
     is_strict_time = any(kw in combined_text for kw in strict_time_keywords)
 
-    hard_keywords = [
-        "exam", "midterm", "final", "quiz", "test", "lecture", "class",
-        "doctor", "dentist", "flight", "interview", "presentation", "lab", "surgery",
-        "movie", "cinema", "film", "theater", "theatre", "concert", "show", "match",
-        "train", "bus", "wedding", "ceremony", "appointment"
+    # 1. Study / Revision / Self-prep
+    study_keywords = [
+        "study", "revision", "revise", "homework", "prep", "prepare", "preparation",
+        "review", "self-study", "reading", "practice problems"
     ]
-    is_hard = any(k in title for k in hard_keywords) or task_type in ["exam", "class", "lecture", "quiz", "movie"]
+    is_study = any(k in title for k in study_keywords) or task_type in ["study", "study_block", "homework", "revision"]
 
+    # 2. Family / Social Obligation / Ceremonies (External / Uncontrollable)
+    family_keywords = [
+        "family", "function", "wedding", "reception", "ceremony", "anniversary",
+        "gathering", "reunion", "baby shower", "puja", "pooja", "festival",
+        "birthday party", "celebration", "relatives"
+    ]
+    is_family = any(k in title for k in family_keywords) or task_type == "family"
+
+    # 3. Formal Appointments (External / Uncontrollable)
+    appointment_keywords = [
+        "doctor", "dentist", "appointment", "clinic", "therapy", "hospital",
+        "checkup", "surgery", "consultation", "interview", "court", "hearing",
+        "embassy", "visa"
+    ]
+    is_appointment = any(k in title for k in appointment_keywords) or task_type == "appointment"
+
+    # 4. Ticketed / Public Scheduled Events (External / Uncontrollable)
+    ticketed_keywords = [
+        "movie", "cinema", "film", "theater", "theatre", "concert", "show",
+        "match", "flight", "train", "bus"
+    ]
+    is_ticketed = any(k in title for k in ticketed_keywords) or task_type == "movie"
+
+    # 5. Live Classes / Lectures / Labs (External / Uncontrollable)
+    class_keywords = ["lecture", "class", "lab", "seminar", "college", "school"]
+    is_class = (any(k in title for k in class_keywords) or task_type in ["class", "lecture"]) and not is_study
+
+    # 6. Actual Exams / Tests (External / Uncontrollable)
+    exam_keywords = ["exam", "midterm", "final", "quiz", "test"]
+    is_actual_exam = (any(k in title for k in exam_keywords) or task_type in ["exam", "quiz"]) and not is_study
+
+    # 7. Workouts / Fitness (Personal / Controllable)
+    workout_keywords = [
+        "gym", "workout", "exercise", "run", "running", "yoga", "swimming",
+        "flute", "practice", "piano", "guitar"
+    ]
+    is_workout = any(k in title for k in workout_keywords) or task_type == "workout"
+
+    # 8. Casual Social / Meals (Personal / Flexible)
     social_keywords = [
         "dinner", "lunch", "breakfast", "brunch", "coffee", "drinks",
-        "hang out", "hangout", "friends", "party", "meet friends", "eating", "restaurant", "club"
+        "hang out", "hangout", "friends", "meet friends", "eating", "restaurant", "club"
     ]
-    is_social = any(k in title for k in social_keywords)
-
-    workout_keywords = [
-        "gym", "workout", "exercise", "run", "running", "yoga", "swimming", "flute", "practice", "piano", "guitar"
-    ]
-    is_workout = any(k in title for k in workout_keywords)
+    is_social = any(k in title for k in social_keywords) and not is_family
 
     res = dict(task_dict)
 
@@ -890,40 +1002,76 @@ def infer_task_properties(task_dict: dict, user_text: str = "") -> dict:
         res["strict_time"] = True
         res["skip_recovery_buffer"] = True
 
-    if explicit_high_prio:
-        res["priority"] = 2
-        res["flexibility"] = not is_hard
-    elif is_hard:
-        if any(k in title for k in ["movie", "cinema", "film", "theater", "theatre"]):
-            res["task_type"] = "movie"
-        elif any(k in title for k in ["exam", "midterm", "final", "quiz", "test"]):
-            res["task_type"] = "exam"
-        elif any(k in title for k in ["class", "lecture", "lab"]):
-            res["task_type"] = "class"
-        else:
-            res["task_type"] = res.get("task_type") or "fixed"
+    # Determine Controllability, Task Type, Priority, and Flexibility
+    if is_actual_exam:
+        res["controllability"] = "external"
+        res["task_type"] = "exam"
         res["priority"] = 1
         res["flexibility"] = False
-    elif is_social:
-        res["task_type"] = "social"
-        res["priority"] = 3
+    elif is_family:
+        res["controllability"] = "external"
+        res["task_type"] = "family"
+        res["priority"] = 2
+        res["flexibility"] = False
+    elif is_appointment:
+        res["controllability"] = "external"
+        res["task_type"] = "appointment"
+        res["priority"] = 1 if any(k in title for k in ["surgery", "court", "hearing", "interview"]) else 2
+        res["flexibility"] = False
+    elif is_ticketed:
+        res["controllability"] = "external"
+        res["task_type"] = "movie" if any(k in title for k in ["movie", "cinema", "film", "theater", "theatre"]) else "fixed"
+        res["priority"] = 1
+        res["flexibility"] = False
+    elif is_class:
+        res["controllability"] = "external"
+        res["task_type"] = "class"
+        res["priority"] = 1
+        res["flexibility"] = False
+    elif is_study:
+        res["controllability"] = "personal"
+        res["task_type"] = "study"
         res["flexibility"] = True
+        exam_ctx = check_upcoming_exam_context(title, user_text=user_text, existing_items=existing_items)
+        if explicit_high_prio:
+            res["priority"] = 2
+        elif exam_ctx["has_upcoming_exam"]:
+            res["priority"] = 2  # Urgent exam preparation
+            res["exam_context"] = exam_ctx["reason"]
+        else:
+            res["priority"] = 3  # Normal self-study
     elif is_workout:
+        res["controllability"] = "personal"
         res["task_type"] = "workout"
-        res["priority"] = 3
+        res["priority"] = 2 if explicit_high_prio else 3
+        res["flexibility"] = True
+    elif is_social:
+        res["controllability"] = "personal"
+        res["task_type"] = "social"
+        res["priority"] = 2 if explicit_high_prio else 3
         res["flexibility"] = True
     else:
-        res["priority"] = 3
+        # Default fallback
+        res["controllability"] = task_dict.get("controllability") or ("external" if task_type == "fixed" or not task_dict.get("flexibility", True) else "personal")
+        res["task_type"] = res.get("task_type") or "task"
+        res["priority"] = 2 if explicit_high_prio else int(res.get("priority") or 3)
         if "flexibility" not in res:
-            res["flexibility"] = True
+            res["flexibility"] = (res["controllability"] == "personal")
 
     return res
 
-def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
+def check_collision_or_gap_issue(it1: dict, it2: dict, existing_items: list = None) -> tuple:
     """
     Check if two tasks collide or have an insufficient cognitive recovery gap.
     Returns (has_conflict, anchor, loser, gap_minutes).
-    Fixed ticketed events (Movies, Exams, Flights, Classes) can NEVER be displaced by flexible items.
+    
+    CONTROL & PRIORITY RULES:
+    1. External (uncontrollable) events (Family functions, Appointments, Exams, Movies, Classes)
+       ALWAYS anchor over Personal (controllable) tasks (Study, Workout, Chores, Casual Social).
+       The personal task MUST yield and reschedule.
+    2. If both share the same controllability (e.g. both external, or both personal):
+       - Inflexible tasks (flexibility: False) anchor over flexible tasks.
+       - Lower priority number wins (P1 Critical > P2 High > P3 Normal).
     """
     s1 = _parse_dt(it1.get("start_time"))
     e1 = _parse_dt(it1.get("end_time"))
@@ -932,19 +1080,30 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
     if not (s1 and e1 and s2 and e2):
         return False, None, None, 0
 
-    prop1 = infer_task_properties(it1)
-    prop2 = infer_task_properties(it2)
+    prop1 = infer_task_properties(it1, existing_items=existing_items)
+    prop2 = infer_task_properties(it2, existing_items=existing_items)
 
-    # Fixed tasks (flexibility: False) ALWAYS anchor and cannot be moved by flexible tasks
-    if not prop1["flexibility"] and prop2["flexibility"]:
+    ctrl1 = prop1.get("controllability", "personal")
+    ctrl2 = prop2.get("controllability", "personal")
+
+    # 1. CORE PRINCIPLE: External (uncontrollable) events ALWAYS anchor over personal (controllable) tasks.
+    if ctrl1 == "external" and ctrl2 == "personal":
         anchor, loser = it1, it2
         anchor_prop, loser_prop = prop1, prop2
-    elif prop1["flexibility"] and not prop2["flexibility"]:
+    elif ctrl1 == "personal" and ctrl2 == "external":
+        anchor, loser = it2, it1
+        anchor_prop, loser_prop = prop2, prop1
+    # 2. Same controllability: check flexibility
+    elif not prop1.get("flexibility", True) and prop2.get("flexibility", True):
+        anchor, loser = it1, it2
+        anchor_prop, loser_prop = prop1, prop2
+    elif prop1.get("flexibility", True) and not prop2.get("flexibility", True):
         anchor, loser = it2, it1
         anchor_prop, loser_prop = prop2, prop1
     else:
-        score1 = (prop1["priority"], 0 if not prop1["flexibility"] else 1)
-        score2 = (prop2["priority"], 0 if not prop2["flexibility"] else 1)
+        # 3. Same controllability & flexibility: compare priority
+        score1 = (prop1.get("priority", 3), 0 if not prop1.get("flexibility", True) else 1)
+        score2 = (prop2.get("priority", 3), 0 if not prop2.get("flexibility", True) else 1)
         if score1 <= score2:
             anchor, loser = it1, it2
             anchor_prop, loser_prop = prop1, prop2
@@ -964,6 +1123,11 @@ def check_collision_or_gap_issue(it1: dict, it2: dict) -> tuple:
 
     # 3. Check recovery gap between adjacent tasks (e.g. Exam ends at 9:00 PM, Dinner starts at 9:00 PM)
     if e1 <= s2:
+        gap = (s2 - e1).total_seconds() / 60
+        req_buf = calculate_recovery_buffer_minutes(it1, it2)
+        if gap < req_buf:
+            return True, anchor, loser, int(req_buf - gap)
+    elif e2 <= s1:
         gap = (s2 - e1).total_seconds() / 60
         req_buf = calculate_recovery_buffer_minutes(it1, it2)
         if gap < req_buf:
@@ -1106,6 +1270,24 @@ def find_optimal_reschedule_slot(to_reschedule: dict, anchor: dict, all_items: l
             note = f"Added a {post_anchor_buffer}-minute decompression break after '{anchor.get('title')}' so you don't feel rushed."
             return post_start, post_end, note
 
+    # Focus / Study Prioritization before Evening Commitments:
+    # If the anchor is an evening event starting at 19:00 or later (Family function, Party, Dinner, Movie),
+    # studying BEFORE the event (e.g. 18:30 - 19:30) is the natural human choice over studying late at night!
+    is_study_task = ("study" in title_lower or "prep" in title_lower or "revision" in title_lower or "homework" in title_lower)
+    anchor_hour = anchor_start.astimezone(tz).hour if anchor_start else None
+
+    if is_study_task and anchor_hour and anchor_hour >= 19:
+        # Check pre-anchor study slot first (e.g. 18:30 - 19:30 before 20:00 Family function)
+        pre_end = anchor_start - timedelta(minutes=max(pre_anchor_buffer, 20))
+        pre_start = pre_end - timedelta(minutes=dur)
+        if pre_start.minute not in [0, 30]:
+            pre_start = pre_start.replace(minute=30 if pre_start.minute >= 30 else 0, second=0, microsecond=0)
+            pre_end = pre_start + timedelta(minutes=dur)
+        if (pre_end + timedelta(minutes=20)) <= anchor_start and is_candidate_valid(pre_start, pre_end, is_today):
+            s_disp = pre_start.astimezone(tz).strftime('%I:%M %p')
+            note = f"Scheduled Study session at {s_disp} before '{anchor.get('title')}' so you are focused and relaxed for the evening."
+            return pre_start, pre_end, note
+
     # Strategy 1: Post-anchor slot on target day (with stress recovery buffer)
     post_start = anchor_end + timedelta(minutes=post_anchor_buffer)
     rem = post_start.minute % 5
@@ -1210,10 +1392,20 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
     Save or update a task item while automatically detecting collisions
     and insufficient recovery gaps, rescheduling flexible tasks to optimal non-overlapping slots.
     Enforces day-of-week integrity and daytime wake/sleep boundaries.
+    Respects LOCUS OF CONTROL: External commitments anchor firmly, personal tasks yield.
     Returns (saved_item, optional_explanation_note).
     """
     tz = user_tz or _get_default_tz()
-    inferred = infer_task_properties(task_data, user_text=user_text)
+
+    # Pre-fetch existing schedule to provide accurate exam context & collision tracking
+    existing_resp = sb_get("schedule_items", {
+        "user_id": f"eq.{user_id}",
+        "status": "neq.cancelled",
+    })
+    existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
+    combined_existing = list(existing_list) + list(in_flight_items)
+
+    inferred = infer_task_properties(task_data, user_text=user_text, existing_items=combined_existing)
     dur = int(inferred.get("duration_minutes") or 60)
     t_clean = (inferred.get("title") or "").strip()
     if not t_clean or t_clean.lower() in ["pending task", "untitled", "task", "undefined", "null"]:
@@ -1226,6 +1418,7 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         "duration_minutes": dur,
         "priority": inferred.get("priority", 3),
         "flexibility": inferred.get("flexibility", True),
+        "controllability": inferred.get("controllability", "personal"),
         "status": "pending",
     }
     if inferred.get("strict_time") or inferred.get("skip_recovery_buffer"):
@@ -1274,25 +1467,32 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
     # Check for collisions or insufficient recovery gaps with existing scheduled items or items in this batch
     if item.get("start_time") and item.get("end_time"):
-        existing_resp = sb_get("schedule_items", {
-            "user_id": f"eq.{user_id}",
-            "status": "neq.cancelled",
-        })
-        existing_list = existing_resp.json() if existing_resp.status_code == 200 else []
-        combined = list(existing_list) + list(in_flight_items)
+        combined = list(combined_existing)
 
         for other in combined:
             if (other.get("title") or "").strip().lower() == item["title"].strip().lower():
                 continue
 
-            has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other)
+            has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other, existing_items=combined)
             if has_conflict:
                 orig_s_fmt = _parse_dt(loser.get("start_time"), user_tz).astimezone(tz).strftime("%I:%M %p")
                 new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined, user_tz=user_tz)
                 new_s_fmt = new_s.astimezone(tz).strftime("%I:%M %p")
                 new_e_fmt = new_e.astimezone(tz).strftime("%I:%M %p")
 
-                reason = f"Auto-rescheduled from {orig_s_fmt} to {new_s_fmt}: {slot_note}"
+                a_prop = infer_task_properties(anchor, existing_items=combined)
+                l_prop = infer_task_properties(loser, existing_items=combined)
+
+                if a_prop.get("controllability") == "external" and l_prop.get("controllability") == "personal":
+                    ctrl_msg = f"'{anchor.get('title')}' is a fixed external commitment (not in your control), while '{loser.get('title')}' is in your personal control."
+                    reason = f"Auto-rescheduled from {orig_s_fmt} to {new_s_fmt}: {ctrl_msg} {slot_note}"
+                    note_msg = (
+                        f"⚡ Auto-Rescheduled: '{loser.get('title')}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. "
+                        f"'{anchor.get('title')}' is an external commitment (not in your control), so '{loser.get('title')}' was shifted to an optimal focus slot."
+                    )
+                else:
+                    reason = f"Auto-rescheduled from {orig_s_fmt} to {new_s_fmt}: {slot_note}"
+                    note_msg = f"⚡ Auto-Rescheduled: '{loser.get('title')}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
 
                 if loser == item:
                     item["start_time"] = new_s.isoformat()
@@ -1301,11 +1501,9 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                     item["auto_rescheduled"] = True
                     item["flexibility"] = True
                     item["completion_note"] = reason
-                    reschedule_note = (
-                        f"⚡ Auto-Rescheduled: '{item['title']}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
-                    )
+                    reschedule_note = note_msg
                 else:
-                    loser_prop = infer_task_properties(other)
+                    loser_prop = infer_task_properties(other, existing_items=combined)
                     patch_data = {
                         "start_time": new_s.isoformat(),
                         "end_time": new_e.isoformat(),
@@ -1314,14 +1512,13 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                         "task_type": loser_prop["task_type"],
                         "priority": loser_prop["priority"],
                         "flexibility": True,
+                        "controllability": loser_prop.get("controllability", "personal"),
                         "completion_note": reason,
                     }
                     if other.get("id"):
                         sb_patch("schedule_items", patch_data, params={"id": f"eq.{other['id']}", "user_id": f"eq.{user_id}"})
                     other.update(patch_data)
-                    reschedule_note = (
-                        f"⚡ Auto-Rescheduled: '{other.get('title')}' was adjusted from {orig_s_fmt} to {new_s_fmt} – {new_e_fmt}. {slot_note}"
-                    )
+                    reschedule_note = note_msg
 
     if item.get("strict_time") and not reschedule_note:
         s_dt = _parse_dt(item.get("start_time"))
@@ -1575,9 +1772,9 @@ def extract_context_hints(text: str) -> dict:
         if cand.lower() not in ["it", "that", "this", "something", "a task", "me", "my schedule"]:
             hints["title"] = cand
 
-    # Pattern B: standalone domain titles e.g. "Math exam", "Dinner with friends", "Chemistry quiz"
+    # Pattern B: standalone domain titles e.g. "Math exam", "Dinner with friends", "Chemistry quiz", "Family function"
     if "title" not in hints:
-        keywords = ["exam", "test", "quiz", "midterm", "final", "dinner", "lunch", "movie", "cinema", "workout", "gym", "flute", "piano", "class", "lecture"]
+        keywords = ["exam", "test", "quiz", "midterm", "final", "dinner", "lunch", "movie", "cinema", "workout", "gym", "flute", "piano", "class", "lecture", "function", "wedding", "appointment", "study", "reception"]
         for kw in keywords:
             if kw in t_lower:
                 m_kw = re.search(rf'([a-zA-Z0-9\s]{{2,25}}?\b{kw}\b[a-zA-Z0-9\s]{{0,15}})', text, re.IGNORECASE)
@@ -1667,6 +1864,23 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - You MUST include the updated task in the "tasks" array!
    - Set fixed_start to the new requested ISO time (e.g. Sunday 9:00 PM), fixed_end to fixed_start + duration, and set action to "reschedule".
    - NEVER leave "tasks" empty when the user tells you to move or reschedule a task! If "tasks" is empty, the database cannot be updated!
+7. LOCUS OF CONTROL & TASK PRIORITIZATION (CRITICAL):
+   - EXTERNAL COMMITMENTS (NOT in user's control):
+     Events where the timing is governed externally by third parties, organizations, or tickets (Family functions, weddings, ceremonies, doctor appointments, interviews, live classes/lectures, formal exams, movies/shows, flights).
+     * The user CANNOT move or alter the timing of a family function or wedding to accommodate personal study.
+     * These commitments have controllability: "external" and flexibility: false. Their time is FIXED.
+   - PERSONAL TASKS (IN user's control):
+     Self-managed, personal activities where the user chooses when to do them (Study sessions, exam prep, homework, workouts, gym, reading, personal chores).
+     * The user CAN control and shift their study or workout time to an optimal free slot.
+     * These tasks have controllability: "personal" and flexibility: true.
+   - COLLISION PRINCIPLE:
+     When an external uncontrollable commitment conflicts with a personal task (e.g. "Family function at 8 PM" and "Study for math exam at 8 PM"):
+     * The EXTERNAL event is the IMMOVABLE ANCHOR. It stays at 8:00 PM.
+     * The PERSONAL task is the one that gets RESCHEDULED to an optimal free slot (e.g. earlier daytime focus window before the event, or next available slot).
+   - CONTEXTUAL EXAM-AWARE STUDY PRIORITY:
+     * Differentiate between an ACTUAL EXAM (task_type: "exam", priority: 1, controllability: "external") and STUDYING FOR AN EXAM (task_type: "study", controllability: "personal").
+     * If the user has an upcoming exam in their schedule or mentions an upcoming exam, study sessions for that exam have elevated priority (Priority 2, High/Important), but remain personal/controllable (yielding to immovable external events, but prioritized over low-priority personal tasks like gaming/workouts).
+     * If there is no upcoming exam, self-study is standard priority (Priority 3, Normal).
 
 When extracting tasks/events, return valid JSON in this exact structure:
 {
@@ -1679,7 +1893,8 @@ When extracting tasks/events, return valid JSON in this exact structure:
       "deadline": "ISO string or null",
       "priority": 1-4,
       "flexibility": true/false,
-      "task_type": "task|fixed|study|workout|practice|meeting|class|exam|assignment|quiz",
+      "controllability": "external|personal",
+      "task_type": "task|fixed|study|workout|practice|meeting|class|exam|assignment|quiz|family|appointment|movie",
       "recurrence": "daily|weekdays|weekly|null",
       "recurrence_days": [0,1,2,3,4] or null,
       "fixed_start": "ISO string or null",
