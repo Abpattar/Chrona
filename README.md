@@ -1,229 +1,183 @@
-# Chrona — Intelligent Adaptive Scheduling Engine
+# Chrona — Adaptive AI Time-Management Copilot
 
-> **Take a photo of your exam timetable. Chrona builds your entire study schedule, repairs it every day, and learns how you actually work.**
+> **Drop your exam timetable, syllabus, or daily routine. Chrona extracts all commitments, reasons dynamic travel & cognitive fatigue buffers with AI, locks external anchors, and auto-schedules your entire timeline into a spatial mind map and interactive 3D card deck.**
 
-## What is Chrona?
+[![Status](https://img.shields.io/badge/Status-v2.0_Adaptive_Live-emerald?style=flat-square)](https://github.com/Abpattar/Chrona)
+[![Frontend](https://img.shields.io/badge/Frontend-React_18_+_Vite_+_Tailwind-sky?style=flat-square)](https://vitejs.dev/)
+[![Backend](https://img.shields.io/badge/Backend-FastAPI_+_Python_3.12-blue?style=flat-square)](https://fastapi.tiangolo.com/)
+[![AI Engine](https://img.shields.io/badge/AI-Gemini_Vision_+_Groq_Pool-purple?style=flat-square)](https://ai.google.dev/)
+[![License](https://img.shields.io/badge/License-MIT-slate?style=flat-square)](LICENSE)
 
-Chrona is the evolution of Neuravex — an AI-powered event extraction system. It adds **intelligent scheduling**, **behavioral learning**, and **adaptive repair capabilities** on top of Neuravex's multimodal event extraction.
+---
 
-**Project Status: v1.0 Core Complete** — All backend modules, agent pipeline, database schema, and core frontend components implemented. Running locally with free-tier services ($0/month).
+## 🌟 Key Features
 
-## Current Status
+### 1. 🧠 Dynamic AI Transition Buffers (Zero Hardcoding)
+Traditional schedulers force rigid 15-minute or 30-minute static blocks. Chrona uses a dedicated AI reasoning engine (`scheduling/transitions.py`) to calculate contextual buffers based on:
+- **Travel & Commute:** Evaluates departure locations, arrival venues, and traffic realities.
+- **Preparation & Getting Ready:** Detects pre-event requirements (formal attire, equipment setup, revision).
+- **Cognitive Recovery:** Allocates decompression intervals between demanding high-focus blocks (e.g. 3-hour university exams, presentations).
+- Every scheduled task carries a dynamic `transition_reason` rendered directly in the timeline.
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Event Extraction (Neuravex)** | ✅ Complete | Text, images, PDFs via Gemini Vision |
-| **Agent Pipeline (LangGraph)** | ✅ Complete | ingestion → parser → enrichment → scheduling → repair → explanation |
-| **EDF Scheduler** | ✅ Complete | Earliest Deadline First with behavior weights |
-| **Behavior Learning** | ✅ Complete | EMA-based slot weights, onboarding cold-start |
-| **Conflict Detection & Repair** | ✅ Complete | Move, split, defer strategies with explanations |
-| **Study Block Generation** | ✅ Complete | Auto-generates 45-90min sessions from exam topics |
-| **Database Schema** | ✅ Complete | Supabase migration `003_chrona_schema.sql` |
-| **Frontend (React + Vite)** | ✅ Core | Calendar, Repair Panel, Onboarding Wizard |
-| **Production Deploy** | 🔄 Ready | Vercel serverless functions configured |
+### 2. ◈ 3-Axis Stakes System
+Every schedule item is evaluated across three core dimensions:
+- **Immovable (Ancient Anchor):** Fixed external events (university exams, lectures, flights, weddings, appointments) that can never be shifted automatically.
+- **Negotiable (Sacred Vow):** High-priority personal commitments (deep-work study sessions, project milestones, workouts) that adapt around immovable anchors.
+- **Fluid (Wandering Thought):** Flexible backlog focus blocks placed dynamically into open circadian windows.
 
-## Features
+### 3. 📄 Multimodal Timetable & Document Extraction
+- Direct drag-and-drop or attachment (`📎`) of timetable images (PNG, JPG, JPEG) and syllabi PDFs.
+- Powered by Google Gemini Flash Multimodal Vision with high-speed IPv4 routing and automatic day-first date normalization (`DD-MM-YYYY` and `hh.mm a/p`).
+- Automatically extracts start time, end time, venue, subject code, and priority in a single pass.
 
-### From Neuravex (Base)
-- Upload photos, PDFs, or text descriptions of events
-- AI extracts structured data: title, category, severity, complexity, prep hours, topics
-- Automatic mindmap visualization
-- Priority scoring and action recommendations
+### 4. 🗺️ Spatial Mind Map & Week Grid
+- **Spatial Mind Map (`/calendar`):** Interactive ReactFlow canvas mapping your commitments, dependencies, and dynamic transition nodes with live zoom, pan, and filter controls.
+- **Week Grid (`/week`):** Full-width, clean 7-day timeline view highlighting overlaps, travel buffers, and circadian energy levels.
 
-### New in Chrona v1.0
-- **EDF Scheduler** — Earliest Deadline First algorithm that assigns tasks to your free time slots
-- **Behavior Learning** — Learns when you're most productive (Meta-style EMA weight updates)
-- **Smart Repair** — When conflicts happen, proposes 3 strategies: move, split, or defer
-- **Study Block Generation** — Automatically creates study sessions from exam topics (killer feature)
-- **Onboarding Wizard** — 5-question cold start that initializes your behavioral profile
-- **Calendar View** — Real-time schedule display with complete/skip/reschedule actions
-- **LangGraph Agent Pipeline** — Full agentic AI pipeline: ingestion → parsing → enrichment → scheduling → repair → explanation
+### 5. 🃏 Interactive 3D Card Deck (`/dashboard`)
+- Tactile 3D card deck (`Deck` mode) with gesture swipe, completion marks, deferral, and instant AI re-alignment.
+- Toggle into **Grid** view for rapid scanning and bulk management.
+- Ambient glowing particle background with screen-fit `100dvh` responsive viewport.
 
-## Tech Stack
+---
 
-| Layer | Technology | Cost |
-|-------|-----------|------|
-| Frontend | React 18 + Vite + TailwindCSS | Free |
-| Backend | Python 3.11 + FastAPI | Free |
-| Production | Vercel Serverless Functions | Free tier |
-| AI | Google Gemini 2.5 Flash / Flash-Lite | Free tier (20 req/day) |
-| Database | Supabase PostgreSQL + RLS | Free tier (500MB) |
-| Cache | Upstash Redis REST | Free tier (10K req/day) |
-| Agents | LangGraph (open source) | Free |
-| Scheduling | Pure Python EDF Algorithm | Free |
-
-**Total monthly cost: $0** (all free tiers)
-
-## Quick Start
-
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- Supabase account (free at supabase.com)
-- Google Gemini API key (free at ai.google.dev)
-
-### Setup
-
-```bash
-# 1. Clone and install
-git clone https://github.com/Abpattar/Chrona.git
-cd Chrona
-npm install
-cd backend && pip install -r requirements.txt && cd ..
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your API keys (see .env.example for all variables)
-
-# 3. Run database migration
-# Paste supabase/migrations/003_chrona_schema.sql in Supabase SQL Editor
-
-# 4. Start backend
-cd backend && uvicorn server:app --port 8000 --reload
-
-# 5. Start frontend (new terminal)
-npm run dev
-```
-
-### One-command dev start (both servers)
-```bash
-python3 run_servers.py
-```
-
-### Verify
-```bash
-curl http://localhost:8000/api/health
-# {"status":"ok","service":"neuravex-chrona-backend"}
-
-curl -X POST http://localhost:8000/api/schedule/generate \
-  -H "X-User-ID: test-user" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "test-user", "tasks": [{"title": "Study", "duration_minutes": 60, "deadline": "2026-10-30T15:00:00Z"}], "free_slots": [{"start": "2026-10-30T09:00:00Z", "end": "2026-10-30T12:00:00Z"}]}'
-```
-
-## Project Structure
+## 🏗️ Architecture & Tech Stack
 
 ```
 Chrona/
 ├── backend/
-│   ├── server.py                 # FastAPI app with all endpoints
-│   ├── scheduling/               # EDF scheduler, conflict detection, repair
-│   │   ├── edf.py               # Core EDF algorithm
-│   │   ├── conflict.py          # Overlap detection
-│   │   ├── repair_engine.py     # Move/split/defer strategies
-│   │   └── validator.py         # Plan validation
-│   ├── behavior/                 # Behavioral learning
-│   │   ├── profile.py           # EMA weight updates, onboarding
-│   │   └── predictor.py         # ML predictor stub (LightGBM)
-│   ├── agents/                   # LangGraph pipeline nodes
-│   │   ├── graph.py             # Pipeline orchestration
-│   │   ├── ingestion.py         # Input type classification
-│   │   ├── parser.py            # Gemini extraction (text/image/PDF)
-│   │   ├── enrichment.py        # Study block generation from topics
-│   │   ├── repair.py            # Natural language repair proposals
-│   │   └── explanation.py       # Human-readable schedule explanations
-│   ├── cache/                    # Redis abstraction with fallback
-│   └── db/                       # Supabase client helpers
-├── api/                          # Vercel serverless functions (production)
-├── src/                          # React frontend
-│   ├── components/               # CalendarView, RepairPanel, BehaviorOnboarding
-│   ├── pages/                    # Upload, Mindmap, Priority, Drafts
-│   └── lib/                      # Supabase client, priority engine
-├── supabase/migrations/          # Database schema (003_chrona_schema.sql)
-├── tests/                        # pytest + vitest
-├── run_servers.py                # One-command dev server startup
-├── .env.example                  # All required environment variables
-└── docs/                         # Architecture & integration guides
+│   ├── server.py                 # FastAPI core application, REST APIs, and database sync
+│   ├── ai_router.py              # Dual-engine router (Gemini Vision + Groq Key Pool)
+│   ├── scheduling/
+│   │   ├── edf.py                # Earliest Deadline First (EDF) conflict resolver
+│   │   ├── transitions.py        # AI contextual transition buffer reasoner
+│   │   ├── conflict.py           # Overlap and gap evaluation engine
+│   │   └── repair_engine.py      # Move / Split / Defer repair strategies
+│   ├── agents/
+│   │   ├── parser.py             # Multimodal schedule extractor & 3-axis stakes tagger
+│   │   ├── enrichment.py         # Automatic study block generator from exam topics
+│   │   └── explanation.py        # Natural language explainability engine
+│   └── requirements.txt          # Python dependencies
+├── src/
+│   ├── components/
+│   │   ├── CardStack.jsx         # 3D interactive stacked task cards
+│   │   ├── CalendarMindmap.jsx   # Spatial mind map timeline (ReactFlow)
+│   │   ├── CalendarView.jsx      # Week grid schedule view
+│   │   └── ParticleBackground.jsx# Ambient glowing particle canvas
+│   ├── pages/
+│   │   ├── Dashboard.jsx         # Today focus view (Deck / Grid toggle)
+│   │   ├── Chat.jsx              # Chrona AI conversational assistant & file upload
+│   │   ├── Calendar.jsx          # Mind map & week grid router
+│   │   └── Onboarding.jsx        # First-time behavioral initialization wizard
+│   ├── lib/api.js                # Frontend API client and Supabase bindings
+│   └── App.jsx                   # Single-row unified navigation and routing
+├── tests/
+│   └── test_scheduling_engine.py # Pytest test suite for EDF, stakes, and transitions
+├── run_servers.py                # One-command dual dev server launcher
+└── vercel.json                   # Vercel deployment configuration
 ```
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| `README.md` | This file — project overview, setup, status |
-| `docs/READMECHRONA.md` | **Complete backend integration guide** — all modules, APIs, data flows, testing |
-| `docs/CHRONA_ARCHITECTURE.md` | Full architecture analysis and research rationale |
-| `docs/CLAUDE.md` | Quick reference for AI agents working on the codebase |
-| `.env.example` | All required environment variables |
-
-## How It Works
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Ingestion  │────▶│   Parser    │────▶│ Enrichment  │
-│  (type cls) │     │  (Gemini)   │     │ (study gen) │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-                    ┌─────────────┐     ┌───────▼───────┐
-                    │ Explanation │◀────│   Repair     │
-                    │  (natural   │     │ (move/split/ │
-                    │   language) │     │   defer)     │
-                    └──────┬──────┘     └──────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │ Scheduling  │
-                    │  (EDF +     │
-                    │  behavior)  │
-                    └─────────────┘
-```
-
-## Future Roadmap (v1.1 - v2.0)
-
-### v1.1 — Polish & Reliability (Next 2 weeks)
-- [ ] **Fix Gemini quota limits** — Implement request batching, caching, and fallback to local LLM (Ollama)
-- [ ] **End-to-end tests** — Full pipeline tests with mocked Gemini responses
-- [ ] **Rate limiting & retry logic** — Exponential backoff for all external APIs
-- [ ] **WebSocket support** — Real-time schedule updates on frontend
-- [ ] **Drag-and-drop rescheduling** — Visual calendar editing
-- [ ] **Notification system** — Email/push for upcoming tasks and conflicts
-- [ ] **Timezone support** — Full IANA timezone handling
-
-### v1.2 — Intelligence Layer (Month 2)
-- [ ] **LightGBM Predictor** — Replace stub with actual ML model for task duration/completion prediction
-- [ ] **Vector embeddings** — Semantic search for "similar past tasks"
-- [ ] **RL-based slot optimizer** — Reinforcement learning for schedule quality
-- [ ] **Multi-user support** — Team calendars, shared resources, family mode
-- [ ] **Calendar sync** — Google Calendar / Outlook 2-way sync via CalDAV
-
-### v1.3 — Platform Expansion (Month 3)
-- [ ] **Mobile app** — React Native / Expo wrapper
-- [ ] **Browser extension** — Capture events from any webpage
-- [ ] **Email parsing** — Forward emails to extract events
-- [ ] **Voice input** — Whisper integration for voice notes
-
-### v2.0 — Autonomous Agent (Month 6)
-- [ ] **Proactive scheduling** — "I notice you have exams in 2 weeks, generating prep plan now"
-- [ ] **Life integration** — Sleep tracking (Oura/Apple Health), focus sessions (Forest/Be Focused)
-- [ ] **Collaborative AI** — Multiple agents negotiating shared resources
-- [ ] **Plugin marketplace** — Custom schedulers, domain-specific extractors (medical, legal, etc.)
-
-## Known Limitations
-
-| Issue | Workaround | Fix Target |
-|-------|------------|------------|
-| Gemini free tier: 20 req/day | Cache extracted events, batch requests | v1.1 |
-| No local LLM fallback | Add Ollama support for offline mode | v1.1 |
-| Single-user auth only | Supabase RLS ready, need multi-tenant UI | v1.2 |
-| No calendar sync | CalDAV/Google Calendar API stubs exist | v1.2 |
-| Frontend state management | Migrate to TanStack Query / Zustand | v1.1 |
-
-## Competitive Advantage
-
-| Feature | Chrona | Motion | Reclaim | Clockwise |
-|---------|--------|--------|---------|-----------|
-| Multi-modal ingestion (photo/PDF) | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| Auto study plan from timetable | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| Prep hours estimation via AI | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| Topic-level sub-task generation | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| Behavior learning (EMA) | ✅ Yes | ✅ Yes | ✅ Yes | Partial |
-| Explainable AI reasoning | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| Agent-based architecture | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Free tier** | ✅ Yes | $19/mo | Limited | Limited |
-
-## License
-
-Private — Hackathon Project / Personal Portfolio
 
 ---
 
-*Built with Neuravex + Chrona Architecture | All free-tier services | Total cost: $0*
+## 🚀 Quick Start
+
+### Prerequisites
+- **Node.js**: v18+ (v20+ recommended)
+- **Python**: 3.10+ (tested on Python 3.12)
+- **API Keys**: Google Gemini API key and/or Groq API key
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/Abpattar/Chrona.git
+cd Chrona
+
+# Install frontend dependencies
+npm install
+
+# Setup backend environment
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+### 2. Configure Environment Variables
+
+Copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Add your API credentials:
+```env
+# Gemini API Key (Multimodal timetable parsing & vision)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Groq API Key (Fast conversational AI & transition reasoning)
+GROQ_API_KEY=your_groq_api_key_here
+
+# Optional: Supabase configuration (defaults to local fallback storage)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_supabase_anon_key
+```
+
+### 3. Launch Development Servers
+
+Run both the FastAPI backend (`:8000`) and Vite frontend (`:5173`) with a single command:
+
+```bash
+python3 run_servers.py
+```
+
+- **Frontend:** [http://localhost:5173](http://localhost:5173)
+- **Backend API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## 🧪 Testing & Verification
+
+Run the test suite to verify the scheduling engine, transition calculations, and conflict resolution:
+
+```bash
+# Run backend engine tests
+PYTHONPATH=backend backend/venv/bin/pytest tests/test_scheduling_engine.py
+
+# Run frontend build check
+npm run build
+```
+
+---
+
+## 🌐 API Overview
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/chat` | Natural language chat and schedule modification |
+| `POST` | `/api/chat/upload` | Multimodal timetable, syllabus, or invite card ingestion |
+| `GET` | `/api/schedule/items` | Retrieves all scheduled items and transition metadata |
+| `POST` | `/api/schedule/complete/{id}` | Marks a scheduled item as fulfilled |
+| `POST` | `/api/schedule/auto-reschedule`| Re-balances tasks using EDF and behavioral weights |
+| `GET` | `/api/context` | Live context snapshot for dashboard and active focus block |
+| `DELETE` | `/api/schedule/clear` | Clears scheduled items |
+
+---
+
+## 🚢 Deployment
+
+### Deploying Frontend to Vercel
+
+```bash
+npm run build
+vercel --prod
+```
+
+`vercel.json` is pre-configured with rewrites for Vite single-page application routing.
+
+---
+
+## 📄 License
+
+MIT License. Designed and developed with Chrona Adaptive AI.

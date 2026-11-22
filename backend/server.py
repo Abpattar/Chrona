@@ -17,7 +17,22 @@ Run with: uvicorn server:app --port 8000 --reload
 """
 import os
 import sys
+import asyncio
 import re
+import socket
+# Force IPv4 on external domains to prevent 30-60s timeouts on unroutable IPv6
+_orig_getaddrinfo = socket.getaddrinfo
+def _smart_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    if family == socket.AF_UNSPEC and host and str(host) not in ('localhost', '127.0.0.1', '0.0.0.0', '::1', None):
+        if not str(host).startswith(('127.', '192.168.', '10.', '172.')):
+            family = socket.AF_INET
+    return _orig_getaddrinfo(host, port, family, type, proto, flags)
+socket.getaddrinfo = _smart_getaddrinfo
+
+import urllib3.util.connection as urllib3_cn
+urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+
+import dateutil.parser
 import json
 import hashlib
 import traceback
@@ -28,13 +43,18 @@ from fastapi.responses import StreamingResponse
 from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
-
 # ==============================
 # CONFIGURATION
 # ==============================
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'), override=True)
+
+from ai_router import AIRouter
+from scheduling.transitions import compute_dynamic_transitions, compute_pair_transition
+from agents.parser import EXTRACTION_PROMPT as MULTIMODAL_EXTRACTION_PROMPT
+
+router = AIRouter()
 
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
@@ -49,32 +69,8 @@ GEMINI_MODEL = "gemini-3.8-flash"
 GROQ_MODEL   = "openai/gpt-oss-120b"
 
 # ---- AI Client setup ----
-gemini_client = None
-if GEMINI_API_KEY and (GEMINI_API_KEY.startswith("AIzaSy") or not GEMINI_API_KEY.startswith("AQ.")):
-    try:
-        from google import genai as _genai
-        gemini_client = _genai.Client(api_key=GEMINI_API_KEY)
-        print("✅ Gemini (google-genai) initialized")
-    except ImportError:
-        # Fallback to old SDK
-        try:
-            import google.generativeai as _oldgenai
-            _oldgenai.configure(api_key=GEMINI_API_KEY)
-            gemini_client = _oldgenai
-            print("⚠️ Using legacy google.generativeai SDK")
-        except ImportError:
-            print("❌ No Gemini SDK found")
-else:
-    print("ℹ️ Note: GEMINI_API_KEY is not a Google AI Studio key (starts with AIzaSy). Using Groq as primary LLM.")
-
-groq_client = None
-if GROQ_API_KEY:
-    try:
-        from groq import Groq
-        groq_client = Groq(api_key=GROQ_API_KEY)
-        print("✅ Groq initialized")
-    except ImportError:
-        print("⚠️ Groq not installed")
+gemini_client = router.gemini
+groq_client = next(iter(router.groq_clients.values()), None)
 
 if not all([SUPABASE_URL, SUPABASE_ANON_KEY]):
     print("⚠️  WARNING: Supabase env vars missing")
@@ -183,14 +179,45 @@ def _eval_in_memory_filter(item: dict, key: str, val: Any) -> bool:
 
     return True
 
+SUPABASE_ALLOWED_COLUMNS = {
+    "schedule_items": {
+        "id", "user_id", "event_id", "title", "task_type", "start_time", "end_time",
+        "deadline", "priority", "flexibility", "status", "actual_start", "actual_end",
+        "completion_note", "created_at"
+    }
+}
+
 def sb_get(table: str, params: dict = None, service: bool = False) -> Any:
+    remote_items = []
+    got_remote = False
     try:
         resp = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), params=params, timeout=2)
         if resp.status_code == 200:
-            return resp
+            remote_items = resp.json() or []
+            got_remote = True
     except Exception:
         pass
-    # In-memory fallback
+
+    if got_remote:
+        if not remote_items:
+            # Remote returned 200 with an empty list - legitimately empty
+            return MockResponse([], 200)
+        # Augment with computed duration_minutes and extra metadata from in-memory cache
+        mem_cache = {it.get("id"): it for it in _in_memory_db.get(table, []) if it.get("id")}
+        for it in remote_items:
+            cached = mem_cache.get(it.get("id"))
+            if cached:
+                for extra_k in ["duration_minutes", "movability", "effort_level", "life_significance", "location", "transition_reason", "auto_rescheduled"]:
+                    if extra_k in cached and extra_k not in it:
+                        it[extra_k] = cached[extra_k]
+            if "duration_minutes" not in it and it.get("start_time") and it.get("end_time"):
+                s_dt = _parse_dt(it["start_time"])
+                e_dt = _parse_dt(it["end_time"])
+                if s_dt and e_dt:
+                    it["duration_minutes"] = max(15, int((e_dt - s_dt).total_seconds() / 60))
+        return MockResponse(remote_items, 200)
+
+    # In-memory fallback if remote returned empty or failed
     items = list(_in_memory_db.get(table, []))
     if params:
         limit_val = None
@@ -219,6 +246,14 @@ def sb_get(table: str, params: dict = None, service: bool = False) -> Any:
         if limit_val is not None and limit_val > 0:
             items = items[:limit_val]
 
+    # Ensure duration_minutes is present on all in-memory items
+    for it in items:
+        if "duration_minutes" not in it and it.get("start_time") and it.get("end_time"):
+            s_dt = _parse_dt(it["start_time"])
+            e_dt = _parse_dt(it["end_time"])
+            if s_dt and e_dt:
+                it["duration_minutes"] = max(15, int((e_dt - s_dt).total_seconds() / 60))
+
     return MockResponse(items, 200)
 
 def sb_post(table: str, data: dict | list, service: bool = True) -> Any:
@@ -234,32 +269,70 @@ def sb_post(table: str, data: dict | list, service: bool = True) -> Any:
             return MockResponse([], 201)
         data = valid_post if isinstance(data, list) else valid_post[0]
 
+    # Filter payload for Supabase schema compatibility
+    allowed_cols = SUPABASE_ALLOWED_COLUMNS.get(table)
+    supabase_data = data
+    if allowed_cols:
+        if isinstance(data, list):
+            supabase_data = []
+            for it in data:
+                c_it = {k: v for k, v in it.items() if k in allowed_cols}
+                if "end_time" not in c_it and c_it.get("start_time") and it.get("duration_minutes"):
+                    s_dt = _parse_dt(c_it["start_time"])
+                    if s_dt:
+                        c_it["end_time"] = (s_dt + timedelta(minutes=int(it["duration_minutes"]))).isoformat()
+                supabase_data.append(c_it)
+        else:
+            supabase_data = {k: v for k, v in data.items() if k in allowed_cols}
+            if "end_time" not in supabase_data and supabase_data.get("start_time") and data.get("duration_minutes"):
+                s_dt = _parse_dt(supabase_data["start_time"])
+                if s_dt:
+                    supabase_data["end_time"] = (s_dt + timedelta(minutes=int(data["duration_minutes"]))).isoformat()
+
+    saved_items = []
     try:
-        resp = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), json=data, timeout=2)
+        resp = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), json=supabase_data, timeout=3)
         if resp.status_code in [200, 201]:
-            return resp
+            saved_items = resp.json() if isinstance(resp.json(), list) else [resp.json()]
     except Exception:
         pass
-    # In-memory store
+
+    # Keep in in-memory store with full enriched fields
     table_items = _in_memory_db.setdefault(table, [])
     data_list = data if isinstance(data, list) else [data]
-    inserted = []
     import uuid
-    for item in data_list:
+    inserted = []
+    for idx, item in enumerate(data_list):
         entry = dict(item)
-        if "id" not in entry:
+        if saved_items and idx < len(saved_items) and saved_items[idx].get("id"):
+            entry["id"] = saved_items[idx]["id"]
+        elif "id" not in entry:
             entry["id"] = str(uuid.uuid4())
-        table_items.append(entry)
+        # Replace or add
+        replaced = False
+        for m_idx, cur in enumerate(table_items):
+            if cur.get("id") == entry["id"]:
+                table_items[m_idx] = entry
+                replaced = True
+                break
+        if not replaced:
+            table_items.append(entry)
         inserted.append(entry)
-    return MockResponse(inserted, 201)
+
+    return MockResponse(saved_items if saved_items else inserted, 201)
 
 def sb_patch(table: str, data: dict, params: dict, service: bool = True) -> Any:
+    allowed_cols = SUPABASE_ALLOWED_COLUMNS.get(table)
+    supabase_data = {k: v for k, v in data.items() if k in allowed_cols} if allowed_cols else data
+
     try:
-        resp = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), params=params, json=data, timeout=2)
-        if resp.status_code in [200, 204]:
-            return resp
+        if supabase_data:
+            resp = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), params=params, json=supabase_data, timeout=3)
+            if resp.status_code in [200, 204]:
+                pass
     except Exception:
         pass
+
     # In-memory patch
     table_items = _in_memory_db.setdefault(table, [])
     item_id = params.get("id", "").replace("eq.", "")
@@ -271,16 +344,17 @@ def sb_patch(table: str, data: dict, params: dict, service: bool = True) -> Any:
     return MockResponse(updated, 200)
 
 def sb_delete(table: str, params: dict, service: bool = True) -> Any:
+    item_id = params.get("id", "").replace("eq.", "") if params else ""
+    if item_id:
+        _in_memory_db[table] = [i for i in _in_memory_db.get(table, []) if i.get("id") != item_id]
+    elif not params or "id" not in params:
+        _in_memory_db[table] = []
     try:
         resp = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(service), params=params, timeout=2)
         if resp.status_code in [200, 204]:
             return resp
     except Exception:
         pass
-    # In-memory delete
-    item_id = params.get("id", "").replace("eq.", "")
-    if item_id:
-        _in_memory_db[table] = [i for i in _in_memory_db.get(table, []) if i.get("id") != item_id]
     return MockResponse([], 200)
 
 # ==============================
@@ -355,9 +429,15 @@ def _parse_dt(s: Any, user_tz: Optional[timezone] = None) -> Optional[datetime]:
         s_clean = str(s).strip()
         if s_clean.endswith("Z"):
             s_clean = s_clean[:-1] + "+00:00"
-        dt = datetime.fromisoformat(s_clean)
+        try:
+            dt = datetime.fromisoformat(s_clean)
+            return _ensure_utc(dt, user_tz)
+        except Exception:
+            pass
+        s_norm = re.sub(r'(\d{1,2})\.(\d{2})\s*(am|pm|AM|PM)?', r'\1:\2 \3', s_clean).strip()
+        dt = dateutil.parser.parse(s_norm, dayfirst=True)
         return _ensure_utc(dt, user_tz)
-    except (ValueError, TypeError):
+    except Exception:
         return None
 
 # ==============================
@@ -428,67 +508,14 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return " ".join(chunks)
 
 # ==============================
-# GEMINI AI HELPERS (google-genai SDK)
+# AI ROUTING HELPERS (AIRouter: Gemini 2.5 + Groq Pool)
 # ==============================
 
-def _ai_complete(prompt: str, json_mode: bool = False, system: str = None) -> str:
-    """Call AI with Gemini primary, Groq fallback. Returns text."""
-    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+def _ai_complete(prompt: str, json_mode: bool = False, system: str = None, role: str = "chat", prefer_gemini: bool = False) -> Any:
+    return router.complete(prompt=prompt, system=system, role=role, prefer_gemini=prefer_gemini, json_mode=json_mode)
 
-    if gemini_client:
-        try:
-            # Try new google-genai SDK
-            if hasattr(gemini_client, 'models'):
-                from google import genai as _genai
-                resp = gemini_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=full_prompt,
-                    config=_genai.types.GenerateContentConfig(
-                        response_mime_type="application/json" if json_mode else "text/plain",
-                        temperature=0.1 if json_mode else 0.7,
-                        max_output_tokens=8192,
-                    )
-                )
-                return resp.text
-            else:
-                # Legacy google.generativeai SDK
-                model = gemini_client.GenerativeModel(model_name="gemini-2.0-flash")
-                config = {"temperature": 0.1 if json_mode else 0.7}
-                if json_mode:
-                    config["response_mime_type"] = "application/json"
-                resp = model.generate_content(full_prompt, generation_config=config)
-                return resp.text
-        except Exception as e:
-            print(f"⚠️ Gemini error: {e}")
-
-    if groq_client:
-        try:
-            msgs = [{"role": "user", "content": full_prompt}]
-            kw = {}
-            if json_mode:
-                kw["response_format"] = {"type": "json_object"}
-            resp = groq_client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=msgs,
-                temperature=0.1 if json_mode else 0.7,
-                max_tokens=8192,
-                **kw
-            )
-            return resp.choices[0].message.content
-        except Exception as e:
-            print(f"⚠️ Groq error: {e}")
-
-    raise HTTPException(500, "No AI provider available")
-
-def _ai_json(prompt: str, system: str = None) -> Any:
-    """Call AI and parse JSON response."""
-    text = _ai_complete(prompt, json_mode=True, system=system)
-    # Strip markdown code fences if present
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1])
-    return json.loads(text)
+def _ai_json(prompt: str, system: str = None, role: str = "chat", prefer_gemini: bool = False) -> Any:
+    return router.complete(prompt=prompt, system=system, role=role, prefer_gemini=prefer_gemini, json_mode=True)
 
 # ==============================
 # PYDANTIC MODELS
@@ -794,48 +821,32 @@ def compute_free_slots(
 # INTELLIGENT TASK INFERENCE, COGNITIVE RECOVERY & CONFLICT RESOLUTION ENGINE
 # ==============================
 
+_transition_cache = {}
+
 def calculate_recovery_buffer_minutes(preceding_task: dict, succeeding_task: dict = None) -> int:
     """
-    Calculate dynamic cognitive recovery and transition buffer based on task exertion.
-    High exertion / stressful tasks (exams, interviews, presentations) require 30-45m recovery.
-    Moderate exertion (gym, workouts, lectures) require 20-30m.
-    Casual / low effort tasks require 10-15m.
+    Dynamic common-sense transition and stakes buffer reasoned by AI.
+    Calculates realistic travel, prep time, and cognitive fatigue between tasks.
     """
-    p_title = (preceding_task.get("title") or "").lower()
-    p_type = (preceding_task.get("task_type") or "").lower()
-
-    # Differentiate actual exams from self-study sessions
-    study_kws = ["study", "prep", "prepare", "revision", "revise", "homework", "reading"]
-    p_is_study = any(k in p_title for k in study_kws) or p_type == "study"
-
-    # High stress / cognitive exhaustion from actual test, interview, presentation, or surgery
-    stressful_keywords = ["exam", "midterm", "final", "test", "quiz", "interview", "presentation", "defense", "surgery", "oral"]
-    is_stressful = not p_is_study and (any(k in p_title for k in stressful_keywords) or p_type in ["exam", "quiz"])
-
-    # Physical exhaustion / workouts
-    workout_keywords = ["gym", "workout", "exercise", "run", "running", "swimming", "sports"]
-    is_workout = any(k in p_title for k in workout_keywords) or p_type == "workout"
-
-    # Deep focus
-    focus_keywords = ["lecture", "class", "coding", "project", "assignment", "lab", "study"]
-    is_focus = any(k in p_title for k in focus_keywords) or p_type in ["class", "lecture", "study"] or p_is_study
-
-    if is_stressful:
-        buffer_min = 35  # 30-45 min relaxation after stressful exam
-    elif is_workout:
-        buffer_min = 30  # shower & cooldown
-    elif is_focus:
-        buffer_min = 20
+    if not succeeding_task:
+        return 15
+    cache_key = (
+        (preceding_task.get("title") or "").strip().lower(),
+        (succeeding_task.get("title") or "").strip().lower()
+    )
+    if cache_key in _transition_cache:
+        t = _transition_cache[cache_key]
     else:
-        buffer_min = 15
+        t = compute_pair_transition(preceding_task, succeeding_task, router=router)
+        _transition_cache[cache_key] = t
 
-    # If succeeding task is social or travel-heavy, ensure at least 30m after exam
-    if succeeding_task:
-        s_title = (succeeding_task.get("title") or "").lower()
-        if ("dinner" in s_title or "lunch" in s_title or "party" in s_title) and is_stressful:
-            buffer_min = max(buffer_min, 30)
-
-    return buffer_min
+    reason = t.get("reason")
+    if reason:
+        if isinstance(succeeding_task, dict):
+            succeeding_task["transition_reason"] = reason
+        if isinstance(preceding_task, dict):
+            preceding_task["post_transition_reason"] = reason
+    return int(t.get("buffer_minutes", 15))
 
 def check_upcoming_exam_context(subject_or_title: str, user_text: str = "", existing_items: list = None) -> dict:
     """
@@ -1058,6 +1069,47 @@ def infer_task_properties(task_dict: dict, user_text: str = "", existing_items: 
         if "flexibility" not in res:
             res["flexibility"] = (res["controllability"] == "personal")
 
+    # 3-Axis Stakes preservation & defaults
+    if "movability" in task_dict and task_dict["movability"]:
+        res["movability"] = task_dict["movability"]
+    else:
+        if res.get("controllability") == "external" or not res.get("flexibility", True):
+            res["movability"] = "immovable"
+        elif explicit_high_prio or res.get("priority") in [1, 2]:
+            res["movability"] = "negotiable"
+        else:
+            res["movability"] = "fluid"
+
+    if "effort_level" in task_dict and task_dict["effort_level"]:
+        res["effort_level"] = task_dict["effort_level"]
+    else:
+        if is_actual_exam or (is_study and res.get("priority") == 2):
+            res["effort_level"] = "high"
+        elif is_workout or is_study or is_class:
+            res["effort_level"] = "medium"
+        else:
+            res["effort_level"] = "low"
+
+    if "life_significance" in task_dict and task_dict["life_significance"]:
+        res["life_significance"] = task_dict["life_significance"]
+    else:
+        prio = res.get("priority", 3)
+        res["life_significance"] = "critical" if prio == 1 else ("high" if prio == 2 else "normal")
+
+    if "location" in task_dict and task_dict["location"]:
+        res["location"] = task_dict["location"]
+    elif task_dict.get("venue"):
+        res["location"] = task_dict["venue"]
+    else:
+        if is_class or is_actual_exam:
+            res["location"] = "campus"
+        elif is_workout:
+            res["location"] = "gym"
+        elif is_ticketed or is_family or is_appointment:
+            res["location"] = "external_venue"
+        else:
+            res["location"] = "home"
+
     return res
 
 def check_collision_or_gap_issue(it1: dict, it2: dict, existing_items: list = None) -> tuple:
@@ -1085,6 +1137,11 @@ def check_collision_or_gap_issue(it1: dict, it2: dict, existing_items: list = No
 
     ctrl1 = prop1.get("controllability", "personal")
     ctrl2 = prop2.get("controllability", "personal")
+
+    # Two external immovable commitments (e.g. exams or live classes) never reschedule each other unless directly overlapping
+    if ctrl1 == "external" and ctrl2 == "external":
+        if not (s1 < e2 and e1 > s2):
+            return False, None, None, 0
 
     # 1. CORE PRINCIPLE: External (uncontrollable) events ALWAYS anchor over personal (controllable) tasks.
     if ctrl1 == "external" and ctrl2 == "personal":
@@ -1121,24 +1178,20 @@ def check_collision_or_gap_issue(it1: dict, it2: dict, existing_items: list = No
     if loser.get("strict_time") or loser.get("skip_recovery_buffer") or loser_prop.get("strict_time") or loser_prop.get("skip_recovery_buffer"):
         return False, None, None, 0
 
-    # 3. Check recovery gap between adjacent tasks (e.g. Exam ends at 9:00 PM, Dinner starts at 9:00 PM)
+    # 3. Check recovery gap between adjacent tasks on the same day (e.g. Exam ends at 5:00 PM, Dinner at 5:15 PM)
+    # Tasks separated by more than 3 hours (180 mins) or across days need no gap conflict
     if e1 <= s2:
         gap = (s2 - e1).total_seconds() / 60
-        req_buf = calculate_recovery_buffer_minutes(it1, it2)
-        if gap < req_buf:
-            return True, anchor, loser, int(req_buf - gap)
-    elif e2 <= s1:
-        gap = (s2 - e1).total_seconds() / 60
-        req_buf = calculate_recovery_buffer_minutes(it1, it2)
-        if gap < req_buf:
-            return True, anchor, loser, int(req_buf - gap)
+        if 0 <= gap < 180:
+            req_buf = calculate_recovery_buffer_minutes(it1, it2)
+            if gap < req_buf:
+                return True, anchor, loser, int(req_buf - gap)
     elif e2 <= s1:
         gap = (s1 - e2).total_seconds() / 60
-        req_buf = calculate_recovery_buffer_minutes(it2, it1)
-        if gap < req_buf:
-            return True, anchor, loser, int(req_buf - gap)
-
-    return False, None, None, 0
+        if 0 <= gap < 180:
+            req_buf = calculate_recovery_buffer_minutes(it2, it1)
+            if gap < req_buf:
+                return True, anchor, loser, int(req_buf - gap)
 
     return False, None, None, 0
 
@@ -1483,8 +1536,14 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
         "priority": inferred.get("priority", 3),
         "flexibility": inferred.get("flexibility", True),
         "controllability": inferred.get("controllability", "personal"),
+        "movability": inferred.get("movability", "fluid"),
+        "effort_level": inferred.get("effort_level", "medium"),
+        "life_significance": inferred.get("life_significance", "normal"),
+        "location": inferred.get("location", "home"),
         "status": "pending",
     }
+    if task_data.get("transition_reason") or inferred.get("transition_reason"):
+        item["transition_reason"] = task_data.get("transition_reason") or inferred.get("transition_reason")
     if inferred.get("strict_time") or inferred.get("skip_recovery_buffer"):
         item["strict_time"] = True
         item["skip_recovery_buffer"] = True
@@ -1494,19 +1553,35 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
     elif is_explicit_edit and pre_match and pre_match.get("deadline"):
         item["deadline"] = pre_match["deadline"]
 
-    raw_start = task_data.get("fixed_start") or task_data.get("start_time")
+    raw_start = task_data.get("fixed_start") or task_data.get("start_time") or task_data.get("event_datetime")
+    if not raw_start and task_data.get("date"):
+        d_val = str(task_data.get("date")).strip()
+        t_val = str(task_data.get("time") or task_data.get("start_time") or "09:00 AM").strip()
+        raw_start = f"{d_val} {t_val}"
+    elif raw_start and task_data.get("date") and not any(sep in str(raw_start) for sep in ["-", "/"]):
+        # raw_start is only time (e.g. 01.00pm) and date is in task_data["date"]
+        raw_start = f"{task_data.get('date')} {raw_start}"
+
     if not raw_start and is_explicit_edit and pre_match and pre_match.get("start_time"):
         raw_start = pre_match["start_time"]
-    if raw_start:
-        s_dt = _parse_dt(raw_start, user_tz)
-        if s_dt:
-            item["start_time"] = s_dt.isoformat()
-            raw_end = task_data.get("fixed_end") or task_data.get("end_time")
-            e_dt = _parse_dt(raw_end, user_tz) if raw_end else None
-            if not e_dt or e_dt <= s_dt or task_data.get("duration_minutes"):
-                e_dt = s_dt + timedelta(minutes=dur)
-            item["end_time"] = e_dt.isoformat()
-            item["status"] = "scheduled"
+
+    s_dt = _parse_dt(raw_start, user_tz) if raw_start else None
+
+    # If still no start_time, assign a scheduled daytime slot so database NOT NULL constraint is satisfied
+    if not s_dt:
+        now_local = datetime.now(tz)
+        tomorrow_9am = (now_local + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        s_dt = tomorrow_9am
+
+    item["start_time"] = _ensure_utc(s_dt, user_tz).isoformat()
+    raw_end = task_data.get("fixed_end") or task_data.get("end_time")
+    if raw_end and task_data.get("date") and not any(sep in str(raw_end) for sep in ["-", "/"]):
+        raw_end = f"{task_data.get('date')} {raw_end}"
+    e_dt = _parse_dt(raw_end, user_tz) if raw_end else None
+    if not e_dt or e_dt <= s_dt:
+        e_dt = s_dt + timedelta(minutes=dur)
+    item["end_time"] = _ensure_utc(e_dt, user_tz).isoformat()
+    item["status"] = "scheduled"
 
     # Day-of-week and daytime safeguard:
     # E.g. 'a flute class every Sunday' MUST be placed on Sunday during waking hours!
@@ -1548,6 +1623,11 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
 
             has_conflict, anchor, loser, gap_deficit = check_collision_or_gap_issue(item, other, existing_items=combined)
             if has_conflict:
+                loser_prop = infer_task_properties(loser, existing_items=combined)
+                # Immovable external commitments (exams, classes, appointments) must NEVER be auto-rescheduled!
+                if loser_prop.get("controllability") == "external" or not loser_prop.get("flexibility", True):
+                    continue
+
                 orig_s_fmt = _parse_dt(loser.get("start_time"), user_tz).astimezone(tz).strftime("%I:%M %p")
                 new_s, new_e, slot_note = find_optimal_reschedule_slot(loser, anchor, combined, user_tz=user_tz)
                 new_s_fmt = new_s.astimezone(tz).strftime("%I:%M %p")
@@ -1577,6 +1657,12 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                         if inferred.get("controllability") == "external"
                         else True
                     )
+                    item["movability"] = inferred.get("movability", "fluid")
+                    item["effort_level"] = inferred.get("effort_level", "medium")
+                    item["life_significance"] = inferred.get("life_significance", "normal")
+                    item["location"] = inferred.get("location", "home")
+                    if loser.get("transition_reason"):
+                        item["transition_reason"] = loser["transition_reason"]
                     item["completion_note"] = reason
                     reschedule_note = note_msg
                 else:
@@ -1594,8 +1680,14 @@ def resolve_and_save_schedule_item(user_id: str, task_data: dict, in_flight_item
                             else True
                         ),
                         "controllability": loser_prop.get("controllability", "personal"),
+                        "movability": loser_prop.get("movability", "fluid"),
+                        "effort_level": loser_prop.get("effort_level", "medium"),
+                        "life_significance": loser_prop.get("life_significance", "normal"),
+                        "location": loser_prop.get("location", "home"),
                         "completion_note": reason,
                     }
+                    if loser.get("transition_reason"):
+                        patch_data["transition_reason"] = loser["transition_reason"]
                     if other.get("id"):
                         sb_patch("schedule_items", patch_data, params={"id": f"eq.{other['id']}", "user_id": f"eq.{user_id}"})
                     other.update(patch_data)
@@ -1958,8 +2050,9 @@ CRITICAL CONVERSATIONAL & EXTRACTION PRINCIPLES:
    - You can inform the user in your message: "I've set this for [X] hours based on typical defaults — feel free to adjust it anytime!"
 3. ACTIONABLE EXTRACTIONS:
    - Extract tasks into the "tasks" array.
+   - MANDATORY: NEVER write in your response text that a task or meeting is scheduled/confirmed unless you include the task object in the "tasks" array! If "tasks" is empty, the task will NOT be saved to the user's database or shown on their calendar. Whenever the user mentions any commitment, meeting, appointment, class, or task with a day or time, ALWAYS output it in "tasks"!
    - Only set clarification_needed if a truly essential detail is missing (e.g. user says "I have an exam" with no subject, date, or timeframe).
-   - If user says "My exam is next Friday at 2 PM", that is completely sufficient! Extract it immediately with duration=120 min.
+   - If user says "My exam is next Friday at 2 PM" or "I have a family meeting tomorrow at 5pm", that is completely sufficient! Extract it immediately with duration=60 min (or 120 min for exams).
 4. COGNITIVE RECOVERY & DECOMPRESSION BREAKS (CRITICAL):
    - Exhausting / stressful tasks (Exams, tests, midterms, finals, interviews) require a 35-minute cognitive recovery break by default!
    - If a succeeding task (such as Dinner with friends or Gym) is scheduled right after an exam (e.g. Exam ends at 9:00 PM and Dinner is at 9:00 PM), Chrona MUST by default insert a 35-minute decompression break and reschedule Dinner to 9:35 PM so the user doesn't burn out!
@@ -2326,29 +2419,40 @@ Extract any tasks/commitments (including updates/reschedules to existing items u
                     e_dt = s_dt + timedelta(minutes=dur_m)
                 t["fixed_end"] = e_dt.isoformat()
 
-    # Deterministic fallback: If user provided title & time across turns for an incomplete draft
-    if not extracted_tasks and draft_dict.get("title") and (draft_dict.get("time_str") or current_hints.get("time_str")):
-        t_title = draft_dict["title"]
-        t_time = draft_dict.get("time_str") or current_hints.get("time_str")
-        t_day = draft_dict.get("day_str") or current_hints.get("day_str") or "Today"
-        dt_start = compute_datetime_from_day_and_time(t_day, t_time, user_tz)
-        dur = int(draft_dict.get("duration_minutes") or 60)
-        t_prop = infer_task_properties({"title": t_title})
+    # Deterministic fallback: If user provided title & time/day in current hints OR accumulated draft
+    effective_title = current_hints.get("title") or draft_dict.get("title")
+    effective_time = current_hints.get("time_str") or draft_dict.get("time_str")
+    effective_day = current_hints.get("day_str") or draft_dict.get("day_str") or "Today"
 
-        synth_task = {
-            "title": t_title,
-            "duration_minutes": dur,
-            "task_type": t_prop.get("task_type", "task"),
-            "priority": t_prop.get("priority", 3),
-            "flexibility": t_prop.get("flexibility", True),
-            "controllability": t_prop.get("controllability", "personal"),
-            "fixed_start": dt_start.isoformat(),
-            "fixed_end": (dt_start + timedelta(minutes=dur)).isoformat(),
-        }
-        extracted_tasks = [synth_task]
-        result["tasks"] = extracted_tasks
-        result["clarification_needed"] = None
-        result["message"] = f"Understood! I have scheduled '{t_title}' for {t_day} at {t_time}."
+    if not extracted_tasks and effective_title and (effective_time or current_hints.get("day_str")):
+        t_clean = effective_title.strip()
+        if t_clean.lower() not in ["pending task", "untitled", "task", "something", "somting", "anything"]:
+            existing_match = _find_existing_schedule_item(all_user_items, new_title=t_clean)
+            if not existing_match:
+                t_time = effective_time or "6:00 PM"
+                dt_start = compute_datetime_from_day_and_time(effective_day, t_time, user_tz)
+                dur = int(current_hints.get("duration_minutes") or draft_dict.get("duration_minutes") or 60)
+                t_prop = infer_task_properties({"title": t_clean})
+                is_meeting = bool(re.search(r'\b(meeting|function|wedding|doctor|dentist|appointment|interview|lecture|class|exam|dinner)\b', t_clean.lower()))
+
+                synth_task = {
+                    "title": t_clean.title(),
+                    "duration_minutes": dur,
+                    "task_type": t_prop.get("task_type", "meeting" if is_meeting else "task"),
+                    "priority": 1 if is_meeting else t_prop.get("priority", 2),
+                    "flexibility": False if is_meeting else t_prop.get("flexibility", True),
+                    "controllability": "external" if is_meeting else t_prop.get("controllability", "personal"),
+                    "movability": "immovable" if is_meeting else t_prop.get("movability", "fluid"),
+                    "effort_level": t_prop.get("effort_level", "low" if is_meeting else "medium"),
+                    "fixed_start": dt_start.isoformat(),
+                    "fixed_end": (dt_start + timedelta(minutes=dur)).isoformat(),
+                }
+                extracted_tasks = [synth_task]
+                result["tasks"] = extracted_tasks
+                result["action"] = "add_tasks"
+                result["clarification_needed"] = None
+                time_disp = dt_start.astimezone(tz).strftime('%A, %b %d at %I:%M %p')
+                result["message"] = f"Locked in! I've scheduled '{t_clean.title()}' for {time_disp} ({dur}m) with full VIP priority."
 
     # Check strict time override in user message
     strict_keywords = [
@@ -2683,86 +2787,112 @@ async def chat_upload(
     user_tz = get_user_timezone(req)
     """
     Unified Chat + Upload endpoint.
-    Accepts text message, uploaded timetable/syllabus/document, or OCR extracted text.
+    Accepts text message, uploaded timetable/syllabus/document, or image/PDF.
+    Uses native Gemini Vision/PDF parsing directly on raw bytes.
     Extracts events/commitments, auto-plans them, detects collisions, and returns response.
     """
-    file_text = ""
+    inserted_tasks = []
+    reschedule_notes = []
+    extracted_tasks = []
     file_name = ""
-    is_image = False
+
     if file:
         file_name = file.filename or "uploaded_file"
-        is_image = file_name.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp"))
-        try:
-            content = await file.read()
-            if extracted_text and extracted_text.strip():
-                file_text = extracted_text.strip()
-            elif is_image:
-                # Server-side OCR execution fallback via node tesseract
-                try:
-                    import tempfile, subprocess
-                    suffix = os.path.splitext(file_name)[1] or ".jpg"
-                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                        tmp.write(content)
-                        tmp_path = tmp.name
-                    res = subprocess.run(
-                        ["node", "scripts/ocr_extract.mjs", tmp_path],
-                        capture_output=True,
-                        text=True,
-                        timeout=15
-                    )
-                    if res.returncode == 0 and res.stdout.strip():
-                        file_text = res.stdout.strip()
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
-                except Exception as e:
-                    print(f"⚠️ Server OCR fallback notice: {e}")
-            elif file_name.lower().endswith(".pdf") or content.startswith(b"%PDF"):
-                file_text = extract_text_from_pdf(content)
-            else:
-                try:
-                    file_text = content.decode("utf-8")
-                except UnicodeDecodeError:
-                    file_text = extract_text_from_pdf(content)
-        except Exception as e:
-            print(f"⚠️ Error reading file: {e}")
-    elif extracted_text and extracted_text.strip():
-        file_text = extracted_text.strip()
+        content = await file.read()
+        mime_type = file.content_type or ("application/pdf" if file_name.lower().endswith(".pdf") else "image/jpeg")
+        prompt_text = f"{MULTIMODAL_EXTRACTION_PROMPT}\n\nToday's date and time: {datetime.now(user_tz).strftime('%Y-%m-%d %A %H:%M')}"
+        if message and message.strip():
+            prompt_text += f"\nUser instructions / note: {message.strip()}"
 
-    full_user_input = message.strip() if message else ""
-    if file_name and file_text:
-        attachment_context = f"\n[Timetable / Syllabus OCR Extracted Content ({file_name})]:\n{file_text[:5000]}"
-        full_user_input = f"{full_user_input}\n{attachment_context}".strip()
-    elif is_image and not file_text and not full_user_input:
-        session_key = session_id or "default"
-        await cache_del(f"chrona:draft:{user_id}:{session_key}")
+        try:
+            extracted_payload = await asyncio.to_thread(
+                router.parse_multimodal_with_gemini,
+                file_bytes=content,
+                mime_type=mime_type,
+                prompt=prompt_text,
+                json_mode=True,
+            )
+            if isinstance(extracted_payload, dict):
+                for key in ("tasks", "events", "items"):
+                    if key in extracted_payload:
+                        extracted_tasks = extracted_payload[key]
+                        break
+                else:
+                    extracted_tasks = [extracted_payload]
+            elif isinstance(extracted_payload, list):
+                extracted_tasks = extracted_payload
+            else:
+                extracted_tasks = []
+        except Exception as e:
+            print(f"⚠️ Multimodal extraction error: {e}")
+            extracted_tasks = []
+
+        if len(extracted_tasks) >= 2:
+            try:
+                transitions = await asyncio.to_thread(
+                    compute_dynamic_transitions,
+                    extracted_tasks,
+                    router=router,
+                )
+                for tr in transitions:
+                    to_idx = tr.get("to_index")
+                    if to_idx is not None and 0 <= to_idx < len(extracted_tasks):
+                        extracted_tasks[to_idx]["transition_reason"] = tr.get("reason")
+            except Exception as e:
+                print(f"⚠️ Transition computation notice: {e}")
+
+        for task_data in extracted_tasks:
+            saved_item, conflict_note = resolve_and_save_schedule_item(
+                user_id, task_data, inserted_tasks, user_text=message or "", user_tz=user_tz
+            )
+            if saved_item:
+                inserted_tasks.append(saved_item)
+            if conflict_note:
+                reschedule_notes.append(conflict_note)
+
+        if inserted_tasks:
+            await _sync_recent_tasks_cache(user_id, session_id, inserted_tasks)
+
+        if not inserted_tasks and not extracted_tasks:
+            final_msg = (
+                f"I received your uploaded file '{file_name}', but wasn't able to automatically detect scheduled events. "
+                "Could you please type or paste your key schedule commitments? "
+                "I'll immediately organize your schedule with dynamic transition buffers."
+            )
+        else:
+            final_msg = f"I've extracted and scheduled {len(inserted_tasks)} item(s) from '{file_name}'."
+            if reschedule_notes:
+                final_msg += "\n\n" + "\n".join(reschedule_notes)
+
         return {
-            "message": (
-                f"I received your uploaded image '{file_name}'. I wasn't able to automatically detect legible text in this image. "
-                f"Could you please type or paste your key schedule commitments (e.g. 'Math exam Sunday 8-9 PM, Dinner at 9 PM')? "
-                f"I'll immediately organize your schedule with conflict resolution and decompression breaks!"
-            ),
-            "action": "clarification",
-            "tasks_extracted": [],
-            "tasks_saved": [],
+            "message": final_msg,
+            "action": "schedule_saved" if inserted_tasks else "clarification",
+            "tasks_extracted": extracted_tasks,
+            "tasks_saved": inserted_tasks,
             "file_name": file_name,
             "clarification_needed": None,
-            "schedule_trigger": False,
+            "schedule_trigger": bool(inserted_tasks),
             "decomposition": None,
             "quick_actions": [],
         }
 
+    # Text message fallback (no file)
+    full_user_input = (message or "").strip()
+    if extracted_text and extracted_text.strip():
+        full_user_input = f"{full_user_input}\n{extracted_text.strip()}".strip()
+
     if not full_user_input:
-        full_user_input = "Please analyze the uploaded document and extract my schedule commitments and deadlines."
+        full_user_input = "Please analyze my input and extract my schedule commitments and deadlines."
 
     result = await process_chat_message(user_id, full_user_input, session_id=session_id, user_tz=user_tz)
 
-    inserted_tasks = []
-    reschedule_notes = []
     if result.get("already_saved"):
         inserted_tasks = list(result.get("tasks") or [])
     elif result.get("tasks"):
         for task_data in result["tasks"]:
-            saved_item, conflict_note = resolve_and_save_schedule_item(user_id, task_data, inserted_tasks, user_text=full_user_input, user_tz=user_tz)
+            saved_item, conflict_note = resolve_and_save_schedule_item(
+                user_id, task_data, inserted_tasks, user_text=full_user_input, user_tz=user_tz
+            )
             if saved_item:
                 inserted_tasks.append(saved_item)
             if conflict_note:
@@ -2771,15 +2901,8 @@ async def chat_upload(
     if inserted_tasks and not result.get("already_saved"):
         await _sync_recent_tasks_cache(user_id, session_id, inserted_tasks)
 
-    final_msg = result.get("message", "I analyzed your document and extracted the relevant tasks.")
-    if is_image and not file_text and not inserted_tasks:
-        final_msg = (
-            f"I received your uploaded image '{file_name}'. I wasn't able to automatically detect legible text in this image. "
-            f"Could you please type or paste your key schedule commitments (e.g. 'Math exam Sunday 8-9 PM, Dinner at 9 PM')? "
-            f"I'll immediately organize your schedule with conflict resolution and decompression breaks!"
-        )
-        result["clarification_needed"] = None
-    elif reschedule_notes:
+    final_msg = result.get("message", "I analyzed your input and extracted the relevant tasks.")
+    if reschedule_notes:
         final_msg = final_msg.strip() + "\n\n" + "\n".join(reschedule_notes)
 
     quick_actions = []
@@ -2797,13 +2920,13 @@ async def chat_upload(
                 "variant": "warning"
             })
             quick_actions.append({
-                "label": f"🧘 Keep 35m Decompression Break ({time_display})",
+                "label": f"🧘 Keep Decompression Break ({time_display})",
                 "action": "dismiss",
                 "variant": "primary"
             })
         elif t.get("strict_time") or t.get("skip_recovery_buffer"):
             quick_actions.append({
-                "label": f"🧘 Add 35m Decompression Break for '{t.get('title')}'",
+                "label": f"🧘 Add Decompression Break for '{t.get('title')}'",
                 "task_id": t.get("id"),
                 "task_title": t.get("title"),
                 "skip_break": False,
@@ -3369,12 +3492,8 @@ async def schedule_items(
     end: Optional[str] = None,
     status: Optional[str] = None,
 ):
-    """Get schedule items for the user with automatic conflict detection and repair."""
+    """Get schedule items for the user."""
     user_tz = get_user_timezone(req)
-    try:
-        auto_repair_existing_conflicts(user_id, user_tz=user_tz)
-    except Exception as e:
-        print(f"⚠️ Conflict auto-repair warning: {e}")
 
     params = {"user_id": f"eq.{user_id}", "order": "start_time.asc"}
     if start:
@@ -3530,10 +3649,21 @@ async def schedule_fixed_create(item: FixedCommitmentCreate, req: Request, user_
 @app.delete("/api/schedule/fixed/{item_id}")
 async def schedule_fixed_delete(item_id: str, user_id: str = Depends(get_user_id)):
     """Delete a fixed commitment."""
+    sb_delete("behavior_events", {"task_id": f"eq.{item_id}"})
     resp = sb_delete("schedule_items", {"id": f"eq.{item_id}", "user_id": f"eq.{user_id}"})
     if resp.status_code in [200, 204]:
         return {"success": True}
     raise HTTPException(500, resp.text)
+
+@app.delete("/api/schedule/clear")
+@app.post("/api/schedule/clear")
+async def clear_all_schedule_items(user_id: str = Depends(get_user_id)):
+    """Clear all scheduled items and associated behavior events."""
+    _in_memory_db["schedule_items"] = []
+    _in_memory_db["behavior_events"] = []
+    sb_delete("behavior_events", {"user_id": f"eq.{user_id}"})
+    sb_delete("schedule_items", {"user_id": f"eq.{user_id}"})
+    return {"success": True, "message": "All schedule items cleared"}
 
 @app.patch("/api/schedule/items/{item_id}")
 async def update_schedule_item(item_id: str, body: dict, user_id: str = Depends(get_user_id)):

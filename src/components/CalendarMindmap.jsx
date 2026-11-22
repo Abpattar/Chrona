@@ -3,7 +3,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   Handle,
@@ -15,125 +14,80 @@ import '@xyflow/react/dist/style.css'
 import dayjs from 'dayjs'
 import { api, TEST_USER_ID } from '../lib/api'
 
-// ── Color Schemes ─────────────────────────────────────────────────────────────
-// Pending = Amber/Gold; Completed = Emerald; Critical = Crimson; High = Orange; Normal = Cyan; Low = Purple
+// ── Hollow Knight / Hallownest Cartography Themes ─────────────────────────────
+// Ancient Anchor (Immovable): #f8fafc (Soul Pale Silver)
+// Sacred Vow (Personal Priority): #fbbf24 (Lumafly Gold)
+// Wandering Thought (Dynamic): #38bdf8 (City of Tears Azure)
+// Unassigned / Pending: #c084fc (Monarch Purple)
+// Fulfilled: #34d399 (Soul Green)
 export function getNodeTheme(item) {
   const isCompleted = item.status === 'completed'
   const isPending = item.status === 'pending' || !item.start_time
   const isRescheduled = item.status === 'rescheduled' || !!item.auto_rescheduled || !!item.completion_note?.includes('Auto-rescheduled')
-  const titleLower = (item.title || '').toLowerCase()
-  const isStudy = item.task_type === 'study' || /study|prep|prepare|revision|homework|reading/i.test(titleLower)
-  const isFamily = /family|function|wedding|ceremony|reception|gathering|anniversary|puja|pooja|festival|reunion/i.test(titleLower) || item.task_type === 'family'
-  const isAppointment = /doctor|dentist|appointment|clinic|therapy|hospital|surgery|interview|court/i.test(titleLower) || item.task_type === 'appointment'
-  const isMovieOrShow = /movie|cinema|film|theater|theatre|concert|show|match/i.test(titleLower) || item.task_type === 'movie'
-  const isExam = !isStudy && (item.task_type === 'exam' || /exam|midterm|final|quiz|test/i.test(titleLower))
-  const isClass = !isStudy && (item.task_type === 'class' || /lecture|class|lab/i.test(titleLower))
-  const isSocial = /dinner|lunch|breakfast|coffee|drinks|friends|party|hangout/i.test(titleLower) && !isFamily
-  const isStrictTime = !!item.strict_time || !!item.skip_recovery_buffer || !!item.completion_note?.includes('Strict')
-  const isFixed = !isRescheduled && !isStrictTime && (isExam || isClass || isMovieOrShow || isFamily || isAppointment || item.controllability === 'external' || item.task_type === 'fixed' || (item.flexibility === false && !isSocial && !isStudy))
-  const priority = Number(item.priority || 3)
+  const movability = item.movability || (
+    item.flexibility === false || item.controllability === 'external' || item.task_type === 'fixed' ||
+    /exam|midterm|final|quiz|test|lecture|class|lab|movie|cinema|film|theater|theatre|concert|show|doctor|dentist|appointment|clinic|therapy|hospital|surgery|interview|court|family|wedding|ceremony/i.test(item.title || '')
+      ? 'immovable'
+      : (Number(item.priority || 3) <= 2 ? 'negotiable' : 'fluid')
+  )
 
   if (isCompleted) {
     return {
-      border: '#10b981',
-      bg: 'rgba(16, 185, 129, 0.14)',
-      glow: '0 0 16px rgba(16, 185, 129, 0.35)',
-      badgeBg: 'rgba(16, 185, 129, 0.22)',
+      border: 'rgba(52, 211, 153, 0.4)',
+      bg: 'rgba(16, 185, 129, 0.1)',
+      glow: '0 0 16px rgba(16, 185, 129, 0.25)',
+      badgeBg: 'rgba(16, 185, 129, 0.2)',
       badgeText: '#34d399',
-      label: '✓ COMPLETED',
+      label: '✓ FULFILLED',
       textStyle: 'line-through text-slate-400',
     }
   }
 
   if (isPending) {
     return {
-      border: '#f59e0b',
-      bg: 'rgba(245, 158, 11, 0.16)',
-      glow: '0 0 18px rgba(245, 158, 11, 0.4)',
-      badgeBg: 'rgba(245, 158, 11, 0.25)',
-      badgeText: '#fbbf24',
-      label: '⏳ PENDING',
-      textStyle: 'text-amber-100 font-semibold',
-    }
-  }
-
-  if (isStrictTime) {
-    return {
-      border: '#f59e0b',
-      bg: 'rgba(245, 158, 11, 0.16)',
-      glow: '0 0 18px rgba(245, 158, 11, 0.45)',
-      badgeBg: 'rgba(245, 158, 11, 0.25)',
-      badgeText: '#fbbf24',
-      label: '⚡ STRICT (NO BREAK)',
-      textStyle: 'text-amber-100 font-semibold',
-    }
-  }
-
-  if (isFixed) {
-    const fixedLabel = isExam
-      ? '🔒 FIXED EXAM'
-      : isClass
-        ? '🔒 FIXED CLASS'
-        : isMovieOrShow
-          ? '🎬 FIXED MOVIE'
-          : isFamily
-            ? '🔒 FIXED FAMILY'
-            : isAppointment
-              ? '🏥 APPOINTMENT'
-              : '🔒 FIXED'
-    return {
-      border: '#a855f7',
-      bg: 'rgba(168, 85, 247, 0.14)',
-      glow: '0 0 18px rgba(168, 85, 247, 0.35)',
-      badgeBg: 'rgba(168, 85, 247, 0.22)',
+      border: 'rgba(192, 132, 252, 0.4)',
+      bg: 'rgba(157, 78, 221, 0.1)',
+      glow: '0 0 16px rgba(157, 78, 221, 0.25)',
+      badgeBg: 'rgba(157, 78, 221, 0.2)',
       badgeText: '#c084fc',
-      label: fixedLabel,
-      textStyle: 'text-white font-semibold',
+      label: '⏳ UNASSIGNED',
+      textStyle: 'text-purple-200 font-medium',
     }
   }
 
-  // Active items by importance/priority:
-  switch (priority) {
-    case 1:
-      return {
-        border: '#ef4444',
-        bg: 'rgba(239, 68, 68, 0.18)',
-        glow: '0 0 22px rgba(239, 68, 68, 0.45)',
-        badgeBg: 'rgba(239, 68, 68, 0.25)',
-        badgeText: '#f87171',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (CRITICAL)' : '⚡ CRITICAL (P1)',
-        textStyle: 'text-red-100 font-bold',
-      }
-    case 2:
-      return {
-        border: '#f97316',
-        bg: 'rgba(249, 115, 22, 0.16)',
-        glow: '0 0 18px rgba(249, 115, 22, 0.35)',
-        badgeBg: 'rgba(249, 115, 22, 0.24)',
-        badgeText: '#fb923c',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (HIGH)' : (isStudy ? '📚 EXAM PREP (P2)' : '★ HIGH (P2)'),
-        textStyle: 'text-orange-100 font-semibold',
-      }
-    case 3:
-      return {
-        border: '#06b6d4',
-        bg: 'rgba(6, 182, 212, 0.14)',
-        glow: '0 0 16px rgba(6, 182, 212, 0.3)',
-        badgeBg: 'rgba(6, 182, 212, 0.22)',
-        badgeText: '#38bdf8',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED' : (isStudy ? '📚 STUDY (P3)' : '● NORMAL (P3)'),
-        textStyle: 'text-cyan-100 font-semibold',
-      }
-    default:
-      return {
-        border: '#8b5cf6',
-        bg: 'rgba(139, 92, 246, 0.12)',
-        glow: '0 0 12px rgba(139, 92, 246, 0.25)',
-        badgeBg: 'rgba(139, 92, 246, 0.2)',
-        badgeText: '#a78bfa',
-        label: isRescheduled ? '↻ AUTO-RESCHEDULED (LOW)' : '○ LOW (P4)',
-        textStyle: 'text-slate-200',
-      }
+  if (movability === 'immovable') {
+    return {
+      border: 'rgba(248, 250, 252, 0.35)',
+      bg: 'rgba(248, 250, 252, 0.08)',
+      glow: '0 0 18px rgba(248, 250, 252, 0.15)',
+      badgeBg: 'rgba(248, 250, 252, 0.14)',
+      badgeText: '#f8fafc',
+      label: '◈ ANCIENT ANCHOR',
+      textStyle: 'text-slate-100 font-cinzel font-bold tracking-wide',
+    }
+  }
+
+  if (movability === 'negotiable') {
+    return {
+      border: 'rgba(245, 158, 11, 0.4)',
+      bg: 'rgba(245, 158, 11, 0.08)',
+      glow: '0 0 18px rgba(245, 158, 11, 0.25)',
+      badgeBg: 'rgba(245, 158, 11, 0.18)',
+      badgeText: '#fbbf24',
+      label: isRescheduled ? '↻ AUTO-ALIGNED' : '✧ SACRED VOW',
+      textStyle: 'text-amber-100 font-cinzel font-semibold',
+    }
+  }
+
+  // Fluid / Dynamic
+  return {
+    border: 'rgba(56, 189, 248, 0.35)',
+    bg: 'rgba(56, 189, 248, 0.08)',
+    glow: '0 0 18px rgba(56, 189, 248, 0.2)',
+    badgeBg: 'rgba(56, 189, 248, 0.18)',
+    badgeText: '#38bdf8',
+    label: isRescheduled ? '✦ SUGGESTED' : '✦ WANDERING THOUGHT',
+    textStyle: 'text-cyan-100 font-medium',
   }
 }
 
@@ -155,18 +109,17 @@ function ScheduleTaskNode({ data }) {
     <div
       className="relative px-3.5 py-3 min-w-[210px] max-w-[260px] rounded-xl transition-all duration-200 group"
       style={{
-        background: 'rgba(12, 19, 42, 0.94)',
-        backdropFilter: 'blur(10px)',
-        border: `1.5px solid ${theme.border}`,
-        boxShadow: `${theme.glow}, 0 8px 24px rgba(0,0,0,0.5)`,
+        background: '#10141e',
+        border: `1px solid ${theme.border}`,
+        boxShadow: `${theme.glow}, 0 4px 20px rgba(0,0,0,0.7)`,
       }}
     >
-      <Handle type="target" position={Position.Left} className="!bg-cyan-400 !w-2 !h-2" />
+      <Handle type="target" position={Position.Left} className="!bg-slate-300 !w-2 !h-2" />
 
       {/* Top row: Priority/Status Badge & Quick Delete */}
       <div className="flex items-center justify-between gap-1 mb-1.5">
         <span
-          className="text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider"
+          className="text-[9px] font-cinzel font-bold px-2 py-0.5 rounded uppercase tracking-wider"
           style={{ background: theme.badgeBg, color: theme.badgeText }}
         >
           {theme.label}
@@ -301,79 +254,88 @@ function ScheduleTaskNode({ data }) {
   )
 }
 
-// ── Custom Node: Date Branch (Day Hub) ────────────────────────────────────────
+// ── Custom Node: Date Branch (Day Milestone Hub) ──────────────────────────────
 function DateBranchNode({ data }) {
   const { dateLabel, dayName, count, totalDuration, isToday, isPending } = data
-  const accentColor = isToday ? '#38bdf8' : isPending ? '#f59e0b' : '#a78bfa'
+  const accentColor = isToday ? '#38bdf8' : isPending ? '#c084fc' : '#f8fafc'
 
   return (
     <div
-      className="relative px-4 py-2.5 rounded-2xl min-w-[150px] text-center transition-all"
+      className="relative px-4 py-2.5 rounded-2xl min-w-[160px] text-center transition-all select-none"
       style={{
-        background: 'rgba(15, 23, 50, 0.95)',
-        backdropFilter: 'blur(10px)',
-        border: `2px solid ${accentColor}`,
-        boxShadow: `0 0 20px ${accentColor}40, 0 4px 16px rgba(0,0,0,0.4)`,
+        background: '#0e121c',
+        border: `1px solid ${accentColor}45`,
+        boxShadow: `0 0 16px ${accentColor}18, 0 4px 16px rgba(0,0,0,0.6)`,
       }}
     >
-      <Handle type="target" position={Position.Left} className="!bg-white !w-2 !h-2" />
+      <Handle type="target" position={Position.Left} className="!bg-slate-300 !w-2.5 !h-2.5" />
       <div className="flex items-center justify-center gap-1.5">
-        <span className="text-sm">{isPending ? '⏳' : isToday ? '⚡' : '📅'}</span>
-        <span className="text-xs font-bold uppercase tracking-wider text-white">
+        <span className="text-xs text-slate-400">{isPending ? '⏳' : isToday ? '✧' : '◈'}</span>
+        <span className="font-cinzel text-xs font-bold uppercase tracking-wider text-slate-100">
           {dayName}
         </span>
       </div>
-      <p className="text-[10px] font-mono text-slate-300 mt-0.5">{dateLabel}</p>
-      <div className="mt-1 inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[9px] font-mono"
-        style={{ background: `${accentColor}15`, color: accentColor }}>
-        <span>{count} {count === 1 ? 'task' : 'tasks'}</span>
+      <p className="text-[10px] font-mono text-slate-400 mt-0.5">{dateLabel}</p>
+      <div
+        className="mt-1 inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-[9px] font-mono font-medium"
+        style={{ background: 'rgba(255, 255, 255, 0.05)', color: accentColor, border: `1px solid ${accentColor}30` }}
+      >
+        <span>{count} {count === 1 ? 'vow' : 'vows'}</span>
         {totalDuration > 0 && <span>• {Math.round(totalDuration / 60 * 10) / 10}h</span>}
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-white !w-2 !h-2" />
+      <Handle type="source" position={Position.Right} className="!bg-slate-300 !w-2.5 !h-2.5" />
     </div>
   )
 }
 
 // ── Custom Node: Center Timeline Core ─────────────────────────────────────────
 function CenterTimelineNode({ data }) {
-  const { total, completed, pending, onAutoRescheduleAll } = data
+  const { total, completed, pending, onAutoRescheduleAll, onDeploySample } = data
 
   return (
     <div
-      className="relative px-6 py-4 rounded-3xl min-w-[210px] text-center transition-all select-none"
+      className="relative px-7 py-5 rounded-3xl min-w-[240px] text-center transition-all select-none"
       style={{
-        background: 'radial-gradient(circle, #1e3a6a, #0b132b)',
-        border: '2px solid rgba(77, 163, 255, 0.7)',
-        boxShadow: '0 0 40px rgba(77, 163, 255, 0.4), 0 0 80px rgba(99, 102, 241, 0.2)',
+        background: 'radial-gradient(circle at 50% 30%, #151a27 0%, #07090e 100%)',
+        border: '1.5px solid rgba(203, 213, 225, 0.3)',
+        boxShadow: '0 0 30px rgba(248, 250, 252, 0.08), 0 8px 32px rgba(0, 0, 0, 0.8)',
       }}
     >
-      <div className="flex items-center justify-center gap-2 text-cyan-400 mb-1">
-        <span className="text-xl">🧠</span>
-        <span className="text-sm font-extrabold tracking-wider uppercase text-white">
-          Chrona Timeline
+      <div className="flex items-center justify-center gap-2 mb-1">
+        <span className="text-xl text-slate-200">◈</span>
+        <span className="font-cinzel text-sm font-bold tracking-widest uppercase text-slate-100">
+          CHRONA TIMELINE FLOW
         </span>
       </div>
-      <p className="text-[10px] text-cyan-200/80 font-mono">
+      <p className="text-[10px] text-cyan-300 font-mono tracking-wider">
         {dayjs().format('dddd, MMMM D, YYYY')}
       </p>
 
       {/* Stats pill */}
-      <div className="mt-2.5 flex items-center justify-center gap-1.5 text-[9px] font-mono">
-        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+      <div className="mt-3 flex items-center justify-center gap-1.5 text-[9px] font-mono">
+        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
           ✓ {completed}
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+        <span className="px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
           ⏳ {pending}
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+        <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
           Σ {total}
         </span>
       </div>
 
       {total === 0 && (
-        <p className="mt-2.5 text-[10px] text-slate-400 font-mono">
-          No tasks yet — use Chrona Chat to plan
-        </p>
+        <div className="mt-3">
+          <p className="text-[10px] text-slate-400 font-mono">
+            No scheduled tasks on the timeline yet
+          </p>
+          <a
+            href="/chat"
+            className="inline-block mt-2 text-[10px] font-semibold tracking-wider px-3 py-1.5 rounded-xl text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-sm transition-all"
+          >
+            + Plan in Chrona AI
+          </a>
+        </div>
       )}
 
       {pending > 0 && onAutoRescheduleAll && (
@@ -382,15 +344,14 @@ function CenterTimelineNode({ data }) {
             e.stopPropagation()
             onAutoRescheduleAll()
           }}
-          className="mt-2.5 text-[9px] font-bold px-2.5 py-1 rounded-lg transition-all animate-pulse text-amber-200 hover:text-white"
-          style={{ background: 'rgba(245, 158, 11, 0.25)', border: '1px solid rgba(245, 158, 11, 0.4)' }}
+          className="mt-3 text-[9px] font-semibold tracking-wider uppercase px-3 py-1 rounded-xl transition-all text-amber-200 hover:text-white bg-amber-500/20 border border-amber-500/35"
         >
-          ✦ Auto-Reschedule Unplaced
+          ⚡ Place Flexible Tasks
         </button>
       )}
 
-      <Handle type="source" position={Position.Right} className="!bg-cyan-400 !w-3 !h-3" />
-      <Handle type="source" position={Position.Left} className="!bg-cyan-400 !w-3 !h-3" />
+      <Handle type="source" position={Position.Right} className="!bg-slate-300 !w-3 !h-3" />
+      <Handle type="source" position={Position.Left} className="!bg-slate-300 !w-3 !h-3" />
     </div>
   )
 }
@@ -484,7 +445,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
       target: dateNodeId,
       animated: isToday || isPending,
       style: {
-        stroke: isToday ? '#38bdf8' : isPending ? '#f59e0b' : '#a78bfa',
+        stroke: isToday ? '#38bdf8' : isPending ? '#f59e0b' : '#a855f7',
         strokeWidth: 2,
       },
     })
@@ -559,7 +520,7 @@ function buildMindmapLayout(items, { onComplete, onReschedule, onDelete, onAutoR
               animated: true,
               label: 'depends on',
               labelStyle: { fill: '#38bdf8', fontSize: 9, fontFamily: 'monospace', fontWeight: 600 },
-              labelBgStyle: { fill: '#0b132b', fillOpacity: 0.85 },
+              labelBgStyle: { fill: '#14161b', fillOpacity: 0.9 },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
                 color: '#38bdf8',
@@ -715,87 +676,51 @@ function MindmapFlow({ items, loadSchedule }) {
   }, [])
 
   return (
-    <div className="flex-1 flex flex-col w-full overflow-hidden relative">
-      {/* ── Toolbar ────────────────────────────────────────────────────── */}
-      <div className="flex-none px-4 py-2.5 glass-strong border-b border-white/5 flex flex-wrap items-center justify-between gap-2.5 z-20">
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-glow" />
-          <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
-            Schedule Flow Mind Map
-          </h2>
-          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-            ({filteredItems.length} active nodes)
-          </span>
-        </div>
+    <div className="flex-1 w-full h-full min-h-0 relative" style={{ background: '#07090e' }}>
+      {/* Floating Minimal Canvas Menu Controls */}
+      <div className="absolute top-3 right-3 sm:right-6 z-20 flex items-center gap-2 pointer-events-auto">
+        <div className="flex items-center bg-[#0d121e]/90 p-1 rounded-xl border border-slate-800/80 backdrop-blur-xl shadow-lg gap-1">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="bg-transparent text-xs text-slate-300 font-medium px-2 py-0.5 focus:outline-none cursor-pointer"
+          >
+            <option value="all" className="bg-[#0f1422]">All Tasks ({items.length})</option>
+            <option value="today" className="bg-[#0f1422]">Today Only</option>
+            <option value="pending" className="bg-[#0f1422]">Pending</option>
+            <option value="critical" className="bg-[#0f1422]">Urgent</option>
+            <option value="completed" className="bg-[#0f1422]">Completed</option>
+          </select>
 
-        {/* Filters */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {[
-            { id: 'all', label: 'All Items' },
-            { id: 'today', label: '⚡ Today' },
-            { id: 'pending', label: '⏳ Pending' },
-            { id: 'critical', label: '🔥 Urgent' },
-            { id: 'completed', label: '✓ Done' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${filter === tab.id
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-white bg-white/5 border border-transparent'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-
-          <input
-            type="text"
-            placeholder="Search tasks..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="text-xs px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 w-28 sm:w-36"
-          />
+          <div className="h-3 w-px bg-slate-800" />
 
           <button
-            onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400 })}
-            className="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10"
-            title="Reset view zoom"
+            onClick={() => rfInstance.current?.zoomIn({ duration: 300 })}
+            className="w-6 h-6 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 flex items-center justify-center transition-all"
+            title="Zoom In"
           >
-            Fit View
+            +
+          </button>
+          <button
+            onClick={() => rfInstance.current?.zoomOut({ duration: 300 })}
+            className="w-6 h-6 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 flex items-center justify-center transition-all"
+            title="Zoom Out"
+          >
+            −
+          </button>
+          <button
+            onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400 })}
+            className="px-2 py-0.5 rounded-lg text-xs text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all flex items-center gap-1"
+            title="Reset zoom & fit view"
+          >
+            <span>⛶</span>
+            <span className="hidden sm:inline">Fit</span>
           </button>
         </div>
       </div>
 
-      {/* ── Legend Bar ─────────────────────────────────────────────────── */}
-      <div className="flex-none px-4 py-1.5 bg-black/40 border-b border-white/5 flex items-center justify-between overflow-x-auto text-[10px] font-mono text-slate-400 z-10 scrollbar-none">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm" /> Pending
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-500 shadow-sm" /> Critical (P1)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-orange-400 shadow-sm" /> High (P2)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-sm" /> Normal (P3)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-purple-400 shadow-sm" /> Fixed/Low
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm" /> Completed
-          </span>
-        </div>
-        <div className="hidden sm:inline text-slate-500">
-          Tip: Drag nodes · Use Done or Reschedule directly on cards
-        </div>
-      </div>
-
-      {/* ── Canvas with Guaranteed Pixel Height ─────────────────────────── */}
-      <div style={{ width: '100%', height: canvasHeight ? `${canvasHeight}px` : 'calc(100vh - 110px)' }}>
+      {/* ── Pure Full-Height Canvas ─────────────────────────────────────────── */}
+      <div className="absolute inset-0 w-full h-full">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -812,25 +737,14 @@ function MindmapFlow({ items, loadSchedule }) {
           maxZoom={2.5}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="rgba(77, 163, 255, 0.08)" gap={28} size={1.2} variant="dots" />
-          <Controls className="!bg-[#0d162c] !border-white/10 !fill-white" />
-          <MiniMap
-            className="hidden md:block !bg-[#0b1328] !border-white/10"
-            nodeColor={(n) => {
-              if (n.type === 'centerNode') return '#38bdf8'
-              if (n.type === 'dateBranchNode') return '#a78bfa'
-              const item = n.data?.item
-              if (!item) return '#4da3ff'
-              return getNodeTheme(item).border
-            }}
-          />
+          <Background color="rgba(255, 255, 255, 0.05)" gap={28} size={1.2} variant="dots" />
         </ReactFlow>
       </div>
 
       {/* ── Explanation Modal ───────────────────────────────────────── */}
       {explainData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-5 max-w-md w-full shadow-2xl relative">
+          <div className="border border-white/10 rounded-2xl p-5 max-w-md w-full shadow-2xl relative" style={{ background: '#14161b' }}>
             <button
               onClick={() => setExplainData(null)}
               className="absolute top-3.5 right-3.5 text-slate-400 hover:text-white text-base"
@@ -935,7 +849,7 @@ export default function CalendarMindmap({ onOpenRepair }) {
 
   if (loading && items.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="flex-1 flex items-center justify-center backdrop-blur-sm" style={{ background: '#0c0d10' }}>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
           <p className="text-xs text-cyan-300 font-mono">Loading schedule mind map...</p>

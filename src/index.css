@@ -2,127 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Global Reset ──────────────────────────────── */
-*,
-*::before,
-*::after {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
+:root {
+  /* Hollow Knight — Hallownest Palette */
+  --hk-abyss: #07090e;
+  --hk-slate-dark: #0a0d14;
+  --hk-tablet: #10141e;
+  --hk-tablet-elevated: #161b28;
+  --hk-tablet-high: #1c2333;
+
+  /* Hollow Knight Essence Accents */
+  --hk-soul-white: #f8fafc;
+  --hk-pale-silver: #cbd5e1;
+  --hk-bone-muted: #94a3b8;
+  --hk-void-black: #040508;
+
+  --hk-lumafly-gold: #f59e0b;
+  --hk-lumafly-soft: rgba(245, 158, 11, 0.15);
+  
+  --hk-city-azure: #38bdf8;
+  --hk-city-soft: rgba(56, 189, 248, 0.15);
+
+  --hk-lifeblood: #22d3ee;
+  --hk-monarch-purple: #c084fc;
+  --hk-grimm-crimson: #ef4444;
+
+  --hk-border-delicate: rgba(203, 213, 225, 0.12);
+  --hk-border-carved: rgba(203, 213, 225, 0.22);
 }
 
-html {
-  overflow-x: hidden;
-  scroll-behavior: smooth;
+html,
+body,
+#root {
   height: 100%;
+  height: 100dvh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 body {
-  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
-  color: #e2e8f0;
-  min-height: 100vh;
-  min-height: 100dvh;
+  background-color: #05070c;
+  color: #cbd5e1;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: radial-gradient(ellipse at top, #0f1c3f 0%, #070d1f 60%, #050a18 100%);
-  background-attachment: fixed;
-  overflow-x: hidden;
 }
 
-/* ─── Utility: Glass Panel ──────────────────────── */
-@layer utilities {
-  .glass {
-    background: rgba(15, 25, 60, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .glass-strong {
-    background: rgba(15, 25, 60, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-  }
+/* Hollow Knight Handcrafted Typography */
+.font-cinzel {
+  font-family: 'Cinzel', serif;
 }
 
-/* ─── Scrollbar ─────────────────────────────────── */
-@media (min-width: 640px) {
-  ::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: #070d1f;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: rgba(77, 163, 255, 0.3);
-    border-radius: 3px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(77, 163, 255, 0.5);
-  }
+/* Atmospheric Stone & Tablet Utilities */
+.hk-stone-card {
+  background: rgba(16, 20, 30, 0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(203, 213, 225, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
 }
 
-@media (max-width: 639px) {
-  ::-webkit-scrollbar {
-    width: 0;
-  }
+.hk-stone-card:hover {
+  border-color: rgba(203, 213, 225, 0.2);
 }
 
-/* ─── React Flow Overrides (Dark Theme) ─────────── */
-.react-flow__background {
-  background-color: transparent !important;
+.hk-glow-soul {
+  box-shadow: 0 0 20px rgba(248, 250, 252, 0.12), inset 0 0 15px rgba(248, 250, 252, 0.04);
 }
 
-.react-flow__controls {
-  background: rgba(15, 25, 60, 0.8) !important;
-  backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
-  overflow: hidden !important;
+.hk-glow-lumafly {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.2), inset 0 0 12px rgba(245, 158, 11, 0.05);
 }
 
-.react-flow__controls button {
-  background: transparent !important;
-  border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-  color: #94a3b8 !important;
-  fill: #94a3b8 !important;
-  width: 32px !important;
-  height: 32px !important;
-  transition: all 0.15s ease !important;
+.hk-glow-azure {
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.2), inset 0 0 12px rgba(56, 189, 248, 0.05);
 }
 
-.react-flow__controls button:last-child {
-  border-bottom: none !important;
+/* Soul Vessel Orb */
+.hk-soul-orb {
+  background: radial-gradient(circle, #f8fafc 10%, #93c5fd 60%, #1e293b 100%);
+  box-shadow: 0 0 16px rgba(248, 250, 252, 0.4), 0 0 32px rgba(147, 197, 253, 0.25);
 }
 
-.react-flow__controls button:hover {
-  background: rgba(77, 163, 255, 0.15) !important;
-  fill: #4da3ff !important;
-  color: #4da3ff !important;
+/* Custom Subterranean Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
 }
 
-.react-flow__minimap {
-  background: rgba(15, 25, 60, 0.8) !important;
-  backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+::-webkit-scrollbar-track {
+  background: #07090e;
 }
 
-.react-flow__edge path {
-  stroke-width: 2 !important;
-  opacity: 0.85 !important;
-  filter: drop-shadow(0 0 4px currentColor);
+::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.2);
+  border-radius: 9999px;
 }
 
-/* Prevent page scroll when interacting with the mindmap */
-.react-flow__pane {
-  touch-action: none !important;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(203, 213, 225, 0.4);
 }

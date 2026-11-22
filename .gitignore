@@ -34,3 +34,7 @@ npm-debug.log*
 
 # Vercel
 .vercel
+.env*
+
+# Archives
+*.zip

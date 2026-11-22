@@ -25,7 +25,7 @@ export function getClientTimezoneOffset() {
 const API_BASE = import.meta.env.VITE_API_URL ||
   (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
 
-const TIMEOUT = 20000  // 20 seconds for AI calls
+const TIMEOUT = 45000  // 45 seconds for AI calls
 
 async function request(endpoint, options = {}) {
   const controller = new AbortController()

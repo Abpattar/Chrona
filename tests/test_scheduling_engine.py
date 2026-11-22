@@ -6,7 +6,9 @@ Run with: python -m pytest tests/test_scheduling_engine.py -v
 import pytest
 from datetime import datetime, timezone, timedelta
 import sys
-sys.path.insert(0, "/home/neo/Codes/neuravex/backend")
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
 
 from scheduling.edf import EDFScheduler, Task, TimeSlot, ScheduleResult
 from scheduling.repair_engine import RepairEngine

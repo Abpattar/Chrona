@@ -15,8 +15,7 @@ def start_backend():
         '/home/neo/Codes/neuravex/backend/venv/bin/uvicorn',
         'server:app',
         '--host', '0.0.0.0',
-        '--port', '8000',
-        '--reload'
+        '--port', '8000'
     ], cwd='/home/neo/Codes/neuravex/backend', env=env)
     return proc
 
