@@ -46,6 +46,11 @@ async function request(endpoint, options = {}) {
 
     clearTimeout(timeoutId)
 
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/html')) {
+      throw new Error(`API endpoint ${endpoint} returned HTML (server route unavailable)`)
+    }
+
     if (!response.ok) {
       const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
       throw new Error(err.detail || `HTTP ${response.status}`)
@@ -162,13 +167,19 @@ export const api = {
     }),
   }),
 
-  scheduleItems: (start = null, end = null, status = null) => {
+  scheduleItems: async (start = null, end = null, status = null) => {
     const params = new URLSearchParams()
     if (start)  params.set('start', start)
     if (end)    params.set('end', end)
     if (status) params.set('status', status)
     const qs = params.toString()
-    return request(`/api/schedule/items${qs ? '?' + qs : ''}`)
+    try {
+      const res = await request(`/api/schedule/items${qs ? '?' + qs : ''}`)
+      if (res && res.items) return res
+    } catch (e) {
+      console.warn('scheduleItems fetch notice:', e.message)
+    }
+    return { items: [] }
   },
 
   scheduleFixedCreate: (data) => request('/api/schedule/fixed', {
@@ -279,13 +290,34 @@ export const api = {
     }),
 
   // ── Context ───────────────────────────────────────────────
-  context: () => request('/api/context'),
+  context: async () => {
+    try {
+      const res = await request('/api/context')
+      if (res && (res.today || res.this_week)) return res
+    } catch (e) {
+      console.warn('context fetch notice:', e.message)
+    }
+    return {
+      today: [],
+      this_week: [],
+      active_focus: null,
+      stats: { total: 0, completed: 0 },
+    }
+  },
 
   // ── Projects ──────────────────────────────────────────────
   projects: () => request('/api/projects'),
 
   // ── Events ────────────────────────────────────────────────
-  events: () => request('/api/events'),
+  events: async () => {
+    try {
+      const res = await request('/api/events')
+      if (res && res.events) return res
+    } catch (e) {
+      console.warn('events fetch notice:', e.message)
+    }
+    return { events: [] }
+  },
 
   // ── Legacy command ────────────────────────────────────────
   command: (command) => request('/api/command', {

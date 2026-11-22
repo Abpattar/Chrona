@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import Chat from './pages/Chat'
 import Calendar from './pages/Calendar'
-import Onboarding from './pages/Onboarding'
 import ParticleBackground from './components/ParticleBackground'
 import dayjs from 'dayjs'
 
@@ -15,24 +14,12 @@ const navLinks = [
 ]
 
 export default function App() {
-  const [onboarded, setOnboarded] = useState(() => {
-    return localStorage.getItem('chrona_onboarded') === 'true'
-  })
   const [clock, setClock] = useState(dayjs())
 
   useEffect(() => {
     const timer = setInterval(() => setClock(dayjs()), 10000)
     return () => clearInterval(timer)
   }, [])
-
-  if (!onboarded) {
-    return (
-      <div className="relative flex flex-col h-screen h-dvh overflow-hidden bg-[#05070c]">
-        <ParticleBackground />
-        <Onboarding onComplete={() => setOnboarded(true)} />
-      </div>
-    )
-  }
 
   return (
     <div className="relative flex flex-col h-screen h-dvh overflow-hidden bg-[#05070c] text-[#cbd5e1] select-none">

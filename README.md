@@ -2,11 +2,14 @@
 
 > **Drop your exam timetable, syllabus, or daily routine. Chrona extracts all commitments, reasons dynamic travel & cognitive fatigue buffers with AI, locks external anchors, and auto-schedules your entire timeline into a spatial mind map and interactive 3D card deck.**
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Vercel-black?style=flat-square&logo=vercel)](https://neuravex-two.vercel.app)
 [![Status](https://img.shields.io/badge/Status-v2.0_Adaptive_Live-emerald?style=flat-square)](https://github.com/Abpattar/Chrona)
 [![Frontend](https://img.shields.io/badge/Frontend-React_18_+_Vite_+_Tailwind-sky?style=flat-square)](https://vitejs.dev/)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI_+_Python_3.12-blue?style=flat-square)](https://fastapi.tiangolo.com/)
 [![AI Engine](https://img.shields.io/badge/AI-Gemini_Vision_+_Groq_Pool-purple?style=flat-square)](https://ai.google.dev/)
 [![License](https://img.shields.io/badge/License-MIT-slate?style=flat-square)](LICENSE)
+
+🌐 **Live Vercel Application:** [https://neuravex-two.vercel.app](https://neuravex-two.vercel.app)
 
 ---
 
