@@ -147,7 +147,7 @@ export async function callGemini({ parts, jsonMode = false, perModelTimeoutMs = 
   throw new Error(`Gemini request failed (${errors.slice(-2).join(' | ')})`)
 }
 
-export async function fetchActiveScheduleItems(supabase, userId, offsetMinutes = 330) {
+export async function fetchRawActiveScheduleItems(supabase, userId) {
   if (!supabase) return []
   try {
     const { data, error } = await supabase
@@ -157,11 +157,16 @@ export async function fetchActiveScheduleItems(supabase, userId, offsetMinutes =
       .neq('status', 'cancelled')
       .order('start_time', { ascending: true })
     if (error || !Array.isArray(data)) return []
-    return deduplicateScheduleItems(data.map(enrichScheduleItem), offsetMinutes)
+    return data.map(enrichScheduleItem)
   } catch (err) {
-    console.warn('fetchActiveScheduleItems error:', err.message)
+    console.warn('fetchRawActiveScheduleItems error:', err.message)
     return []
   }
+}
+
+export async function fetchActiveScheduleItems(supabase, userId, offsetMinutes = 330) {
+  const raw = await fetchRawActiveScheduleItems(supabase, userId)
+  return deduplicateScheduleItems(raw, offsetMinutes)
 }
 
 function formatItemForPrompt(item, tzCtx) {
@@ -271,7 +276,16 @@ function itemLocalDate(item, offsetMinutes) {
 function findOperationTargets(op, workingItems, offsetMinutes) {
   if (op.target_id) {
     const exact = workingItems.find((it) => it.id === op.target_id)
-    if (exact) return [exact]
+    if (exact) {
+      // Include any duplicate sibling rows of the same task so no ghost copy remains
+      const siblings = workingItems.filter(
+        (it) =>
+          it.id !== exact.id &&
+          it.status !== 'cancelled' &&
+          isDuplicateCandidate(it, exact.title, exact.start_time, !!exact.start_time, offsetMinutes)
+      )
+      return [exact, ...siblings]
+    }
   }
 
   const matchDate = (op.match_date || '').trim()
@@ -296,7 +310,35 @@ function findOperationTargets(op, workingItems, offsetMinutes) {
   }
 
   if (op.all_matching) return candidates
-  return candidates.length > 0 ? [candidates[0]] : []
+  if (candidates.length === 0) return []
+  const primary = candidates[0]
+  const siblings = candidates
+    .slice(1)
+    .filter((it) =>
+      isDuplicateCandidate(it, primary.title, primary.start_time, !!primary.start_time, offsetMinutes)
+    )
+  return [primary, ...siblings]
+}
+
+async function deleteRowsFromSupabase(supabase, userId, ids) {
+  if (!supabase || !ids || ids.length === 0) return
+  const { error } = await supabase
+    .from('schedule_items')
+    .delete()
+    .eq('user_id', userId)
+    .in('id', ids)
+  if (error) {
+    // Fallback to soft-cancel if a foreign-key constraint (e.g. behavior_events) blocks hard delete
+    console.warn('Hard delete failed, falling back to status=cancelled:', error.message)
+    const { error: updErr } = await supabase
+      .from('schedule_items')
+      .update({ status: 'cancelled' })
+      .eq('user_id', userId)
+      .in('id', ids)
+    if (updErr) {
+      throw new Error(`Failed to remove schedule items: ${updErr.message}`)
+    }
+  }
 }
 
 export async function executeScheduleOperations(supabase, userId, operations, existingItems, tzCtx) {
@@ -316,7 +358,14 @@ export async function executeScheduleOperations(supabase, userId, operations, ex
     if (kind === 'clear_all') {
       const targets = workingItems.filter((it) => it.status !== 'cancelled')
       if (supabase) {
-        await supabase.from('schedule_items').delete().eq('user_id', userId)
+        const { error } = await supabase.from('schedule_items').delete().eq('user_id', userId)
+        if (error) {
+          const { error: updErr } = await supabase
+            .from('schedule_items')
+            .update({ status: 'cancelled' })
+            .eq('user_id', userId)
+          if (updErr) throw new Error(`Failed to clear schedule: ${updErr.message}`)
+        }
       }
       cancelledTasks.push(...targets)
       workingItems = []
@@ -339,13 +388,7 @@ export async function executeScheduleOperations(supabase, userId, operations, ex
 
       if (targets.length > 0 && supabase) {
         const ids = targets.map((t) => t.id).filter(Boolean)
-        if (ids.length > 0) {
-          await supabase
-            .from('schedule_items')
-            .delete()
-            .eq('user_id', userId)
-            .in('id', ids)
-        }
+        await deleteRowsFromSupabase(supabase, userId, ids)
       }
 
       const removedIds = new Set(targets.map((t) => t.id))
@@ -359,13 +402,7 @@ export async function executeScheduleOperations(supabase, userId, operations, ex
 
     if (kind === 'cancel' || kind === 'delete') {
       const ids = targets.map((t) => t.id).filter(Boolean)
-      if (supabase && ids.length > 0) {
-        await supabase
-          .from('schedule_items')
-          .delete()
-          .eq('user_id', userId)
-          .in('id', ids)
-      }
+      await deleteRowsFromSupabase(supabase, userId, ids)
       const removedIds = new Set(ids)
       cancelledTasks.push(...targets)
       workingItems = workingItems.filter((it) => !removedIds.has(it.id))
@@ -376,11 +413,12 @@ export async function executeScheduleOperations(supabase, userId, operations, ex
       const ids = targets.map((t) => t.id).filter(Boolean)
       const nowIso = new Date().toISOString()
       if (supabase && ids.length > 0) {
-        await supabase
+        const { error } = await supabase
           .from('schedule_items')
           .update({ status: 'completed', actual_end: nowIso })
           .eq('user_id', userId)
           .in('id', ids)
+        if (error) throw new Error(`Failed to complete schedule items: ${error.message}`)
       }
       for (const t of targets) {
         const doneItem = enrichScheduleItem({ ...t, status: 'completed', actual_end: nowIso })
@@ -392,58 +430,66 @@ export async function executeScheduleOperations(supabase, userId, operations, ex
 
     if (kind === 'reschedule' || kind === 'update' || kind === 'move') {
       const u = op.updates || {}
-      for (const target of targets) {
-        const durMin = Math.max(
-          15,
-          Math.min(720, Number(u.duration_minutes || target.duration_minutes) || 60)
-        )
-        let newStartIso = normalizeIso(u.start_time, tzCtx.offsetStr)
-        let newEndIso = normalizeIso(u.end_time, tzCtx.offsetStr)
-
-        if (!newStartIso && kind === 'reschedule') {
-          const others = workingItems.filter((it) => it.id !== target.id)
-          const oldMs = target.start_time ? new Date(target.start_time).getTime() : null
-          const slot = findNextOpenSlot(durMin, others, tzCtx, oldMs)
-          newStartIso = slot.startIso
-          newEndIso = slot.endIso
-        }
-
-        if (newStartIso && (!newEndIso || new Date(newEndIso).getTime() <= new Date(newStartIso).getTime())) {
-          newEndIso = new Date(new Date(newStartIso).getTime() + durMin * 60000).toISOString()
-        }
-
-        const patch = { status: u.status || 'scheduled' }
-        if (u.title && u.title.trim()) patch.title = u.title.trim()
-        if (newStartIso) patch.start_time = newStartIso
-        if (newEndIso) patch.end_time = newEndIso
-        if (u.priority !== undefined) patch.priority = Math.max(1, Math.min(4, Number(u.priority) || 3))
-        if (u.movability) patch.flexibility = u.movability !== 'immovable'
-        if (u.completion_note !== undefined) patch.completion_note = u.completion_note
-
-        let updatedRow = { ...target, ...patch }
-        if (supabase && target.id) {
-          const { data, error } = await supabase
-            .from('schedule_items')
-            .update(patch)
-            .eq('id', target.id)
-            .eq('user_id', userId)
-            .select()
-            .single()
-          if (!error && data) {
-            updatedRow = data
-          } else if (error) {
-            console.warn('Update schedule_items error:', error.message)
-          }
-        }
-
-        const enriched = enrichScheduleItem({
-          ...updatedRow,
-          movability: u.movability || target.movability,
-          auto_rescheduled: kind === 'reschedule',
-        })
-        updatedTasks.push(enriched)
-        workingItems = workingItems.map((it) => (it.id === target.id ? enriched : it))
+      // Update primary target; remove any duplicate siblings so no ghost remains on old slot
+      const primary = targets[0]
+      const duplicateSiblings = targets.slice(1)
+      if (duplicateSiblings.length > 0) {
+        const dupIds = duplicateSiblings.map((d) => d.id).filter(Boolean)
+        await deleteRowsFromSupabase(supabase, userId, dupIds)
+        const dupSet = new Set(dupIds)
+        workingItems = workingItems.filter((it) => !dupSet.has(it.id))
       }
+
+      const target = primary
+      const durMin = Math.max(
+        15,
+        Math.min(720, Number(u.duration_minutes || target.duration_minutes) || 60)
+      )
+      let newStartIso = normalizeIso(u.start_time, tzCtx.offsetStr)
+      let newEndIso = normalizeIso(u.end_time, tzCtx.offsetStr)
+
+      if (!newStartIso && kind === 'reschedule') {
+        const others = workingItems.filter((it) => it.id !== target.id)
+        const oldMs = target.start_time ? new Date(target.start_time).getTime() : null
+        const slot = findNextOpenSlot(durMin, others, tzCtx, oldMs)
+        newStartIso = slot.startIso
+        newEndIso = slot.endIso
+      }
+
+      if (newStartIso && (!newEndIso || new Date(newEndIso).getTime() <= new Date(newStartIso).getTime())) {
+        newEndIso = new Date(new Date(newStartIso).getTime() + durMin * 60000).toISOString()
+      }
+
+      const patch = { status: u.status || 'scheduled' }
+      if (u.title && u.title.trim()) patch.title = u.title.trim()
+      if (newStartIso) patch.start_time = newStartIso
+      if (newEndIso) patch.end_time = newEndIso
+      if (u.priority !== undefined) patch.priority = Math.max(1, Math.min(4, Number(u.priority) || 3))
+      if (u.movability) patch.flexibility = u.movability !== 'immovable'
+      if (u.completion_note !== undefined) patch.completion_note = u.completion_note
+
+      let updatedRow = { ...target, ...patch }
+      if (supabase && target.id) {
+        const { data, error } = await supabase
+          .from('schedule_items')
+          .update(patch)
+          .eq('id', target.id)
+          .eq('user_id', userId)
+          .select()
+          .single()
+        if (error) {
+          throw new Error(`Failed to update schedule item: ${error.message}`)
+        }
+        if (data) updatedRow = data
+      }
+
+      const enriched = enrichScheduleItem({
+        ...updatedRow,
+        movability: u.movability || target.movability,
+        auto_rescheduled: kind === 'reschedule',
+      })
+      updatedTasks.push(enriched)
+      workingItems = workingItems.map((it) => (it.id === target.id ? enriched : it))
     }
   }
 

@@ -4,7 +4,8 @@ import {
   getTimezoneContext,
   getSupabase,
   callGemini,
-  fetchActiveScheduleItems,
+  fetchRawActiveScheduleItems,
+  deduplicateScheduleItems,
   buildChatAgentPrompt,
   executeScheduleOperations,
   saveExtractedTasks,
@@ -46,24 +47,25 @@ export default async function handler(req, res) {
     : []
 
   try {
-    // 1. Load live schedule context so AI can see, update, cancel, reschedule, or clear existing items
-    const existingItems = await fetchActiveScheduleItems(supabase, userId, tzCtx.offsetMinutes)
+    // 1. Load ALL raw active items (for thorough deletion/updates) + deduplicated view for prompt
+    const rawItems = await fetchRawActiveScheduleItems(supabase, userId)
+    const promptItems = deduplicateScheduleItems(rawItems, tzCtx.offsetMinutes)
 
     // 2. Ask Gemini with full schedule + conversation context
-    const prompt = buildChatAgentPrompt(tzCtx, existingItems, message, history)
+    const prompt = buildChatAgentPrompt(tzCtx, promptItems, message, history)
     const parsed = await callGemini({
       parts: [{ text: prompt }],
       jsonMode: true,
       perModelTimeoutMs: 18000,
     })
 
-    // 3. Execute schedule operations FIRST (cancel, reschedule, update, complete, clear_range, clear_all)
+    // 3. Execute schedule operations against ALL raw rows (so duplicate DB copies are never orphaned)
     const operations = Array.isArray(parsed?.operations) ? parsed.operations : []
     const {
       updatedTasks,
       cancelledTasks,
       completedTasks,
-    } = await executeScheduleOperations(supabase, userId, operations, existingItems, tzCtx)
+    } = await executeScheduleOperations(supabase, userId, operations, rawItems, tzCtx)
 
     // 4. Filter out any task in parsed.tasks that was already handled as an in-place update/completion
     const handledTitles = new Set(
@@ -82,14 +84,15 @@ export default async function handler(req, res) {
     )
 
     const allDisplayTasks = [...updatedTasks, ...completedTasks, ...savedTasks]
+    const displayCancelled = deduplicateScheduleItems(cancelledTasks, tzCtx.offsetMinutes)
 
     let replyMessage = parsed?.message || ''
     let action = 'chat'
 
-    if (cancelledTasks.length > 0 && updatedTasks.length === 0 && savedTasks.length === 0) {
+    if (displayCancelled.length > 0 && updatedTasks.length === 0 && savedTasks.length === 0) {
       action = 'schedule_cleared'
       if (!replyMessage) {
-        replyMessage = `Removed ${cancelledTasks.length} item(s) from your schedule.`
+        replyMessage = `Removed ${displayCancelled.length} item(s) from your schedule.`
       }
     } else if (updatedTasks.length > 0 || completedTasks.length > 0) {
       action = 'schedule_updated'
@@ -118,12 +121,12 @@ export default async function handler(req, res) {
       tasks_saved: allDisplayTasks,
       tasks_extracted: allDisplayTasks,
       tasks_updated: updatedTasks,
-      tasks_cancelled: cancelledTasks,
+      tasks_cancelled: displayCancelled,
       tasks_completed: completedTasks,
       repeated_tasks: repeatedTasks,
       clarification_needed: parsed?.clarification_needed || null,
       schedule_trigger:
-        allDisplayTasks.length > 0 || cancelledTasks.length > 0,
+        allDisplayTasks.length > 0 || displayCancelled.length > 0,
       quick_actions: [],
     })
   } catch (err) {
