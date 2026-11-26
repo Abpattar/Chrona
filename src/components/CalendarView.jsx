@@ -236,9 +236,13 @@ export default function CalendarView() {
   }
 
   const handleNudge = async (ev) => {
-    const res = await api.autoReschedule(ev.id)
-    setAssistantBanner(res.message)
-    fetchSchedule()
+    try {
+      const res = await api.autoReschedule(ev.id)
+      setAssistantBanner(res.message)
+      fetchSchedule()
+    } catch (err) {
+      setAssistantBanner(`Reschedule error: ${err.message}`)
+    }
   }
 
   const handleDelete = async (id) => {

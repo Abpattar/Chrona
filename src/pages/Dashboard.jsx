@@ -93,8 +93,8 @@ export default function Dashboard() {
 
   const handleAutoReschedule = async (taskId = null) => {
     try {
-      await api.autoReschedule(taskId, !taskId)
-      showNotif(taskId ? 'Task rescheduled with AI ⚡' : 'Schedule re-balanced ⚡')
+      const res = await api.autoReschedule(taskId, !taskId)
+      showNotif(res?.message || (taskId ? 'Task rescheduled with AI ⚡' : 'Schedule re-balanced ⚡'))
       fetchContext()
     } catch (e) {
       showNotif(e.message, 'error')

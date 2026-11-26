@@ -37,8 +37,9 @@ export function getNodeTheme(item) {
   if (isCompleted) {
     return {
       border: 'rgba(52, 211, 153, 0.45)',
+      cardBg: 'linear-gradient(155deg, rgba(16, 42, 36, 0.94), rgba(10, 22, 20, 0.96))',
       pinColor: '#34d399',
-      glow: '0 0 18px rgba(16, 185, 129, 0.18)',
+      glow: '0 0 20px rgba(16, 185, 129, 0.16)',
       badgeBg: 'rgba(16, 185, 129, 0.18)',
       badgeText: '#34d399',
       label: '✓ FULFILLED',
@@ -49,10 +50,11 @@ export function getNodeTheme(item) {
   if (isPending) {
     return {
       border: 'rgba(192, 132, 252, 0.45)',
+      cardBg: 'linear-gradient(155deg, rgba(35, 22, 54, 0.94), rgba(16, 12, 28, 0.96))',
       pinColor: '#c084fc',
-      glow: '0 0 18px rgba(157, 78, 221, 0.2)',
-      badgeBg: 'rgba(157, 78, 221, 0.18)',
-      badgeText: '#c084fc',
+      glow: '0 0 20px rgba(168, 85, 247, 0.18)',
+      badgeBg: 'rgba(168, 85, 247, 0.2)',
+      badgeText: '#d8b4fe',
       label: '⏳ UNASSIGNED',
       textStyle: 'text-purple-100 font-medium',
     }
@@ -60,61 +62,81 @@ export function getNodeTheme(item) {
 
   if (movability === 'immovable') {
     return {
-      border: 'rgba(226, 232, 240, 0.38)',
+      border: 'rgba(226, 232, 240, 0.36)',
+      cardBg: 'linear-gradient(155deg, rgba(28, 35, 52, 0.96), rgba(14, 18, 29, 0.98))',
       pinColor: '#f8fafc',
-      glow: '0 0 18px rgba(248, 250, 252, 0.12)',
-      badgeBg: 'rgba(248, 250, 252, 0.12)',
+      glow: '0 0 22px rgba(248, 250, 252, 0.1)',
+      badgeBg: 'rgba(248, 250, 252, 0.14)',
       badgeText: '#f8fafc',
       label: '◈ ANCHOR',
-      textStyle: 'text-slate-100 font-semibold',
+      textStyle: 'text-slate-50 font-semibold',
     }
   }
 
   if (movability === 'negotiable') {
     return {
       border: 'rgba(245, 158, 11, 0.45)',
+      cardBg: 'linear-gradient(155deg, rgba(42, 31, 18, 0.94), rgba(19, 15, 12, 0.97))',
       pinColor: '#fbbf24',
-      glow: '0 0 18px rgba(245, 158, 11, 0.18)',
+      glow: '0 0 20px rgba(245, 158, 11, 0.16)',
       badgeBg: 'rgba(245, 158, 11, 0.18)',
-      badgeText: '#fbbf24',
+      badgeText: '#fcd34d',
       label: isRescheduled ? '↻ ALIGNED' : '✧ PRIORITY',
-      textStyle: 'text-amber-100 font-semibold',
+      textStyle: 'text-amber-50 font-semibold',
     }
   }
 
   return {
-    border: 'rgba(56, 189, 248, 0.4)',
+    border: 'rgba(56, 189, 248, 0.42)',
+    cardBg: 'linear-gradient(155deg, rgba(16, 36, 52, 0.94), rgba(10, 18, 29, 0.97))',
     pinColor: '#38bdf8',
-    glow: '0 0 18px rgba(56, 189, 248, 0.18)',
-    badgeBg: 'rgba(56, 189, 248, 0.16)',
-    badgeText: '#38bdf8',
-    label: isRescheduled ? '✦ SUGGESTED' : '✦ FLUID',
-    textStyle: 'text-cyan-100 font-medium',
+    glow: '0 0 20px rgba(56, 189, 248, 0.16)',
+    badgeBg: 'rgba(56, 189, 248, 0.18)',
+    badgeText: '#7dd3fc',
+    label: isRescheduled ? '✦ RESCHEDULED' : '✦ FLUID',
+    textStyle: 'text-cyan-50 font-medium',
   }
 }
 
-// ── Realistic Push-Pin Cap ────────────────────────────────────────────────────
+// ── Realistic 3D Push-Pin Cap ─────────────────────────────────────────────────
 function PushPin({ color = '#38bdf8' }) {
   return (
     <div
-      className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center pointer-events-none"
+      className="absolute -top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center pointer-events-none"
       aria-hidden="true"
     >
       <div
-        className="w-4 h-4 rounded-full border border-white/40 shadow-[0_3px_8px_rgba(0,0,0,0.85)]"
+        className="w-4 h-4 rounded-full border border-white/50"
         style={{
-          background: `radial-gradient(circle at 35% 30%, #ffffff 0%, ${color} 45%, #0f172a 100%)`,
-          boxShadow: `0 0 10px ${color}88, 0 3px 6px rgba(0,0,0,0.85)`,
+          background: `radial-gradient(circle at 32% 28%, #ffffff 0%, ${color} 45%, #0f172a 100%)`,
+          boxShadow: `0 0 12px ${color}99, 0 5px 8px rgba(0,0,0,0.9)`,
         }}
       />
-      <div className="w-0.5 h-1.5 bg-slate-400/70 -mt-0.5 rounded-b-full" />
+      <div className="w-[2px] h-2 bg-gradient-to-b from-slate-200 to-slate-600 -mt-0.5 rounded-b-full shadow" />
     </div>
+  )
+}
+
+// ── Background Pin-Board Column Zone ──────────────────────────────────────────
+function BoardZoneNode({ data }) {
+  const { width, height, accentColor } = data
+  return (
+    <div
+      className="rounded-3xl pointer-events-none"
+      style={{
+        width: `${width}px`,
+        height: `${height}px`,
+        background: 'linear-gradient(180deg, rgba(17, 24, 39, 0.55) 0%, rgba(10, 14, 24, 0.35) 100%)',
+        border: `1px dashed ${accentColor}30`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 40px rgba(0,0,0,0.35)',
+      }}
+    />
   )
 }
 
 // ── Pinned Task Note Card ─────────────────────────────────────────────────────
 function ScheduleTaskNode({ data }) {
-  const { item, tiltDeg = 0, onComplete, onReschedule, onDelete, onOverrideBreak, onExplain } = data
+  const { item, tiltDeg = 0, onComplete, onReschedule, onDelete, onExplain } = data
   const theme = getNodeTheme(item)
 
   const hasStartTime = !!item.start_time
@@ -130,16 +152,24 @@ function ScheduleTaskNode({ data }) {
 
   return (
     <div
-      className="relative px-3.5 pt-4 pb-3 w-[238px] rounded-xl transition-transform duration-200 hover:!rotate-0 hover:scale-[1.02] group cursor-grab active:cursor-grabbing"
+      className="relative px-3.5 pt-4 pb-3 w-[244px] rounded-xl transition-all duration-200 hover:!rotate-0 hover:scale-[1.03] hover:z-30 group cursor-grab active:cursor-grabbing"
       style={{
-        background: 'linear-gradient(155deg, rgba(18, 24, 38, 0.96), rgba(10, 14, 23, 0.96))',
+        background: theme.cardBg,
         border: `1px solid ${theme.border}`,
-        boxShadow: `${theme.glow}, 0 10px 26px rgba(0,0,0,0.72)`,
+        boxShadow: `${theme.glow}, 0 12px 26px rgba(0,0,0,0.75)`,
         transform: `rotate(${tiltDeg}deg)`,
       }}
     >
       <PushPin color={theme.pinColor} />
       <Handle type="target" position={Position.Top} className="!opacity-0 !w-2 !h-2" />
+
+      {/* Subtle corner paper fold highlight */}
+      <div
+        className="absolute top-0 right-0 w-4 h-4 pointer-events-none rounded-tr-xl opacity-30"
+        style={{
+          background: 'linear-gradient(225deg, rgba(255,255,255,0.22) 0%, transparent 55%)',
+        }}
+      />
 
       {/* Top row: Badge & Delete */}
       <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -154,42 +184,42 @@ function ScheduleTaskNode({ data }) {
             e.stopPropagation()
             if (onDelete) onDelete(item.id)
           }}
-          className="opacity-50 group-hover:opacity-100 text-[10px] font-bold text-rose-400 hover:text-rose-300 px-1"
-          title="Remove item"
+          className="opacity-40 group-hover:opacity-100 text-[10px] font-bold text-rose-400 hover:text-rose-200 px-1 transition-opacity"
+          title="Unpin & remove item"
         >
           ✕
         </button>
       </div>
 
       {/* Title */}
-      <h4 className={`text-xs leading-snug line-clamp-2 ${theme.textStyle}`}>
+      <h4 className={`text-[13px] leading-snug line-clamp-2 ${theme.textStyle}`}>
         {item.title}
       </h4>
 
       {/* Date and Time */}
       <div
         className="mt-2 pt-2 flex flex-col gap-1 text-[10px]"
-        style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
         {hasStartTime ? (
-          <div className="flex items-center justify-between font-mono text-[10px] text-slate-300">
-            <span className="font-semibold text-white">
+          <div className="flex items-center justify-between font-mono text-[10px] text-slate-200">
+            <span className="font-semibold">
               {startDay.format('h:mm A')} – {endDay ? endDay.format('h:mm A') : 'TBD'}
             </span>
-            <span className="text-[9px] text-cyan-300 px-1.5 py-0.2 rounded bg-cyan-500/10 border border-cyan-500/20">
+            <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/25">
               {durationMin}m
             </span>
           </div>
         ) : (
           <div className="flex items-center justify-between text-amber-300/90 font-mono">
-            <span>⏳ Flexible</span>
-            <span className="text-[9px] px-1 rounded bg-amber-500/10">{durationMin}m</span>
+            <span>⏳ Flexible slot</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15">{durationMin}m</span>
           </div>
         )}
 
         {(item.completion_note || item.reschedule_reason) && (
           <div
-            className="text-[9px] text-amber-300/85 font-mono truncate"
+            className="text-[9px] text-amber-200/85 font-mono truncate"
             title={item.completion_note || item.reschedule_reason}
           >
             📌 {item.completion_note || item.reschedule_reason}
@@ -199,7 +229,7 @@ function ScheduleTaskNode({ data }) {
 
       {/* Action buttons */}
       <div
-        className="mt-2.5 pt-2 flex items-center gap-1.5 flex-wrap"
+        className="mt-2.5 pt-2 flex items-center gap-1.5"
         style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
         {item.status !== 'completed' && (
@@ -208,7 +238,7 @@ function ScheduleTaskNode({ data }) {
               e.stopPropagation()
               if (onComplete) onComplete(item.id)
             }}
-            className="flex-1 min-w-[50px] py-1 rounded text-[10px] font-bold transition-all text-emerald-300 hover:text-emerald-100"
+            className="flex-1 py-1 rounded-lg text-[10px] font-bold transition-all text-emerald-300 hover:text-emerald-100 hover:bg-emerald-500/25"
             style={{
               background: 'rgba(16, 185, 129, 0.14)',
               border: '1px solid rgba(16, 185, 129, 0.3)',
@@ -217,31 +247,19 @@ function ScheduleTaskNode({ data }) {
             ✓ Done
           </button>
         )}
-        {item.auto_rescheduled && onOverrideBreak && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onOverrideBreak(item.id, true)
-            }}
-            className="py-1 px-2 rounded text-[10px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/40"
-            title="Skip break"
-          >
-            ⚡
-          </button>
-        )}
         <button
           onClick={(e) => {
             e.stopPropagation()
             if (onReschedule) onReschedule(item.id)
           }}
-          className="py-1 px-2 rounded text-[10px] font-bold text-amber-300 hover:text-amber-100"
+          className="py-1 px-2.5 rounded-lg text-[10px] font-bold text-amber-300 hover:text-amber-100 hover:bg-amber-500/20 transition-all"
           style={{
             background: 'rgba(245, 158, 11, 0.12)',
-            border: '1px solid rgba(245, 158, 11, 0.25)',
+            border: '1px solid rgba(245, 158, 11, 0.28)',
           }}
-          title="Auto-reschedule"
+          title="Move to next open slot"
         >
-          ↻
+          ↻ Move
         </button>
         {onExplain && (
           <button
@@ -249,7 +267,7 @@ function ScheduleTaskNode({ data }) {
               e.stopPropagation()
               onExplain(item)
             }}
-            className="py-1 px-2 rounded text-[10px] font-bold text-cyan-300 hover:text-cyan-100"
+            className="py-1 px-2 rounded-lg text-[10px] font-bold text-cyan-300 hover:text-cyan-100 hover:bg-cyan-500/25 transition-all"
             style={{
               background: 'rgba(6, 182, 212, 0.14)',
               border: '1px solid rgba(6, 182, 212, 0.3)',
@@ -266,21 +284,27 @@ function ScheduleTaskNode({ data }) {
   )
 }
 
-// ── Pinned Day Column Header Card ─────────────────────────────────────────────
+// ── Pinned Day Column Tape Header Card ────────────────────────────────────────
 function DateBranchNode({ data }) {
   const { dateLabel, dayName, count, totalDuration, isToday, isPending } = data
   const accentColor = isToday ? '#38bdf8' : isPending ? '#c084fc' : '#fbbf24'
 
   return (
     <div
-      className="relative px-4 pt-3.5 pb-2.5 rounded-2xl w-[238px] text-center select-none cursor-grab active:cursor-grabbing"
+      className="relative px-4 pt-3.5 pb-2.5 rounded-2xl w-[244px] text-center select-none cursor-grab active:cursor-grabbing overflow-visible"
       style={{
-        background: 'linear-gradient(145deg, rgba(20, 27, 45, 0.96), rgba(11, 15, 25, 0.96))',
+        background: 'linear-gradient(145deg, rgba(22, 30, 49, 0.96), rgba(12, 17, 29, 0.97))',
         border: `1px solid ${accentColor}55`,
-        boxShadow: `0 0 22px ${accentColor}20, 0 8px 20px rgba(0,0,0,0.7)`,
+        boxShadow: `0 0 22px ${accentColor}1c, 0 8px 22px rgba(0,0,0,0.72)`,
       }}
     >
+      {/* Translucent top tape bar */}
+      <div
+        className="absolute top-0 left-6 right-6 h-1 rounded-b-full opacity-75"
+        style={{ background: accentColor }}
+      />
       <PushPin color={accentColor} />
+
       <div className="flex items-center justify-center gap-1.5">
         <span className="text-xs" style={{ color: accentColor }}>
           {isPending ? '⏳' : isToday ? '✧' : '◈'}
@@ -294,9 +318,9 @@ function DateBranchNode({ data }) {
         <span
           className="px-2 py-0.5 rounded-full text-[9px] font-semibold"
           style={{
-            background: `${accentColor}18`,
+            background: `${accentColor}1a`,
             color: accentColor,
-            border: `1px solid ${accentColor}35`,
+            border: `1px solid ${accentColor}38`,
           }}
         >
           {count} {count === 1 ? 'pin' : 'pins'}
@@ -309,6 +333,7 @@ function DateBranchNode({ data }) {
 }
 
 const nodeTypes = {
+  boardZoneNode: BoardZoneNode,
   dateBranchNode: DateBranchNode,
   scheduleTaskNode: ScheduleTaskNode,
 }
@@ -316,7 +341,7 @@ const nodeTypes = {
 // ── Pin-Board 2D Grid Layout Generator ────────────────────────────────────────
 function buildPinBoardLayout(
   items,
-  { onComplete, onReschedule, onDelete, onOverrideBreak, onExplain }
+  { onComplete, onReschedule, onDelete, onExplain }
 ) {
   const nodes = []
   const edges = []
@@ -340,12 +365,13 @@ function buildPinBoardLayout(
 
   const numGroups = dateKeys.length
   const colsPerRow = numGroups <= 2 ? numGroups : numGroups <= 6 ? 3 : 4
-  const colSpacingX = 285
+  const cardWidth = 244
+  const zonePadX = 16
+  const colSpacingX = cardWidth + zonePadX * 2 + 28 // 304px
   const headerHeight = 96
-  const cardSlotY = 186
-  const rowGapY = 64
+  const cardSlotY = 188
+  const rowGapY = 56
 
-  // Split dateKeys into visual rows so the board stays compact & balanced
   let currentRowY = 0
   for (let rowStart = 0; rowStart < numGroups; rowStart += colsPerRow) {
     const rowKeys = dateKeys.slice(rowStart, rowStart + colsPerRow)
@@ -359,26 +385,7 @@ function buildPinBoardLayout(
 
       const colX = colIdx * colSpacingX
       const dateNodeId = `date-${dateKey}`
-
-      let totalDur = 0
-      branchItems.forEach((i) => {
-        totalDur += Number(i.duration_minutes || 60)
-      })
-
-      nodes.push({
-        id: dateNodeId,
-        type: 'dateBranchNode',
-        position: { x: colX, y: currentRowY },
-        data: {
-          dateLabel: isPending ? 'Flexible' : branchDate.format('MMM D, YYYY'),
-          dayName: isPending ? 'Pending' : isToday ? 'Today' : branchDate.format('dddd'),
-          count: branchItems.length,
-          totalDuration: totalDur,
-          isToday,
-          isPending,
-        },
-        draggable: true,
-      })
+      const accentColor = isToday ? '#38bdf8' : isPending ? '#c084fc' : '#fbbf24'
 
       const sortedBranchItems = branchItems.slice().sort((a, b) => {
         const aTime = a.start_time || a.event_datetime
@@ -388,12 +395,55 @@ function buildPinBoardLayout(
         return dayjs(aTime).diff(dayjs(bTime))
       })
 
-      const threadColor = isToday ? '#38bdf8' : isPending ? '#c084fc' : 'rgba(251, 191, 36, 0.55)'
+      let totalDur = 0
+      sortedBranchItems.forEach((i) => {
+        totalDur += Number(i.duration_minutes || 60)
+      })
+
+      const colHeight = headerHeight + sortedBranchItems.length * cardSlotY + 18
+
+      // Background zone frame around this day's pinned column
+      nodes.push({
+        id: `zone-${dateKey}`,
+        type: 'boardZoneNode',
+        position: { x: colX - zonePadX, y: currentRowY - 18 },
+        data: {
+          width: cardWidth + zonePadX * 2,
+          height: colHeight,
+          accentColor,
+        },
+        draggable: false,
+        selectable: false,
+        zIndex: -10,
+      })
+
+      nodes.push({
+        id: dateNodeId,
+        type: 'dateBranchNode',
+        position: { x: colX, y: currentRowY },
+        data: {
+          dateLabel: isPending ? 'Flexible' : branchDate.format('MMM D, YYYY'),
+          dayName: isPending ? 'Pending' : isToday ? 'Today' : branchDate.format('dddd'),
+          count: sortedBranchItems.length,
+          totalDuration: totalDur,
+          isToday,
+          isPending,
+        },
+        draggable: true,
+        zIndex: 5,
+      })
+
+      const threadColor = isToday
+        ? 'rgba(56, 189, 248, 0.55)'
+        : isPending
+        ? 'rgba(192, 132, 252, 0.55)'
+        : 'rgba(251, 191, 36, 0.45)'
 
       sortedBranchItems.forEach((task, taskIdx) => {
         const taskId = `task-${task.id || `${dateKey}-${taskIdx}`}`
         const taskY = currentRowY + headerHeight + taskIdx * cardSlotY
-        const tiltDeg = taskIdx % 2 === 0 ? -0.6 : 0.6
+        const tilts = [-1.0, 0.85, -0.55, 0.95]
+        const tiltDeg = tilts[taskIdx % tilts.length]
 
         nodes.push({
           id: taskId,
@@ -405,13 +455,12 @@ function buildPinBoardLayout(
             onComplete,
             onReschedule,
             onDelete,
-            onOverrideBreak,
             onExplain,
           },
           draggable: true,
+          zIndex: 10,
         })
 
-        // Taut pin-board string connecting header -> 1st card -> 2nd card...
         const sourceId =
           taskIdx === 0
             ? dateNodeId
@@ -421,16 +470,15 @@ function buildPinBoardLayout(
           id: `pin-thread-${sourceId}-${taskId}`,
           source: sourceId,
           target: taskId,
-          type: 'straight',
+          type: 'default',
           style: {
             stroke: threadColor,
-            strokeWidth: 1.5,
+            strokeWidth: 1.6,
             strokeDasharray: '4 3',
           },
         })
       })
 
-      const colHeight = headerHeight + sortedBranchItems.length * cardSlotY
       if (colHeight > maxRowHeight) maxRowHeight = colHeight
     })
 
@@ -481,18 +529,12 @@ function MindmapFlow({ items, loadSchedule }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const rfInstance = useRef(null)
   const [explainData, setExplainData] = useState(null)
+  const [toast, setToast] = useState(null)
 
-  const handleOverrideBreak = useCallback(
-    async (taskId, skipBreak) => {
-      try {
-        await api.overrideBreak({ task_id: taskId, skip_break: skipBreak })
-        loadSchedule()
-      } catch (e) {
-        alert(`Error adjusting break: ${e.message}`)
-      }
-    },
-    [loadSchedule]
-  )
+  const showToast = useCallback((msg, type = 'info') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3500)
+  }, [])
 
   const handleExplain = useCallback(async (item) => {
     try {
@@ -517,39 +559,53 @@ function MindmapFlow({ items, loadSchedule }) {
     async (taskId) => {
       try {
         await api.completeTask(taskId)
+        showToast('Marked as completed ✓')
         loadSchedule()
       } catch (e) {
-        alert(`Error completing task: ${e.message}`)
+        showToast(`Error completing task: ${e.message}`, 'error')
       }
     },
-    [loadSchedule]
+    [loadSchedule, showToast]
   )
 
   const handleReschedule = useCallback(
     async (taskId) => {
       try {
         const res = await api.autoReschedule(taskId)
-        alert(res.message || 'Task automatically rescheduled!')
+        showToast(res.message || 'Pin moved to next open slot ⚡')
         loadSchedule()
       } catch (e) {
-        alert(`Reschedule error: ${e.message}`)
+        showToast(`Reschedule error: ${e.message}`, 'error')
       }
     },
-    [loadSchedule]
+    [loadSchedule, showToast]
   )
 
   const handleDelete = useCallback(
     async (taskId) => {
-      if (!window.confirm('Remove this commitment from your pin board?')) return
+      if (!window.confirm('Remove this pin from your board?')) return
       try {
         await api.updateScheduleItem(taskId, { status: 'cancelled' })
+        showToast('Pin removed')
         loadSchedule()
       } catch (e) {
-        alert(`Error: ${e.message}`)
+        showToast(`Error: ${e.message}`, 'error')
       }
     },
-    [loadSchedule]
+    [loadSchedule, showToast]
   )
+
+  const handleClearAllPins = useCallback(async () => {
+    if (!items.length) return
+    if (!window.confirm(`Remove all ${items.length} pins from your Mind Map?`)) return
+    try {
+      await api.scheduleClear()
+      showToast('All pins cleared from board')
+      loadSchedule()
+    } catch (e) {
+      showToast(`Clear error: ${e.message}`, 'error')
+    }
+  }, [items.length, loadSchedule, showToast])
 
   const filteredItems = useMemo(() => {
     let result = items
@@ -588,21 +644,19 @@ function MindmapFlow({ items, loadSchedule }) {
       onComplete: handleComplete,
       onReschedule: handleReschedule,
       onDelete: handleDelete,
-      onOverrideBreak: handleOverrideBreak,
       onExplain: handleExplain,
     })
     setNodes(newNodes)
     setEdges(newEdges)
 
     setTimeout(() => {
-      rfInstance.current?.fitView({ padding: 0.18, maxZoom: 1.05, duration: 350 })
+      rfInstance.current?.fitView({ padding: 0.16, maxZoom: 1.0, duration: 350 })
     }, 150)
   }, [
     filteredItems,
     handleComplete,
     handleReschedule,
     handleDelete,
-    handleOverrideBreak,
     handleExplain,
     setNodes,
     setEdges,
@@ -610,7 +664,7 @@ function MindmapFlow({ items, loadSchedule }) {
 
   const onInit = useCallback((instance) => {
     rfInstance.current = instance
-    setTimeout(() => instance.fitView({ padding: 0.18, maxZoom: 1.05, duration: 350 }), 200)
+    setTimeout(() => instance.fitView({ padding: 0.16, maxZoom: 1.0, duration: 350 }), 200)
   }, [])
 
   return (
@@ -618,9 +672,22 @@ function MindmapFlow({ items, loadSchedule }) {
       className="flex-1 w-full h-full min-h-0 relative"
       style={{
         background:
-          'radial-gradient(circle at 50% 25%, #0e1422 0%, #070a11 65%, #05070c 100%)',
+          'radial-gradient(circle at 50% 25%, #111728 0%, #090c15 62%, #05070c 100%)',
       }}
     >
+      {/* Inline Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl border text-xs font-mono shadow-2xl backdrop-blur-xl animate-fade-in ${
+            toast.type === 'error'
+              ? 'bg-rose-950/95 border-rose-500/40 text-rose-200'
+              : 'bg-[#0f172a]/95 border-cyan-500/40 text-cyan-200 shadow-[0_0_16px_rgba(56,189,248,0.25)]'
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       {/* Floating Pin Board Summary Badge (Top Left) */}
       <div className="absolute top-3 left-3 sm:left-6 z-20 flex items-center gap-2 pointer-events-auto">
         <div className="flex items-center gap-2.5 bg-[#0d121e]/90 px-3 py-1.5 rounded-xl border border-slate-800/80 backdrop-blur-xl shadow-lg">
@@ -683,15 +750,51 @@ function MindmapFlow({ items, loadSchedule }) {
             −
           </button>
           <button
-            onClick={() => rfInstance.current?.fitView({ padding: 0.18, maxZoom: 1.05, duration: 350 })}
+            onClick={() => rfInstance.current?.fitView({ padding: 0.16, maxZoom: 1.0, duration: 350 })}
             className="px-2 py-0.5 rounded-lg text-xs text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all flex items-center gap-1"
             title="Reset zoom & fit board"
           >
             <span>⛶</span>
             <span className="hidden sm:inline">Fit</span>
           </button>
+
+          {items.length > 0 && (
+            <>
+              <div className="h-3 w-px bg-slate-800" />
+              <button
+                onClick={handleClearAllPins}
+                className="px-2 py-0.5 rounded-lg text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 transition-all flex items-center gap-1"
+                title="Remove all pins from the Mind Map"
+              >
+                <span>🗑️</span>
+                <span className="hidden sm:inline">Clear Pins</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Floating Color Pin Legend (Bottom Left) */}
+      {items.length > 0 && (
+        <div className="hidden sm:flex absolute bottom-3 left-6 z-20 items-center gap-3 bg-[#0d121e]/85 px-3 py-1.5 rounded-xl border border-slate-800/80 backdrop-blur-xl text-[10px] font-mono text-slate-400 pointer-events-auto">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-slate-100 shadow-[0_0_6px_#f8fafc]" />
+            Anchor
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_6px_#fbbf24]" />
+            Priority
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_6px_#38bdf8]" />
+            Fluid
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
+            Done
+          </span>
+        </div>
+      )}
 
       {/* Empty State */}
       {filteredItems.length === 0 && (

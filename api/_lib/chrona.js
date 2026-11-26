@@ -196,20 +196,24 @@ function normalizeIso(dtStr, offsetStr) {
   return parsed.toISOString()
 }
 
-function findNextOpenSlot(durationMin, existingItems, tzCtx) {
+export function findNextOpenSlot(durationMin, existingItems, tzCtx, earliestStartMs = null) {
   const durMs = Math.max(15, durationMin || 60) * 60 * 1000
   const busy = existingItems
-    .filter((it) => it.start_time && it.end_time && it.status !== 'cancelled')
+    .filter((it) => it.start_time && it.end_time && it.status !== 'cancelled' && it.status !== 'completed')
     .map((it) => ({
       start: new Date(it.start_time).getTime(),
       end: new Date(it.end_time).getTime(),
     }))
     .filter((b) => !Number.isNaN(b.start) && !Number.isNaN(b.end))
 
-  // Start checking from the next 30-minute boundary at least 15 mins from now
-  let cursor = new Date(Math.ceil((tzCtx.now.getTime() + 15 * 60000) / (30 * 60000)) * (30 * 60000))
+  const baseMs = Math.max(
+    tzCtx.now.getTime() + 15 * 60000,
+    earliestStartMs ? earliestStartMs + 30 * 60000 : 0
+  )
+  // Start checking from the next 30-minute boundary
+  let cursor = new Date(Math.ceil(baseMs / (30 * 60000)) * (30 * 60000))
 
-  for (let i = 0; i < 240; i++) {
+  for (let i = 0; i < 672; i++) {
     const localHour = new Date(cursor.getTime() + tzCtx.offsetMinutes * 60000).getUTCHours()
     if (localHour >= 8 && localHour < 22) {
       const slotStart = cursor.getTime()
