@@ -80,8 +80,6 @@ export default function CardStack({
   onReschedule,
   onDefer,
   onOpenAI,
-  isIntro = false,
-  onEndIntro,
 }) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [dragOffset, setDragOffset] = useState(0)
@@ -215,12 +213,8 @@ export default function CardStack({
         style={{
           perspective: '1400px',
           perspectiveOrigin: '50% 50%',
-          maskImage: isIntro
-            ? 'none'
-            : 'linear-gradient(to right, transparent 0%, black 4%, black 96%, transparent 100%)',
-          WebkitMaskImage: isIntro
-            ? 'none'
-            : 'linear-gradient(to right, transparent 0%, black 4%, black 96%, transparent 100%)',
+          maskImage: 'linear-gradient(to right, transparent 0%, black 4%, black 96%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 4%, black 96%, transparent 100%)',
         }}
       >
         <div
@@ -249,64 +243,32 @@ export default function CardStack({
             const eTime = item.end_time ? dayjs(item.end_time) : (sTime ? sTime.add(item.duration_minutes || 60, 'minute') : null)
 
             const dragShift = isDragging ? dragOffset * 0.45 : 0
-
-            let translateX
-            let translateY = 0
-            let translateZ
-            let rotateY
-            let rotateZ = 0
-            let scale
-            let opacity
-            let zIndex
-
-            if (isIntro) {
-              // Left-shifted stacked deck position towards the screen
-              const leftBaseShift = windowWidth >= 1200
-                ? -Math.min(500, windowWidth * 0.33)
-                : windowWidth >= 768
-                  ? -Math.min(360, windowWidth * 0.30)
-                  : -Math.min(140, windowWidth * 0.20)
-
-              const stackStepX = windowWidth >= 768 ? -20 : -10
-              const stackStepY = -6
-              const stackRotateZ = -offset * 3.5
-
-              translateX = leftBaseShift + (offset * stackStepX) + dragShift
-              translateY = offset * stackStepY
-              translateZ = -absOffset * 45 + (isCenter ? 35 : 0)
-              rotateY = 16 + (offset * 4)
-              rotateZ = stackRotateZ
-              scale = Math.max(0.72, 1 - absOffset * 0.08)
-              opacity = Math.max(0.35, 1 - absOffset * 0.2)
-              zIndex = 30 - Math.round(absOffset * 8)
-            } else {
-              translateX = offset * spacing + dragShift
-              translateZ = -Math.pow(absOffset, 1.3) * 75
-              rotateY = -offset * 22 + (isDragging ? dragOffset * -0.04 : 0)
-              scale = Math.max(0.72, 1 - absOffset * 0.12)
-              opacity = Math.max(0.35, 1 - absOffset * 0.28)
-              zIndex = 30 - Math.round(absOffset * 10)
-            }
+            const translateX = offset * spacing + dragShift
+            const translateZ = -Math.pow(absOffset, 1.3) * 75
+            const rotateY = -offset * 22 + (isDragging ? dragOffset * -0.04 : 0)
+            const scale = Math.max(0.72, 1 - absOffset * 0.12)
+            const opacity = Math.max(0.35, 1 - absOffset * 0.28)
+            const zIndex = 30 - Math.round(absOffset * 10)
 
             return (
               <div
                 key={item.id || `card-${index}`}
                 onClick={(e) => {
-                  if (isIntro && onEndIntro) onEndIntro()
                   if (Math.abs(dragOffset) > 10) return
                   if (!isCenter) setActiveIndex(index)
                 }}
-                className={`absolute w-[calc(100vw-48px)] max-w-[290px] sm:max-w-[330px] h-[clamp(280px,44dvh,355px)] rounded-[26px] sm:rounded-[30px] p-4 sm:p-5 flex flex-col justify-between cursor-pointer card-sunset-ideas overflow-hidden ${isCenter
-                  ? 'border-white/[0.16] shadow-[0_30px_70px_rgba(0,0,0,0.85)] ring-1 ring-white/10'
-                  : 'opacity-70 hover:opacity-90'
-                  }`}
+                className={`absolute w-[calc(100vw-48px)] max-w-[290px] sm:max-w-[330px] h-[clamp(280px,44dvh,355px)] rounded-[26px] sm:rounded-[30px] p-4 sm:p-5 flex flex-col justify-between cursor-pointer card-sunset-ideas overflow-hidden ${
+                  isCenter
+                    ? 'border-white/[0.16] shadow-[0_30px_70px_rgba(0,0,0,0.85)] ring-1 ring-white/10'
+                    : 'opacity-70 hover:opacity-90'
+                }`}
                 style={{
-                  transform: `translateX(${translateX}px) translateY(${translateY}px) translateZ(${translateZ}px) rotateY(${rotateY}deg) rotateZ(${rotateZ}deg) scale(${scale})`,
+                  transform: `translateX(${translateX}px) translateZ(${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`,
                   transformStyle: 'preserve-3d',
                   zIndex,
                   opacity,
                   willChange: 'transform, opacity',
-                  transition: isDragging ? 'none' : 'transform 1.05s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.8s ease',
+                  transition: isDragging ? 'none' : 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.45s ease',
                 }}
               >
                 {/* Ambient Radial Backlight inside card */}
@@ -383,7 +345,7 @@ export default function CardStack({
                   )}
                 </div>
 
-                {/* Card Bottom Row: Real Productivity Actions */}
+                {/* Card Bottom Row: Real Productivity Actions on Card */}
                 <div
                   className="relative z-20 pt-2.5 border-t border-white/[0.08] flex items-center justify-between gap-1.5"
                   onClick={(e) => e.stopPropagation()}
@@ -402,7 +364,7 @@ export default function CardStack({
                       className="px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-medium text-neutral-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all active:scale-95"
                       title="Auto-reschedule with AI"
                     >
-                      ↻ Reschedule
+                      ↻
                     </button>
                   </div>
 
@@ -421,14 +383,7 @@ export default function CardStack({
 
       {/* Navigation Steppers & Indicators */}
       {items.length > 1 && (
-        <div
-          className="flex items-center gap-3 mt-2 sm:mt-3 z-20 transition-all duration-1000 ease-out"
-          style={{
-            transform: isIntro 
-              ? `translateX(${windowWidth >= 768 ? -Math.min(500, windowWidth * 0.33) : 0}px)` 
-              : 'translateX(0)',
-          }}
-        >
+        <div className="flex items-center gap-3 mt-2 sm:mt-3 z-20">
           <button
             onClick={prevCard}
             aria-label="Previous card"
@@ -459,8 +414,7 @@ export default function CardStack({
             ›
           </button>
         </div>
-      )
-      }
-    </div >
+      )}
+    </div>
   )
 }

@@ -45,19 +45,10 @@ export default function Dashboard() {
   const [notification, setNotification] = useState(null)
   const [currentTime, setCurrentTime] = useState(dayjs())
   const [viewMode, setViewMode] = useState('stack') // 'stack' | 'grid'
-  const [isIntro, setIsIntro] = useState(true)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(dayjs()), 10000)
     return () => clearInterval(timer)
-  }, [])
-
-  // 5-second intro transition: greeting text on left + cards stacked on right, then default view
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsIntro(false)
-    }, 5000)
-    return () => clearTimeout(timer)
   }, [])
 
   const showNotif = (msg, type = 'success') => {
@@ -161,20 +152,6 @@ export default function Dashboard() {
     return list.filter((it) => it.status === 'completed').length
   }, [ctx])
 
-  const greeting = useMemo(() => {
-    const hour = currentTime.hour()
-    if (hour >= 5 && hour < 12) {
-      return { main: 'Good Morning', sub: 'What’s on your mind?' }
-    }
-    if (hour >= 12 && hour < 17) {
-      return { main: 'Good Afternoon', sub: 'What can I help you with today?' }
-    }
-    if (hour >= 17 && hour < 22) {
-      return { main: 'Good Evening', sub: 'What’s on your mind tonight?' }
-    }
-    return { main: 'Good Night', sub: 'Ready to plan tomorrow?' }
-  }, [currentTime])
-
   const skyTheme = getSkyTheme(currentTime.hour())
 
   if (loading) {
@@ -215,11 +192,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Header: Exact match to Image ("Great ideas live here") ────────────── */}
-      <div 
-        className={`flex-none text-center pt-1 sm:pt-2 pb-1 relative z-10 transition-opacity duration-1000 ${
-          isIntro ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
-      >
+      <div className="flex-none text-center pt-1 sm:pt-2 pb-1 relative z-10">
         <h1 className="text-2xl sm:text-4xl md:text-5xl font-light tracking-tight text-white/95 drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
           Great ideas live here
         </h1>
@@ -235,8 +208,6 @@ export default function Dashboard() {
               onReschedule={handleAutoReschedule}
               onDefer={handleSkip}
               onOpenAI={() => navigate('/chat')}
-              isIntro={isIntro}
-              onEndIntro={() => setIsIntro(false)}
             />
           </div>
         ) : (
@@ -344,30 +315,6 @@ export default function Dashboard() {
             })}
           </div>
         )}
-      </div>
-
-      {/* ── First Load Intro Greeting: Big Fat Display Font — Title Case ("Good Morning" not all caps) ── */}
-      <div
-        className={`absolute bottom-20 sm:bottom-24 md:bottom-28 right-6 sm:right-10 md:right-16 lg:right-24 z-30 pointer-events-none transition-all duration-1000 ease-in-out select-none ${
-          isIntro
-            ? 'opacity-100 translate-y-0 filter-none'
-            : 'opacity-0 translate-y-12 blur-xl pointer-events-none'
-        }`}
-      >
-        <div className="max-w-3xl sm:max-w-4xl lg:max-w-5xl text-right sm:text-left">
-          {/* Big Fat Font display headline — Title Case, NOT all caps */}
-          <h1 className="text-6xl sm:text-8xl md:text-9xl lg:text-[10rem] xl:text-[11.5rem] font-black tracking-tight text-[#f5f3ef] drop-shadow-[0_16px_40px_rgba(0,0,0,0.85)] leading-[0.9] font-sans">
-            {greeting.main}
-          </h1>
-
-          {/* Small subtitle underneath */}
-          <div className="flex items-center justify-end sm:justify-start gap-2.5 mt-3 sm:mt-5 pl-1 sm:pl-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)] animate-pulse" />
-            <p className="text-xs sm:text-sm md:text-base font-normal tracking-wide text-neutral-300/90 max-w-sm sm:max-w-md">
-              {greeting.sub}
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* ── Bottom Bar: Truly Page-Centered Down Buttons ("+ Create" & "See all ideas") ── */}
