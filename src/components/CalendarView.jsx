@@ -17,36 +17,36 @@ function getMovabilityStyle(ev) {
 
   if (isCompleted) {
     return {
-      border: '1px solid rgba(16, 185, 129, 0.3)',
+      border: '1px solid rgba(52, 211, 153, 0.28)',
       borderLeft: '3px solid #10b981',
-      bg: 'rgba(16, 185, 129, 0.08)',
+      bg: 'linear-gradient(145deg, rgba(16, 42, 32, 0.8), rgba(10, 24, 20, 0.9))',
       badge: '✓ Fulfilled',
       badgeColor: '#34d399',
     }
   }
   if (movability === 'immovable') {
     return {
-      border: '1px solid rgba(248, 250, 252, 0.25)',
+      border: '1px solid rgba(255, 255, 255, 0.18)',
       borderLeft: '3px solid #f8fafc',
-      bg: 'rgba(248, 250, 252, 0.06)',
-      badge: '◈ Ancient Anchor',
+      bg: 'linear-gradient(145deg, rgba(30, 36, 50, 0.8), rgba(16, 20, 30, 0.9))',
+      badge: '◈ Anchor',
       badgeColor: '#f8fafc',
     }
   }
   if (movability === 'negotiable') {
     return {
-      border: '1px solid rgba(245, 158, 11, 0.3)',
+      border: '1px solid rgba(245, 158, 11, 0.28)',
       borderLeft: '3px solid #f59e0b',
-      bg: 'rgba(245, 158, 11, 0.08)',
-      badge: '✧ Sacred Vow',
+      bg: 'linear-gradient(145deg, rgba(46, 32, 16, 0.8), rgba(24, 18, 10, 0.9))',
+      badge: '✧ Priority',
       badgeColor: '#fbbf24',
     }
   }
   return {
-    border: isSuggested ? '1px dashed rgba(56, 189, 248, 0.4)' : '1px solid rgba(56, 189, 248, 0.25)',
+    border: isSuggested ? '1px dashed rgba(56, 189, 248, 0.38)' : '1px solid rgba(56, 189, 248, 0.25)',
     borderLeft: '3px solid #38bdf8',
-    bg: 'rgba(56, 189, 248, 0.06)',
-    badge: isSuggested ? '✦ Suggested' : '✦ Wandering Thought',
+    bg: 'linear-gradient(145deg, rgba(16, 36, 54, 0.8), rgba(10, 22, 34, 0.9))',
+    badge: isSuggested ? '✦ Suggested' : '✦ Fluid',
     badgeColor: '#38bdf8',
   }
 }
@@ -64,18 +64,18 @@ function TransitionGapPill({ prevEvent, nextEvent }) {
 
   return (
     <div
-      className="absolute left-1 right-1 rounded-md px-2 flex items-center gap-1.5 overflow-hidden pointer-events-auto"
+      className="absolute left-1 right-1 rounded-lg px-2 flex items-center gap-1.5 overflow-hidden pointer-events-auto backdrop-blur-sm"
       style={{
         top: `${topOffset}px`,
         height: `${height}px`,
-        background: 'repeating-linear-gradient(45deg, rgba(245,158,11,0.06), rgba(245,158,11,0.06) 6px, rgba(245,158,11,0.12) 6px, rgba(245,158,11,0.12) 12px)',
+        background: 'repeating-linear-gradient(45deg, rgba(245,158,11,0.08), rgba(245,158,11,0.08) 6px, rgba(245,158,11,0.16) 6px, rgba(245,158,11,0.16) 12px)',
         border: '1px dashed rgba(245, 158, 11, 0.35)',
         zIndex: 5,
       }}
       title={reason}
     >
       <span className="text-[10px]">🧭</span>
-      <span className="text-[9px] font-mono text-amber-300/90 truncate">
+      <span className="text-[9px] font-mono text-amber-200/95 truncate">
         {gapMins}m buffer · {reason}
       </span>
     </div>
@@ -93,7 +93,7 @@ function EventChip({ event, onComplete, onNudge, onDelete, onExplain }) {
 
   return (
     <div
-      className="rounded-lg px-2.5 py-1.5 transition-all duration-150 hover:brightness-110 group overflow-hidden flex flex-col justify-between"
+      className="rounded-xl px-2.5 py-1.5 transition-all duration-200 hover:brightness-110 group overflow-hidden flex flex-col justify-between shadow-md hover:shadow-xl hover:z-30 backdrop-blur-xl"
       style={{
         position: 'absolute',
         top: `${topOffset}px`,
@@ -104,32 +104,31 @@ function EventChip({ event, onComplete, onNudge, onDelete, onExplain }) {
         background: visual.bg,
         border: visual.border,
         borderLeft: visual.borderLeft,
-        backdropFilter: 'blur(6px)',
       }}
     >
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
-          <p className={`text-xs font-semibold truncate ${event.status === 'completed' ? 'line-through opacity-60' : 'text-gray-100'}`}>
+          <p className={`text-xs font-semibold truncate ${event.status === 'completed' ? 'line-through opacity-60 text-slate-400' : 'text-slate-100'}`}>
             {event.title}
           </p>
-          <p className="text-[10px] font-mono text-gray-400">
+          <p className="text-[10px] font-mono text-slate-400 mt-0.5">
             {start.format('h:mm A')} – {end.format('h:mm A')}
             {event.location && event.location !== 'home' ? ` · 📍 ${event.location}` : ''}
           </p>
         </div>
         <span
-          className="text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0"
-          style={{ background: 'rgba(0,0,0,0.35)', color: visual.badgeColor }}
+          className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider flex-shrink-0"
+          style={{ background: 'rgba(0,0,0,0.4)', color: visual.badgeColor, border: `1px solid ${visual.badgeColor}33` }}
         >
           {visual.badge}
         </span>
       </div>
 
-      <div className="hidden group-hover:flex items-center gap-1 pt-1">
+      <div className="hidden group-hover:flex items-center gap-1.5 pt-1 mt-auto">
         {event.status !== 'completed' && (
           <button
             onClick={(e) => { e.stopPropagation(); onComplete(event.id) }}
-            className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35 border border-emerald-500/30 transition-all"
           >
             ✓ Done
           </button>
@@ -137,7 +136,7 @@ function EventChip({ event, onComplete, onNudge, onDelete, onExplain }) {
         {isMovable && event.status !== 'completed' && (
           <button
             onClick={(e) => { e.stopPropagation(); onNudge(event) }}
-            className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30"
+            className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-500/25 text-sky-300 hover:bg-sky-500/35 border border-sky-500/30 transition-all"
             title="Re-optimize slot"
           >
             ↻ Re-slot
@@ -145,14 +144,14 @@ function EventChip({ event, onComplete, onNudge, onDelete, onExplain }) {
         )}
         <button
           onClick={(e) => { e.stopPropagation(); onExplain(event) }}
-          className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/10 text-gray-200 hover:bg-white/20"
+          className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-white/10 text-slate-200 hover:bg-white/20 border border-white/10 transition-all"
           title="Why is this here?"
         >
           Why?
         </button>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(event.id) }}
-          className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/15 text-red-400 hover:bg-red-500/30"
+          className="ml-auto px-2 py-0.5 rounded-full text-[9px] font-bold bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30 transition-all"
         >
           ✕
         </button>
@@ -281,51 +280,95 @@ export default function CalendarView() {
   )
 
   return (
-    <div className="flex h-full w-full overflow-hidden flex-col" style={{ background: 'var(--ch-bg)', color: 'var(--ch-text)' }}>
+    <div className="flex h-full w-full overflow-hidden flex-col bg-transparent text-slate-100">
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Sleek Frosted Top Bar */}
         <div
-          className="flex-shrink-0 px-4 sm:px-6 py-2.5 flex items-center justify-between flex-wrap gap-2.5"
-          style={{ background: 'var(--ch-surface)', borderBottom: '1px solid var(--ch-border)' }}
+          className="flex-shrink-0 px-4 sm:px-8 py-3 flex items-center justify-between flex-wrap gap-3 bg-black/20 backdrop-blur-xl border-b border-white/[0.08]"
         >
           <div className="flex items-center gap-3">
-            <h1 className="text-sm sm:text-base font-bold tracking-tight text-white">{currentWeekStart.format('MMMM YYYY')}</h1>
-            <div className="flex items-center rounded-lg overflow-hidden border border-white/10 bg-[#0e1422]">
-              <button onClick={() => setCurrentWeekStart((w) => w.subtract(1, 'week'))} className="px-2.5 py-1 text-xs text-slate-300 hover:bg-white/5 transition-all">‹</button>
-              <button onClick={() => setCurrentWeekStart(dayjs().startOf('isoWeek'))} className="px-3 py-1 text-xs font-semibold text-cyan-400 border-x border-white/10 hover:bg-white/5 transition-all">Today</button>
-              <button onClick={() => setCurrentWeekStart((w) => w.add(1, 'week'))} className="px-2.5 py-1 text-xs text-slate-300 hover:bg-white/5 transition-all">›</button>
+            <div className="flex items-center gap-2 bg-[#12141c]/80 px-3.5 py-1.5 rounded-full border border-white/10 backdrop-blur-xl shadow-md">
+              <span className="text-xs text-amber-400">📅</span>
+              <h1 className="text-xs sm:text-sm font-bold tracking-tight text-white">{currentWeekStart.format('MMMM YYYY')}</h1>
+            </div>
+
+            <div className="flex items-center rounded-full overflow-hidden border border-white/10 bg-[#12141c]/80 p-0.5 backdrop-blur-xl shadow-md">
+              <button 
+                onClick={() => setCurrentWeekStart((w) => w.subtract(1, 'week'))} 
+                className="w-6 h-6 rounded-full flex items-center justify-center text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+                title="Previous Week"
+              >
+                ‹
+              </button>
+              <button 
+                onClick={() => setCurrentWeekStart(dayjs().startOf('isoWeek'))} 
+                className="px-3 py-0.5 text-xs font-semibold text-cyan-300 hover:text-white hover:bg-white/10 rounded-full transition-all"
+              >
+                Today
+              </button>
+              <button 
+                onClick={() => setCurrentWeekStart((w) => w.add(1, 'week'))} 
+                className="w-6 h-6 rounded-full flex items-center justify-center text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+                title="Next Week"
+              >
+                ›
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 sm:gap-4 text-[10px] font-mono text-slate-400 flex-wrap">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-100 shadow-[0_0_8px_rgba(248,250,252,0.6)]" /> Immovable</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" /> Personal Priority</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.6)]" /> Fluid Dynamic</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" /> Travel / Prep</span>
+          <div className="flex items-center gap-3.5 bg-[#12141c]/80 px-4 py-1.5 rounded-full border border-white/10 backdrop-blur-xl shadow-md text-[10px] font-mono text-slate-300 flex-wrap">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-slate-100 shadow-[0_0_8px_rgba(248,250,252,0.6)]" /> 
+              Anchor
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" /> 
+              Priority
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.6)]" /> 
+              Fluid
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" /> 
+              Fulfilled
+            </span>
           </div>
         </div>
 
         {assistantBanner && (
-          <div className="px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/25 flex items-center justify-between gap-3 text-xs text-amber-100">
+          <div className="px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/25 flex items-center justify-between gap-3 text-xs text-amber-100 backdrop-blur-md">
             <span>💡 {assistantBanner}</span>
             <button onClick={() => setAssistantBanner(null)} className="text-amber-300 hover:text-white font-bold">✕</button>
           </div>
         )}
 
+        {/* Day Column Headers */}
         <div
-          className="flex-shrink-0 grid"
-          style={{ gridTemplateColumns: '56px repeat(7, 1fr)', background: 'var(--ch-surface)', borderBottom: '1px solid var(--ch-border)' }}
+          className="flex-shrink-0 grid bg-white/[0.02] border-b border-white/[0.08] backdrop-blur-sm"
+          style={{ gridTemplateColumns: '60px repeat(7, 1fr)' }}
         >
-          <div className="h-14 border-r border-white/5" />
+          <div className="h-14 border-r border-white/[0.06] flex items-center justify-center">
+            <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">TIME</span>
+          </div>
           {weekDays.map((day) => {
             const isToday = day.isSame(dayjs(), 'day')
             return (
-              <div key={day.format('YYYY-MM-DD')} className="h-14 flex flex-col items-center justify-center border-r border-white/5">
-                <span className="text-[10px] uppercase tracking-wider text-gray-400">{day.format('ddd')}</span>
+              <div 
+                key={day.format('YYYY-MM-DD')} 
+                className={`h-14 flex flex-col items-center justify-center border-r border-white/[0.06] transition-colors ${
+                  isToday ? 'bg-amber-400/[0.05]' : ''
+                }`}
+              >
+                <span className={`text-[10px] uppercase tracking-wider font-medium ${isToday ? 'text-amber-300' : 'text-slate-400'}`}>
+                  {day.format('ddd')}
+                </span>
                 <span
-                  className={`text-sm font-bold mt-0.5 w-7 h-7 flex items-center justify-center rounded-full ${
-                    isToday ? 'text-black' : 'text-gray-200'
+                  className={`text-xs font-bold mt-0.5 w-7 h-7 flex items-center justify-center rounded-full transition-all ${
+                    isToday 
+                      ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-black shadow-[0_0_12px_rgba(251,191,36,0.5)]' 
+                      : 'text-slate-200 hover:bg-white/5'
                   }`}
-                  style={isToday ? { background: 'var(--ch-peach)' } : {}}
                 >
                   {day.format('D')}
                 </span>
@@ -334,22 +377,30 @@ export default function CalendarView() {
           })}
         </div>
 
+        {/* Timeline Grid */}
         <div ref={gridRef} className="flex-1 overflow-y-auto relative">
-          <div className="grid relative" style={{ gridTemplateColumns: '56px repeat(7, 1fr)', minHeight: `${HOURS.length * HOUR_HEIGHT}px` }}>
-            <div className="relative border-r border-white/5">
+          <div className="grid relative" style={{ gridTemplateColumns: '60px repeat(7, 1fr)', minHeight: `${HOURS.length * HOUR_HEIGHT}px` }}>
+            {/* Left Hour Markers */}
+            <div className="relative border-r border-white/[0.06]">
               {HOURS.map((hour) => (
-                <div key={hour} className="absolute w-full flex justify-end pr-2" style={{ top: `${(hour - START_HOUR) * HOUR_HEIGHT}px` }}>
-                  <span className="text-[10px] font-mono text-gray-500 -mt-1.5">
+                <div key={hour} className="absolute w-full flex justify-end pr-2.5" style={{ top: `${(hour - START_HOUR) * HOUR_HEIGHT}px` }}>
+                  <span className="text-[10px] font-mono text-slate-500 -mt-2">
                     {hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
                   </span>
                 </div>
               ))}
             </div>
 
+            {/* 7 Days Columns */}
             {weekDays.map((day) => {
               const dayEvents = eventsForDay(day)
+              const isToday = day.isSame(dayjs(), 'day')
               return (
-                <div key={day.format('YYYY-MM-DD')} className="relative border-r border-white/5">
+                <div 
+                  key={day.format('YYYY-MM-DD')} 
+                  className={`relative border-r border-white/[0.06] ${isToday ? 'bg-amber-400/[0.02]' : ''}`}
+                >
+                  {/* Hour horizontal grid lines */}
                   {HOURS.map((hour) => (
                     <div
                       key={hour}
@@ -358,12 +409,25 @@ export default function CalendarView() {
                     />
                   ))}
 
+                  {/* Current Time Indicator Line (for Today) */}
+                  {isToday && (
+                    <div 
+                      className="absolute left-0 right-0 z-20 pointer-events-none flex items-center"
+                      style={{ top: `${((dayjs().hour() - START_HOUR) * HOUR_HEIGHT) + (dayjs().minute() / 60) * HOUR_HEIGHT}px` }}
+                    >
+                      <div className="w-2 h-2 rounded-full bg-rose-500 -ml-1 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                      <div className="flex-1 h-px bg-gradient-to-r from-rose-500 to-rose-400/20 shadow-[0_0_6px_rgba(244,63,94,0.6)]" />
+                    </div>
+                  )}
+
+                  {/* Transition Buffers */}
                   {dayEvents.map((ev, idx) =>
                     idx < dayEvents.length - 1 ? (
                       <TransitionGapPill key={`gap-${ev.id}`} prevEvent={ev} nextEvent={dayEvents[idx + 1]} />
                     ) : null
                   )}
 
+                  {/* Event Chips */}
                   {dayEvents.map((ev) => (
                     <EventChip
                       key={ev.id}
@@ -381,15 +445,24 @@ export default function CalendarView() {
         </div>
       </div>
 
+      {/* Decision Reasoning Modal */}
       {explainModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="max-w-md w-full rounded-2xl p-5 border border-white/15" style={{ background: 'var(--ch-surface-elevated)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Chrona Reasoning</span>
-              <button onClick={() => setExplainModal(null)} className="text-gray-400 hover:text-white">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className="max-w-md w-full rounded-3xl p-6 border border-white/15 bg-[#141624]/95 backdrop-blur-2xl shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-400 font-mono">Chrona Reasoning</span>
+              <button onClick={() => setExplainModal(null)} className="text-slate-400 hover:text-white transition-colors">✕</button>
             </div>
-            <h3 className="text-base font-bold mb-2">{explainModal.title}</h3>
-            <p className="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap">{explainModal.text}</p>
+            <h3 className="text-base font-bold text-white mb-2">{explainModal.title}</h3>
+            <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{explainModal.text}</p>
+            <div className="flex justify-end gap-2 pt-4 mt-3 border-t border-white/10">
+              <button
+                onClick={() => setExplainModal(null)}
+                className="px-4 py-1.5 rounded-full text-xs font-semibold bg-white/10 text-white hover:bg-white/20 transition-all"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

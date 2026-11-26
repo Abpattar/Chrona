@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import CardStack from '../components/CardStack'
+import { getSkyTheme } from '../lib/theme'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -44,10 +45,19 @@ export default function Dashboard() {
   const [notification, setNotification] = useState(null)
   const [currentTime, setCurrentTime] = useState(dayjs())
   const [viewMode, setViewMode] = useState('stack') // 'stack' | 'grid'
+  const [isIntro, setIsIntro] = useState(true)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(dayjs()), 10000)
     return () => clearInterval(timer)
+  }, [])
+
+  // 5-second intro transition: greeting text on left + cards stacked on right, then default view
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsIntro(false)
+    }, 5000)
+    return () => clearTimeout(timer)
   }, [])
 
   const showNotif = (msg, type = 'success') => {
@@ -129,18 +139,21 @@ export default function Dashboard() {
       .sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0))
   }, [ctx, currentTime])
 
+  // Real backend tasks only — demo crypto data removed
   const allActiveTasks = useMemo(() => {
+    const backendTasks = []
     const seenIds = new Set()
-    const combined = []
+
     for (const t of [...todayItems, ...upcomingItems]) {
       if (t.status === 'completed' || t.status === 'cancelled') continue
       const key = t.id || `${(t.title || '').toLowerCase()}-${t.start_time || ''}`
       if (!seenIds.has(key)) {
         seenIds.add(key)
-        combined.push(t)
+        backendTasks.push(t)
       }
     }
-    return combined
+
+    return backendTasks
   }, [todayItems, upcomingItems])
 
   const completedCount = useMemo(() => {
@@ -148,13 +161,29 @@ export default function Dashboard() {
     return list.filter((it) => it.status === 'completed').length
   }, [ctx])
 
+  const greeting = useMemo(() => {
+    const hour = currentTime.hour()
+    if (hour >= 5 && hour < 12) {
+      return { main: 'Good Morning', sub: 'What’s on your mind?' }
+    }
+    if (hour >= 12 && hour < 17) {
+      return { main: 'Good Afternoon', sub: 'What can I help you with today?' }
+    }
+    if (hour >= 17 && hour < 22) {
+      return { main: 'Good Evening', sub: 'What’s on your mind tonight?' }
+    }
+    return { main: 'Good Night', sub: 'Ready to plan tomorrow?' }
+  }, [currentTime])
+
+  const skyTheme = getSkyTheme(currentTime.hour())
+
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center h-full">
+      <div className={`flex-1 flex items-center justify-center h-full ${skyTheme.bgClass} sky-transition`}>
         <div className="text-center">
-          <div className="w-8 h-8 mx-auto rounded-full border-2 border-slate-600/30 border-t-cyan-400 animate-spin mb-2 shadow-[0_0_12px_rgba(56,189,248,0.2)]" />
-          <p className="text-[11px] tracking-wider text-slate-400 uppercase font-mono">
-            Loading...
+          <div className="w-9 h-9 mx-auto rounded-full border-2 border-amber-500/30 border-t-amber-400 animate-spin mb-3 shadow-[0_0_20px_rgba(245,158,11,0.4)]" />
+          <p className="text-xs tracking-widest text-neutral-300 uppercase font-mono">
+            Loading Great Ideas...
           </p>
         </div>
       </div>
@@ -162,80 +191,42 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="relative z-10 flex-1 flex flex-col justify-between overflow-hidden p-2.5 sm:p-4 max-w-5xl mx-auto w-full h-full min-h-0">
+    <div className={`relative z-10 flex-1 flex flex-col justify-between overflow-hidden px-4 sm:px-8 md:px-12 py-2 sm:py-3.5 w-full h-full min-h-0 ${skyTheme.bgClass} sky-transition select-none`}>
+
+      {/* ── Dynamic Sky Horizon Atmosphere (Morphs from Morning Orange to Afternoon Yellow to Sunset Pink to Night Blue) ── */}
+      <div className="absolute inset-0 pointer-events-none -z-10 overflow-hidden">
+        {/* Soft sunlit clouds across the lower horizon */}
+        <div className={`absolute -bottom-20 inset-x-0 h-[450px] bg-gradient-to-t ${skyTheme.horizonGlow} blur-3xl animate-warm-breath`} />
+        <div className={`absolute bottom-6 left-1/4 w-[600px] h-[350px] rounded-full ${skyTheme.orbLeft} blur-3xl transition-colors duration-1000`} />
+        <div className={`absolute bottom-4 right-1/4 w-[700px] h-[360px] rounded-full ${skyTheme.orbRight} blur-3xl transition-colors duration-1000`} />
+      </div>
 
       {/* Floating Notification */}
       {notification && (
         <div
-          className={`fixed top-16 right-4 sm:right-6 z-50 px-3.5 py-2 rounded-xl border text-xs font-mono tracking-wide shadow-2xl backdrop-blur-xl animate-fade-in ${
+          className={`fixed top-16 right-4 sm:right-6 z-50 px-4 py-2.5 rounded-2xl border text-xs font-mono tracking-wide shadow-2xl backdrop-blur-2xl animate-fade-in ${
             notification.type === 'error'
               ? 'bg-rose-950/95 border-rose-500/40 text-rose-200'
-              : 'bg-[#0f172a]/95 border-cyan-500/40 text-cyan-200 shadow-[0_0_16px_rgba(56,189,248,0.25)]'
+              : 'bg-[#1e1c19]/95 border-amber-500/40 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.3)]'
           }`}
         >
           {notification.msg}
         </div>
       )}
 
-      {/* Screen-Fit Top Bar */}
-      <div className="flex-none flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
-        <div className="flex items-center gap-2">
-          <h1 className="text-base sm:text-lg font-bold text-slate-100 tracking-tight leading-none">
-            Today
-          </h1>
-          <span className="text-[10px] sm:text-xs font-mono text-slate-400 bg-white/[0.04] px-2 py-0.5 rounded-full border border-white/5">
-            {currentTime.format('ddd, MMM D')}
-          </span>
-        </div>
-
-        {/* View Toggle & Action Buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {allActiveTasks.length > 0 && (
-            <div className="flex items-center bg-[#0d121e] p-0.5 rounded-lg border border-slate-800 text-[11px]">
-              <button
-                onClick={() => setViewMode('stack')}
-                className={`px-2 py-0.5 rounded-md font-medium transition-all ${
-                  viewMode === 'stack'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Deck
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`px-2 py-0.5 rounded-md font-medium transition-all ${
-                  viewMode === 'grid'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Grid
-              </button>
-            </div>
-          )}
-
-          <button
-            onClick={() => navigate('/chat')}
-            className="px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-[0_0_12px_rgba(56,189,248,0.25)] transition-all flex items-center gap-1 active:scale-95"
-          >
-            <span>+ Add</span>
-          </button>
-
-          {allActiveTasks.length > 0 && (
-            <button
-              onClick={handleClearSchedule}
-              className="px-2 py-1 rounded-lg text-[11px] text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-              title="Clear all tasks"
-            >
-              Clear
-            </button>
-          )}
-        </div>
+      {/* ── Header: Exact match to Image ("Great ideas live here") ────────────── */}
+      <div 
+        className={`flex-none text-center pt-1 sm:pt-2 pb-1 relative z-10 transition-opacity duration-1000 ${
+          isIntro ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <h1 className="text-2xl sm:text-4xl md:text-5xl font-light tracking-tight text-white/95 drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+          Great ideas live here
+        </h1>
       </div>
 
-      {/* Screen-Fit Center Hero: 3D Card Stack (code.zip) or Internal Grid Scroller */}
-      <div className="flex-1 flex items-center justify-center min-h-0 relative overflow-hidden py-1">
+      {/* ── Center Stage: 3D Cylindrical Carousel (Image 1/3) or Grid View ────── */}
+      <div className="flex-1 flex items-center justify-center min-h-0 relative overflow-hidden py-0.5 my-auto">
         {viewMode === 'stack' ? (
           <div className="w-full flex items-center justify-center">
             <CardStack
@@ -244,65 +235,107 @@ export default function Dashboard() {
               onReschedule={handleAutoReschedule}
               onDefer={handleSkip}
               onOpenAI={() => navigate('/chat')}
+              isIntro={isIntro}
+              onEndIntro={() => setIsIntro(false)}
             />
           </div>
         ) : (
-          /* Internal Grid Scroller (page itself doesn't scroll) */
-          <div className="w-full h-full overflow-y-auto min-h-0 pr-1 py-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {allActiveTasks.map((item) => {
+          /* Internal Grid Scroller matching dark warm matte glass */
+          <div className="w-full h-full overflow-y-auto min-h-0 pr-1 py-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 animate-fade-in scrollbar-none">
+            {allActiveTasks.map((item, idx) => {
               const stake = getStakeBadge(item)
               const sTime = item.start_time ? dayjs(item.start_time) : null
+              const eTime = item.end_time ? dayjs(item.end_time) : (sTime ? sTime.add(item.duration_minutes || 60, 'minute') : null)
 
               return (
                 <div
-                  key={item.id}
-                  className="rounded-xl p-3 bg-[#0e1422]/90 border border-slate-800/80 hover:border-slate-700 backdrop-blur-xl shadow flex flex-col justify-between"
+                  key={item.id || idx}
+                  className="rounded-[28px] p-5 card-sunset-ideas flex flex-col justify-between transition-all hover:scale-[1.01]"
                 >
                   <div>
-                    <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                      <span
-                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1"
-                        style={{ background: stake.bg, color: stake.color, border: `1px solid ${stake.border}` }}
-                      >
-                        <span className="w-1 h-1 rounded-full" style={{ background: stake.dot }} />
-                        {stake.label}
-                      </span>
+                    {/* Top row: Movability & Time */}
+                    <div className="flex items-center justify-between gap-1.5 mb-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1"
+                          style={{
+                            background: stake.bg,
+                            color: stake.color,
+                            border: `1px solid ${stake.border}`,
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: stake.dot }} />
+                          {stake.label}
+                        </span>
+                        {item.task_type && (
+                          <span className="text-[10px] font-mono text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                            {item.task_type}
+                          </span>
+                        )}
+                      </div>
 
-                      {sTime && (
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {sTime.format('h:mm A')} · {item.duration_minutes || 60}m
+                      {sTime ? (
+                        <span className="text-[11px] font-mono text-neutral-300">
+                          {sTime.format('h:mm A')}
+                          {eTime ? ` – ${eTime.format('h:mm A')}` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-mono text-neutral-400">
+                          {item.duration_minutes || 60}m duration
                         </span>
                       )}
                     </div>
 
-                    <h3 className="text-xs sm:text-sm font-bold text-slate-100 tracking-tight line-clamp-2 mb-1">
+                    {/* Middle details */}
+                    <h3 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase line-clamp-1 mb-1">
                       {item.title}
                     </h3>
 
-                    {item.transition_reason && (
-                      <p className="text-[9px] font-mono text-amber-300/80 bg-amber-500/[0.06] p-1 rounded border border-amber-500/20 line-clamp-1 mb-1">
-                        ⚡ {item.transition_reason}
+                    {item.transition_reason ? (
+                      <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-1.5 text-left">
+                        <span className="text-amber-400 text-xs mt-0.5">⚡</span>
+                        <p className="text-[11px] leading-relaxed text-amber-200/90 font-mono line-clamp-2">
+                          Buffer: {item.transition_reason}
+                        </p>
+                      </div>
+                    ) : item.description || item.notes ? (
+                      <p className="text-xs text-neutral-300/80 line-clamp-2 leading-relaxed mt-1">
+                        {item.description || item.notes}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-neutral-400 font-mono mt-1">
+                        {item.location ? `📍 ${item.location}` : 'Scheduled focus session'}
                       </p>
                     )}
                   </div>
 
-                  <div className="pt-1.5 border-t border-slate-800/60 flex items-center justify-between gap-1 mt-1">
-                    <span className="text-[9px] font-mono text-slate-500">
-                      {sTime ? sTime.format('MMM D') : 'Today'}
+                  {/* Bottom actions */}
+                  <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between gap-2 mt-3">
+                    <span className="text-xs font-mono text-neutral-400 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span>{item.duration_minutes || 60}m</span>
                     </span>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleComplete(item.id)}
-                        className="px-2 py-0.5 rounded text-[10px] font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all"
+                        className="px-3 py-1 rounded-full text-[10px] font-medium text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all active:scale-95"
                       >
-                        Done
+                        ✓ Done
                       </button>
                       <button
                         onClick={() => handleAutoReschedule(item.id)}
-                        className="px-1.5 py-0.5 rounded text-[10px] text-slate-300 bg-white/5 hover:bg-white/10 border border-slate-700/50 transition-all"
+                        className="px-2.5 py-1 rounded-full text-[10px] text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all active:scale-95"
+                        title="Auto-reschedule with AI"
                       >
                         ↻
+                      </button>
+                      <button
+                        onClick={() => handleSkip(item.id)}
+                        className="px-2 py-1 rounded-full text-[10px] text-neutral-400 hover:text-white transition-all active:scale-95"
+                        title="Defer task"
+                      >
+                        Defer
                       </button>
                     </div>
                   </div>
@@ -313,45 +346,76 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Screen-Fit Bottom Bar: Compact Stats Strip */}
-      <div className="flex-none pt-2 border-t border-slate-800/80">
-        <div className="grid grid-cols-4 gap-2">
-          <div className="px-2.5 py-1.5 rounded-xl bg-[#0b0f19]/70 border border-slate-800/60 backdrop-blur-md flex flex-col justify-center">
-            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider leading-none">
-              Active
+      {/* ── First Load Intro Greeting: Big Fat Display Font — Title Case ("Good Morning" not all caps) ── */}
+      <div
+        className={`absolute bottom-20 sm:bottom-24 md:bottom-28 right-6 sm:right-10 md:right-16 lg:right-24 z-30 pointer-events-none transition-all duration-1000 ease-in-out select-none ${
+          isIntro
+            ? 'opacity-100 translate-y-0 filter-none'
+            : 'opacity-0 translate-y-12 blur-xl pointer-events-none'
+        }`}
+      >
+        <div className="max-w-3xl sm:max-w-4xl lg:max-w-5xl text-right sm:text-left">
+          {/* Big Fat Font display headline — Title Case, NOT all caps */}
+          <h1 className="text-6xl sm:text-8xl md:text-9xl lg:text-[10rem] xl:text-[11.5rem] font-black tracking-tight text-[#f5f3ef] drop-shadow-[0_16px_40px_rgba(0,0,0,0.85)] leading-[0.9] font-sans">
+            {greeting.main}
+          </h1>
+
+          {/* Small subtitle underneath */}
+          <div className="flex items-center justify-end sm:justify-start gap-2.5 mt-3 sm:mt-5 pl-1 sm:pl-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)] animate-pulse" />
+            <p className="text-xs sm:text-sm md:text-base font-normal tracking-wide text-neutral-300/90 max-w-sm sm:max-w-md">
+              {greeting.sub}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Bottom Bar: Truly Page-Centered Down Buttons ("+ Create" & "See all ideas") ── */}
+      <div className="flex-none pt-2 sm:pt-3 pb-1 border-t border-white/[0.08] relative z-20 w-full">
+        <div className="relative w-full flex flex-col sm:flex-row items-center justify-between gap-2 min-h-[44px]">
+          
+          {/* Left mini status indicators */}
+          <div className="flex items-center gap-2.5 text-xs font-mono text-neutral-300 flex-none">
+            <span className="px-3 py-1 rounded-full bg-white/[0.05] border border-white/10 shadow-xs backdrop-blur-md">
+              Active: <strong className="text-white ml-1">{allActiveTasks.length}</strong>
             </span>
-            <span className="text-sm sm:text-base font-bold font-mono text-slate-100 mt-0.5 leading-none">
-              {allActiveTasks.length}
+            <span className="px-3 py-1 rounded-full bg-white/[0.05] border border-white/10 shadow-xs backdrop-blur-md">
+              Done: <strong className="text-emerald-400 ml-1">{completedCount}</strong>
             </span>
           </div>
 
-          <div className="px-2.5 py-1.5 rounded-xl bg-[#0b0f19]/70 border border-slate-800/60 backdrop-blur-md flex flex-col justify-center">
-            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider leading-none">
-              Today
-            </span>
-            <span className="text-sm sm:text-base font-bold font-mono text-cyan-300 mt-0.5 leading-none">
-              {todayItems.length}
-            </span>
+          {/* Truly Centered to Page Horizontal Axis */}
+          <div className="sm:absolute sm:left-1/2 sm:-translate-x-1/2 flex items-center gap-3 z-10 my-1 sm:my-0">
+            <button
+              onClick={() => navigate('/chat')}
+              className="px-7 sm:px-8 py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-medium text-white bg-[#1e1c19]/90 hover:bg-[#2b2723] border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all flex items-center gap-2 active:scale-95 backdrop-blur-xl"
+            >
+              <span>+</span>
+              <span>Create</span>
+            </button>
+
+            <button
+              onClick={() => setViewMode((prev) => (prev === 'stack' ? 'grid' : 'stack'))}
+              className="px-7 sm:px-8 py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-medium text-white bg-[#1e1c19]/90 hover:bg-[#2b2723] border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all flex items-center gap-2 active:scale-95 backdrop-blur-xl"
+            >
+              <span className="text-sm">⠿</span>
+              <span>{viewMode === 'stack' ? 'See all ideas' : '3D Deck'}</span>
+            </button>
           </div>
 
-          <div className="px-2.5 py-1.5 rounded-xl bg-[#0b0f19]/70 border border-slate-800/60 backdrop-blur-md flex flex-col justify-center">
-            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider leading-none">
-              Done
-            </span>
-            <span className="text-sm sm:text-base font-bold font-mono text-emerald-400 mt-0.5 leading-none">
-              {completedCount}
-            </span>
+          {/* Right Clear Schedule Action */}
+          <div className="flex items-center gap-2 flex-none">
+            {allActiveTasks.length > 0 && (
+              <button
+                onClick={handleClearSchedule}
+                className="px-3.5 py-1 rounded-full text-[11px] font-mono text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                title="Clear all tasks"
+              >
+                Clear all
+              </button>
+            )}
           </div>
 
-          <div className="px-2.5 py-1.5 rounded-xl bg-[#0b0f19]/70 border border-slate-800/60 backdrop-blur-md flex flex-col justify-center">
-            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider leading-none">
-              AI Copilot
-            </span>
-            <span className="text-[10px] sm:text-xs font-mono font-semibold text-emerald-400 mt-0.5 flex items-center gap-1 leading-none">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-              <span className="truncate">Active</span>
-            </span>
-          </div>
         </div>
       </div>
 

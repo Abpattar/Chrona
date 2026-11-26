@@ -33,11 +33,10 @@ export default function ParticleBackground() {
     const particles = []
 
     const colors = [
-      { r: 56, g: 189, b: 248 },  // Ethereal Cyan
-      { r: 125, g: 211, b: 252 }, // Ice Blue
-      { r: 245, g: 158, b: 11 },  // Lumafly Amber / Gold
-      { r: 192, g: 132, b: 252 }, // Monarch Violet
-      { r: 248, g: 250, b: 252 }, // Pure Starlight
+      { r: 254, g: 243, b: 199 },  // Warm starlight
+      { r: 245, g: 158, b: 11 },   // Golden sunset amber
+      { r: 234, g: 88, b: 12 },    // Sunset ember orange
+      { r: 255, g: 255, b: 255 },  // Pure white spark
     ]
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -70,23 +69,8 @@ export default function ParticleBackground() {
       mouse.x += (mouse.targetX - mouse.x) * 0.05
       mouse.y += (mouse.targetY - mouse.y) * 0.05
 
-      // Clear with atmospheric dark gradient
+      // Clear canvas with transparent frame so daylight background shines through
       ctx.clearRect(0, 0, width, height)
-
-      // Draw subtle luminous ambient backdrop
-      const bgGrad = ctx.createRadialGradient(
-        width * 0.5 + (mouse.x - width * 0.5) * 0.05,
-        height * 0.35 + (mouse.y - height * 0.35) * 0.05,
-        50,
-        width * 0.5,
-        height * 0.5,
-        Math.max(width, height) * 0.85
-      )
-      bgGrad.addColorStop(0, 'rgba(12, 18, 32, 0.85)')
-      bgGrad.addColorStop(0.5, 'rgba(7, 10, 18, 0.95)')
-      bgGrad.addColorStop(1, 'rgba(4, 6, 11, 1)')
-      ctx.fillStyle = bgGrad
-      ctx.fillRect(0, 0, width, height)
 
       // Render constellation connections between close particles
       for (let i = 0; i < particles.length; i++) {
