@@ -1,8 +1,10 @@
 import {
   setCors,
   getUserId,
+  getTimezoneContext,
   getSupabase,
   enrichScheduleItem,
+  deduplicateScheduleItems,
 } from './_lib/chrona.js'
 
 export default async function handler(req, res) {
@@ -13,6 +15,7 @@ export default async function handler(req, res) {
   }
 
   const userId = getUserId(req)
+  const tzCtx = getTimezoneContext(req)
   const supabase = getSupabase()
   let items = []
 
@@ -53,15 +56,23 @@ export default async function handler(req, res) {
     }
   }
 
-  const todayStr = new Date().toISOString().split('T')[0]
-  const today = items.filter((t) => t.start_time && t.start_time.startsWith(todayStr))
+  items = deduplicateScheduleItems(items, tzCtx.offsetMinutes)
+
+  const todayStr = tzCtx.localDateStr
+  const today = items.filter((t) => {
+    if (!t.start_time) return false
+    const ms = new Date(t.start_time).getTime()
+    if (Number.isNaN(ms)) return t.start_time.startsWith(todayStr)
+    const localDay = new Date(ms + tzCtx.offsetMinutes * 60000).toISOString().slice(0, 10)
+    return localDay === todayStr
+  })
 
   return res.status(200).json({
     success: true,
     user_id: userId,
-    today: today.length > 0 ? today : items.slice(0, 5),
+    today,
     this_week: items,
-    active_focus: items.find((t) => t.status !== 'completed') || null,
+    active_focus: (today.find((t) => t.status !== 'completed') || items.find((t) => t.status !== 'completed')) || null,
     stats: {
       total: items.length,
       completed: items.filter((t) => t.status === 'completed').length,

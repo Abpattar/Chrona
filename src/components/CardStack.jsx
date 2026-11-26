@@ -59,15 +59,22 @@ export default function CardStack({
   const positionCards = useCallback(() => {
     if (!sliderRef.current) return
     const cardElements = Array.from(sliderRef.current.querySelectorAll('.deck-card'))
-    if (!cardElements.length) return
+    const total = cardElements.length
+    if (!total) return
 
     cardElements.forEach((el, index) => {
+      const distFromTop = total - 1 - index
+      const clampedDist = Math.min(distFromTop, 4)
+      const isHiddenBack = distFromTop >= 4
+
+      gsap.set(el, { zIndex: index + 1 })
       gsap.to(el, {
-        y: `${-12 + 12 * index}%`,
-        z: 14 * index,
-        scale: 1 - (cardElements.length - 1 - index) * 0.035,
-        opacity: index < cardElements.length - 3 ? 0.3 : 1,
-        duration: 0.7,
+        x: 0,
+        y: 14 - clampedDist * 11,
+        z: -clampedDist * 28,
+        scale: Math.max(0.84, 1 - clampedDist * 0.045),
+        opacity: isHiddenBack ? 0 : Math.max(0.35, 1 - distFromTop * 0.2),
+        duration: 0.55,
         ease: 'stackEase',
         overwrite: 'auto',
       })
@@ -94,10 +101,10 @@ export default function CardStack({
     }
 
     gsap.to(lastCard, {
-      y: '+=140%',
+      y: '+=110',
       opacity: 0,
-      scale: 0.9,
-      duration: 0.55,
+      scale: 0.92,
+      duration: 0.4,
       ease: 'stackEase',
       onComplete: () => {
         setDeck((prev) => {
@@ -174,12 +181,12 @@ export default function CardStack({
         )}
       </div>
 
-      {/* Responsive 3D Stack Container from code.zip */}
+      {/* Responsive 3D Stack Container */}
       <div
-        className="relative w-full h-[250px] sm:h-[285px] overflow-hidden"
+        className="relative w-full h-[285px] sm:h-[315px] overflow-visible"
         style={{
-          perspective: '550px',
-          perspectiveOrigin: '50% 50%',
+          perspective: '700px',
+          perspectiveOrigin: '50% 45%',
         }}
       >
         <div
@@ -197,10 +204,10 @@ export default function CardStack({
               <article
                 key={item.id || `card-${index}`}
                 onClick={isTop && deck.length > 1 ? cycleCard : undefined}
-                className={`deck-card absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-36px)] max-w-[480px] h-[225px] sm:h-[250px] rounded-2xl p-4 sm:p-5 flex flex-col justify-between select-none cursor-pointer border transition-colors ${
+                className={`deck-card absolute w-[calc(100vw-36px)] max-w-[480px] h-[225px] sm:h-[245px] rounded-2xl p-4 sm:p-5 flex flex-col justify-between select-none cursor-pointer border transition-colors ${
                   isTop
-                    ? 'bg-[#0f1422]/95 border-slate-600/40 shadow-[0_18px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl'
-                    : 'bg-[#0b0e18]/90 border-slate-800/40 shadow-[0_8px_20px_rgba(0,0,0,0.5)] pointer-events-none'
+                    ? 'bg-[#0f1422]/95 border-slate-600/50 shadow-[0_18px_40px_rgba(0,0,0,0.75)] backdrop-blur-xl'
+                    : 'bg-[#0b0e18]/95 border-slate-800/50 shadow-[0_8px_20px_rgba(0,0,0,0.5)] pointer-events-none'
                 }`}
                 style={{
                   transformStyle: 'preserve-3d',
@@ -322,17 +329,23 @@ export default function CardStack({
 
       {/* Minimal Stack Dots */}
       {deck.length > 1 && (
-        <div className="flex items-center gap-1 mt-1">
-          {deck.map((_, i) => (
-            <span
-              key={`dot-${i}`}
-              className={`h-1 rounded-full transition-all duration-300 ${
-                i === deck.length - 1
-                  ? 'w-5 bg-cyan-400 shadow-[0_0_6px_rgba(56,189,248,0.6)]'
-                  : 'w-1 bg-slate-700'
-              }`}
-            />
-          ))}
+        <div className="flex items-center gap-1.5 mt-1">
+          {deck.length <= 10 ? (
+            deck.map((_, i) => (
+              <span
+                key={`dot-${i}`}
+                className={`h-1 rounded-full transition-all duration-300 ${
+                  i === deck.length - 1
+                    ? 'w-5 bg-cyan-400 shadow-[0_0_6px_rgba(56,189,248,0.6)]'
+                    : 'w-1 bg-slate-700'
+                }`}
+              />
+            ))
+          ) : (
+            <span className="text-[10px] font-mono text-slate-400 px-2.5 py-0.5 rounded-full bg-white/[0.04] border border-slate-800">
+              Showing top of {deck.length} tasks · click card or Next Card ›
+            </span>
+          )}
         </div>
       )}
 

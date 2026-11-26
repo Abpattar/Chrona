@@ -130,8 +130,17 @@ export default function Dashboard() {
   }, [ctx, currentTime])
 
   const allActiveTasks = useMemo(() => {
-    const combined = [...todayItems, ...upcomingItems]
-    return combined.filter((t) => t.status !== 'completed')
+    const seenIds = new Set()
+    const combined = []
+    for (const t of [...todayItems, ...upcomingItems]) {
+      if (t.status === 'completed' || t.status === 'cancelled') continue
+      const key = t.id || `${(t.title || '').toLowerCase()}-${t.start_time || ''}`
+      if (!seenIds.has(key)) {
+        seenIds.add(key)
+        combined.push(t)
+      }
+    }
+    return combined
   }, [todayItems, upcomingItems])
 
   const completedCount = useMemo(() => {

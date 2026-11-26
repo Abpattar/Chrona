@@ -135,6 +135,7 @@ function MessageBubbleItem({ msg, onNavigateMap, onNavigateToday, onQuickAction 
       uniqueTasks.push(t)
     }
   }
+  const repeatedTasks = msg.repeated_tasks || []
 
   return (
     <div className={`flex gap-3.5 ${isUser ? 'flex-row-reverse' : 'flex-row'} animate-fade-in`}>
@@ -180,6 +181,25 @@ function MessageBubbleItem({ msg, onNavigateMap, onNavigateToday, onQuickAction 
                 onNavigateToday={onNavigateToday}
               />
             ))}
+          </div>
+        )}
+
+        {repeatedTasks.length > 0 && (
+          <div className="mt-3 p-2.5 rounded-xl bg-amber-500/[0.08] border border-amber-500/25 space-y-1.5">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-semibold">
+              🔁 Already on your schedule ({repeatedTasks.length})
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {repeatedTasks.map((rt, idx) => (
+                <span
+                  key={rt.id || idx}
+                  className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200"
+                >
+                  {rt.title}
+                  {rt.start_time ? ` · ${dayjs(rt.start_time).format('MMM D, h:mm A')}` : ''}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
@@ -355,6 +375,7 @@ export default function Chat() {
         timestamp: new Date().toISOString(),
         tasks_extracted: result.tasks_extracted || [],
         tasks_saved: result.tasks_saved || [],
+        repeated_tasks: result.repeated_tasks || [],
         clarification_needed: result.clarification_needed,
         schedule_trigger: result.schedule_trigger,
         decomposition: result.decomposition,

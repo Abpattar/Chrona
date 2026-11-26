@@ -1,8 +1,10 @@
 import {
   setCors,
   getUserId,
+  getTimezoneContext,
   getSupabase,
   enrichScheduleItem,
+  deduplicateScheduleItems,
 } from '../_lib/chrona.js'
 
 export default async function handler(req, res) {
@@ -13,6 +15,7 @@ export default async function handler(req, res) {
   }
 
   const userId = getUserId(req)
+  const tzCtx = getTimezoneContext(req)
   const supabase = getSupabase()
   let items = []
 
@@ -52,6 +55,8 @@ export default async function handler(req, res) {
       console.warn('Supabase fetch error in /api/schedule/items:', err.message)
     }
   }
+
+  items = deduplicateScheduleItems(items, tzCtx.offsetMinutes)
 
   return res.status(200).json({
     success: true,

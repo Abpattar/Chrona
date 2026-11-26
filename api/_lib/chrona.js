@@ -246,8 +246,89 @@ export function enrichScheduleItem(row) {
   }
 }
 
+const STOP_WORDS = new Set([
+  'exam', 'test', 'quiz', 'class', 'lecture', 'session', 'meeting', 'task',
+  'event', 'assignment', 'prep', 'study', 'the', 'for', 'in', 'on', 'at',
+  'of', 'and', 'to', 'a', 'an', 'my', 'with',
+])
+
+function normalizeRawTitle(title) {
+  return (title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function coreTitleTokens(title) {
+  const withoutCodes = (title || '')
+    .toLowerCase()
+    .replace(/\b[a-z]{2,5}\s*\d{3,4}[a-z]?\b/gi, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+  const rawTokens = withoutCodes.split(/\s+/).filter(Boolean)
+  const filtered = rawTokens.filter((w) => !STOP_WORDS.has(w))
+  return [...new Set(filtered.length > 0 ? filtered : rawTokens)]
+}
+
+function isDuplicateCandidate(existing, candidateTitle, candidateStartIso, hasExplicitStart = true, offsetMinutes = 330) {
+  if (!existing || existing.status === 'cancelled') return false
+  const normA = normalizeRawTitle(existing.title)
+  const normB = normalizeRawTitle(candidateTitle)
+  if (!normA || !normB) return false
+
+  const tokA = coreTitleTokens(existing.title)
+  const tokB = coreTitleTokens(candidateTitle)
+  const intersection = tokA.filter((t) => tokB.includes(t))
+  const overlapMin = intersection.length / Math.max(1, Math.min(tokA.length, tokB.length))
+  const overlapMax = intersection.length / Math.max(1, Math.max(tokA.length, tokB.length))
+
+  let sameTime = false
+  let sameDay = false
+  let diffMin = Infinity
+  if (existing.start_time && candidateStartIso) {
+    const msA = new Date(existing.start_time).getTime()
+    const msB = new Date(candidateStartIso).getTime()
+    if (!Number.isNaN(msA) && !Number.isNaN(msB)) {
+      diffMin = Math.abs(msA - msB) / 60000
+      sameTime = diffMin <= 45
+      const dayA = new Date(msA + offsetMinutes * 60000).toISOString().slice(0, 10)
+      const dayB = new Date(msB + offsetMinutes * 60000).toISOString().slice(0, 10)
+      sameDay = dayA === dayB
+    }
+  }
+
+  if (normA === normB) {
+    if (!hasExplicitStart || sameTime || sameDay || diffMin <= 24 * 60) {
+      return true
+    }
+  }
+
+  if (overlapMin >= 0.65 && overlapMax >= 0.45) {
+    if (!hasExplicitStart || sameTime || sameDay) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export function deduplicateScheduleItems(items, offsetMinutes = 330) {
+  if (!Array.isArray(items)) return []
+  const kept = []
+  // Prefer richer titles (e.g., with course codes) when collapsing historical duplicates
+  const ordered = [...items].sort((a, b) => (b.title || '').length - (a.title || '').length)
+  for (const item of ordered) {
+    if (!item?.title || item.status === 'cancelled') continue
+    const dup = kept.find((k) =>
+      isDuplicateCandidate(k, item.title, item.start_time, !!item.start_time, offsetMinutes)
+    )
+    if (!dup) kept.push(item)
+  }
+  return kept.sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0))
+}
+
 export async function saveExtractedTasks(supabase, userId, tasks, tzCtx) {
-  if (!Array.isArray(tasks) || tasks.length === 0) return []
+  if (!Array.isArray(tasks) || tasks.length === 0) return { saved: [], repeated: [] }
 
   let existing = []
   if (supabase) {
@@ -264,6 +345,7 @@ export async function saveExtractedTasks(supabase, userId, tasks, tzCtx) {
   }
 
   const saved = []
+  const repeated = []
   const workingList = [...existing]
 
   for (const raw of tasks) {
@@ -273,6 +355,7 @@ export async function saveExtractedTasks(supabase, userId, tasks, tzCtx) {
     const durationMin = Math.max(15, Math.min(720, Number(raw.duration_minutes) || 60))
     let startIso = normalizeIso(raw.start_time, tzCtx.offsetStr)
     let endIso = normalizeIso(raw.end_time, tzCtx.offsetStr)
+    const hasExplicitStart = Boolean(startIso)
 
     if (startIso && (!endIso || new Date(endIso).getTime() <= new Date(startIso).getTime())) {
       endIso = new Date(new Date(startIso).getTime() + durationMin * 60000).toISOString()
@@ -284,23 +367,22 @@ export async function saveExtractedTasks(supabase, userId, tasks, tzCtx) {
       endIso = slot.endIso
     }
 
+    // Check against active (non-completed) items for repeated tasks
+    const matchedExisting = workingList.find(
+      (it) =>
+        it.status !== 'completed' &&
+        isDuplicateCandidate(it, title, startIso, hasExplicitStart, tzCtx.offsetMinutes)
+    )
+    if (matchedExisting) {
+      repeated.push(enrichScheduleItem({ ...matchedExisting, matched_input_title: title }))
+      continue
+    }
+
     const deadlineIso = normalizeIso(raw.deadline, tzCtx.offsetStr)
     const movability = raw.movability || 'fluid'
     const flexibility = movability !== 'immovable'
     const priority = Math.max(1, Math.min(4, Number(raw.priority) || 3))
     const taskType = raw.task_type || raw.category || 'task'
-
-    // Avoid exact duplicate title + start_time
-    const dup = workingList.find(
-      (it) =>
-        (it.title || '').trim().toLowerCase() === title.toLowerCase() &&
-        it.start_time &&
-        Math.abs(new Date(it.start_time).getTime() - new Date(startIso).getTime()) < 5 * 60000
-    )
-    if (dup) {
-      saved.push(enrichScheduleItem({ ...dup, transition_reason: raw.transition_reason || null }))
-      continue
-    }
 
     const noteParts = []
     if (raw.venue) noteParts.push(`Venue: ${raw.venue}`)
@@ -357,6 +439,6 @@ export async function saveExtractedTasks(supabase, userId, tasks, tzCtx) {
     }
   }
 
-  return saved
+  return { saved, repeated }
 }
 

@@ -127,21 +127,41 @@ export default async function handler(req, res) {
       ? parsed
       : []
 
-    const savedTasks = await saveExtractedTasks(supabase, userId, extractedTasks, tzCtx)
+    const { saved: savedTasks, repeated: repeatedTasks } = await saveExtractedTasks(
+      supabase,
+      userId,
+      extractedTasks,
+      tzCtx
+    )
 
-    let finalMessage = parsed?.message
-    if (!finalMessage) {
+    let finalMessage = parsed?.message || ''
+    let action = 'clarification'
+
+    if (savedTasks.length === 0 && repeatedTasks.length > 0) {
+      const list = repeatedTasks.map((t) => `• ${t.title}`).join('\n')
+      finalMessage = `🔁 Repeated task${repeatedTasks.length > 1 ? 's' : ''} detected from '${fileName || 'your input'}' — already on your schedule:\n${list}\n\nNo duplicate was added.`
+      action = 'repeated_task'
+    } else if (savedTasks.length > 0 && repeatedTasks.length > 0) {
+      const names = repeatedTasks.map((t) => `"${t.title}"`).join(', ')
+      finalMessage = `${finalMessage || `I've extracted and scheduled ${savedTasks.length} new item(s) from '${fileName || 'your input'}'.`}\n\n🔁 Skipped ${repeatedTasks.length} repeated task(s) already on your schedule: ${names}.`
+      action = 'schedule_saved'
+    } else if (savedTasks.length > 0) {
       finalMessage =
-        savedTasks.length > 0
-          ? `I've extracted and scheduled ${savedTasks.length} item(s) from '${fileName || 'your input'}'.`
-          : `I analyzed '${fileName || 'your input'}', but couldn't find clear schedulable events. Try adding a short note with the date or time.`
+        finalMessage ||
+        `I've extracted and scheduled ${savedTasks.length} item(s) from '${fileName || 'your input'}'.`
+      action = 'schedule_saved'
+    } else {
+      finalMessage =
+        finalMessage ||
+        `I analyzed '${fileName || 'your input'}', but couldn't find clear schedulable events. Try adding a short note with the date or time.`
     }
 
     return res.status(200).json({
       message: finalMessage,
-      action: savedTasks.length > 0 ? 'schedule_saved' : 'clarification',
-      tasks_extracted: extractedTasks,
+      action,
+      tasks_extracted: savedTasks,
       tasks_saved: savedTasks,
+      repeated_tasks: repeatedTasks,
       file_name: fileName,
       clarification_needed: parsed?.clarification_needed || null,
       schedule_trigger: savedTasks.length > 0,

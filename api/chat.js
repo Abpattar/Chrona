@@ -47,19 +47,38 @@ export default async function handler(req, res) {
     })
 
     const extractedTasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
-    const savedTasks = await saveExtractedTasks(supabase, userId, extractedTasks, tzCtx)
+    const { saved: savedTasks, repeated: repeatedTasks } = await saveExtractedTasks(
+      supabase,
+      userId,
+      extractedTasks,
+      tzCtx
+    )
 
-    const replyMessage =
-      parsed?.message ||
-      (savedTasks.length > 0
-        ? `Scheduled ${savedTasks.length} item(s) for you.`
-        : 'Got it! Let me know if you want me to add any tasks or times to your schedule.')
+    let replyMessage = parsed?.message || ''
+    let action = 'chat'
+
+    if (savedTasks.length === 0 && repeatedTasks.length > 0) {
+      const list = repeatedTasks.map((t) => `• ${t.title}`).join('\n')
+      replyMessage = `🔁 Repeated task${repeatedTasks.length > 1 ? 's' : ''} — already on your schedule:\n${list}\n\nNo duplicate was added. Ask me if you want to reschedule or update ${repeatedTasks.length > 1 ? 'them' : 'it'}.`
+      action = 'repeated_task'
+    } else if (savedTasks.length > 0 && repeatedTasks.length > 0) {
+      const names = repeatedTasks.map((t) => `"${t.title}"`).join(', ')
+      replyMessage = `${replyMessage || `Scheduled ${savedTasks.length} new item(s).`}\n\n🔁 Skipped ${repeatedTasks.length} repeated task(s) already scheduled: ${names}.`
+      action = 'schedule_saved'
+    } else if (savedTasks.length > 0) {
+      replyMessage = replyMessage || `Scheduled ${savedTasks.length} item(s) for you.`
+      action = 'schedule_saved'
+    } else {
+      replyMessage =
+        replyMessage || 'Got it! Let me know if you want me to add any tasks or times to your schedule.'
+    }
 
     return res.status(200).json({
       message: replyMessage,
-      action: savedTasks.length > 0 ? 'schedule_saved' : 'chat',
+      action,
       tasks_saved: savedTasks,
-      tasks_extracted: extractedTasks,
+      tasks_extracted: savedTasks,
+      repeated_tasks: repeatedTasks,
       clarification_needed: parsed?.clarification_needed || null,
       schedule_trigger: savedTasks.length > 0,
       quick_actions: [],
