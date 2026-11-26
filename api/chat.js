@@ -1,53 +1,74 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-let genAI = null
-if (GEMINI_API_KEY) {
-  try {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-  } catch (e) {
-    console.warn('Could not init Gemini in api/chat:', e.message)
-  }
-}
+import {
+  setCors,
+  getUserId,
+  getTimezoneContext,
+  getSupabase,
+  callGemini,
+  buildExtractionPrompt,
+  saveExtractedTasks,
+} from './_lib/chrona.js'
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-User-ID, X-Timezone, X-Timezone-Offset')
+  setCors(res, 'POST, OPTIONS')
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end()
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
+    return res.status(405).json({ error: 'Method not allowed', detail: 'HTTP 405: Use POST' })
   }
 
-  const { message } = req.body || {}
-  if (!message) {
-    return res.status(400).json({ error: 'Message is required' })
-  }
-
-  if (genAI) {
+  let body = req.body
+  if (typeof body === 'string') {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
-      const prompt = `You are Chrona, an AI time-management copilot. Respond concisely and professionally to the user's scheduling query:\n\n${message}`
-      const result = await model.generateContent(prompt)
-      const text = result.response.text()
-      return res.status(200).json({
-        message: text,
-        tasks_saved: [],
-        tasks_extracted: [],
-      })
-    } catch (err) {
-      console.warn('Gemini chat error in api/chat:', err.message)
+      body = JSON.parse(body)
+    } catch {
+      body = {}
     }
   }
+  body = body || {}
 
-  return res.status(200).json({
-    message: `I received your message: "${message}". Connect your local backend with 'python3 run_servers.py' for real-time dynamic transition calculation and timetable vision parsing.`,
-    tasks_saved: [],
-    tasks_extracted: [],
-  })
+  const message = (body.message || '').trim()
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required', detail: 'Message is required' })
+  }
+
+  const userId = getUserId(req)
+  const tzCtx = getTimezoneContext(req, body)
+  const supabase = getSupabase()
+
+  try {
+    const prompt = buildExtractionPrompt(tzCtx, message)
+    const parsed = await callGemini({
+      parts: [{ text: prompt }],
+      jsonMode: true,
+      perModelTimeoutMs: 15000,
+    })
+
+    const extractedTasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+    const savedTasks = await saveExtractedTasks(supabase, userId, extractedTasks, tzCtx)
+
+    const replyMessage =
+      parsed?.message ||
+      (savedTasks.length > 0
+        ? `Scheduled ${savedTasks.length} item(s) for you.`
+        : 'Got it! Let me know if you want me to add any tasks or times to your schedule.')
+
+    return res.status(200).json({
+      message: replyMessage,
+      action: savedTasks.length > 0 ? 'schedule_saved' : 'chat',
+      tasks_saved: savedTasks,
+      tasks_extracted: extractedTasks,
+      clarification_needed: parsed?.clarification_needed || null,
+      schedule_trigger: savedTasks.length > 0,
+      quick_actions: [],
+    })
+  } catch (err) {
+    console.error('Gemini chat error in api/chat:', err.message)
+    return res.status(500).json({
+      error: err.message || 'AI chat failed',
+      detail: err.message || 'AI chat failed',
+    })
+  }
 }
-

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../lib/api'
 
 const QUESTIONS = [
     {
@@ -85,13 +86,7 @@ export default function BehaviorOnboarding({ onComplete }) {
             const archetype = deriveArchetype(updated)
 
             try {
-                const res = await fetch('/api/onboarding', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...updated, archetype }),
-                })
-                if (!res.ok) throw new Error('Onboarding failed')
-                const data = await res.json()
+                const data = await api.onboarding({ ...updated, archetype })
                 localStorage.setItem('onboarding_complete', 'true')
                 localStorage.setItem('chrona_archetype', archetype)
                 if (onComplete) onComplete(data.profile)

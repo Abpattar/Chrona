@@ -22,8 +22,11 @@ export function getClientTimezoneOffset() {
   }
 }
 
-const API_BASE = import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '')
+const normalizedApiUrl = rawApiUrl === '/api' ? '' : rawApiUrl.replace(/\/api$/, '')
+export const API_BASE = rawApiUrl
+  ? normalizedApiUrl
+  : (import.meta.env.PROD ? '' : 'http://localhost:8000')
 
 const TIMEOUT = 45000  // 45 seconds for AI calls
 
@@ -53,7 +56,7 @@ async function request(endpoint, options = {}) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
-      throw new Error(err.detail || `HTTP ${response.status}`)
+      throw new Error(err.detail || err.error || `HTTP ${response.status}`)
     }
 
     return response.json()
@@ -81,9 +84,13 @@ async function uploadRequest(endpoint, formData) {
       signal: controller.signal,
     })
     clearTimeout(timeoutId)
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/html')) {
+      throw new Error(`API endpoint ${endpoint} returned HTML (HTTP ${response.status})`)
+    }
     if (!response.ok) {
       const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
-      throw new Error(err.detail || `HTTP ${response.status}`)
+      throw new Error(err.detail || err.error || `HTTP ${response.status}`)
     }
     return response.json()
   } catch (err) {
@@ -205,6 +212,10 @@ export const api = {
   }),
 
   scheduleFixedDelete: (itemId) => request(`/api/schedule/fixed/${itemId}`, {
+    method: 'DELETE',
+  }),
+
+  scheduleClear: () => request('/api/schedule/clear', {
     method: 'DELETE',
   }),
 

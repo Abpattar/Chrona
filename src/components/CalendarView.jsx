@@ -219,16 +219,7 @@ export default function CalendarView() {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('message', 'Extract all events, venues, prep needs, and deadlines from this file.')
-      const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
-      const res = await fetch(`${API_BASE}/api/chat/upload`, {
-        method: 'POST',
-        headers: {
-          'X-User-ID': TEST_USER_ID,
-          'X-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
-        },
-        body: formData,
-      })
-      const data = await res.json()
+      const data = await api.chatUpload(formData)
       setAssistantBanner(data.message)
       await fetchSchedule()
     } catch (err) {

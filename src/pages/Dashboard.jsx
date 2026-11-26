@@ -104,7 +104,7 @@ export default function Dashboard() {
   const handleClearSchedule = async () => {
     if (!window.confirm('Clear all tasks from your schedule?')) return
     try {
-      await fetch('/api/schedule/clear', { method: 'DELETE' })
+      await api.scheduleClear()
       showNotif('All scheduled items cleared.')
       fetchContext()
     } catch (e) {
