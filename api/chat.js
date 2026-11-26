@@ -4,7 +4,9 @@ import {
   getTimezoneContext,
   getSupabase,
   callGemini,
-  buildExtractionPrompt,
+  fetchActiveScheduleItems,
+  buildChatAgentPrompt,
+  executeScheduleOperations,
   saveExtractedTasks,
 } from './_lib/chrona.js'
 
@@ -37,27 +39,64 @@ export default async function handler(req, res) {
   const userId = getUserId(req)
   const tzCtx = getTimezoneContext(req, body)
   const supabase = getSupabase()
+  const history = Array.isArray(body.history)
+    ? body.history
+    : Array.isArray(body.context?.history)
+    ? body.context.history
+    : []
 
   try {
-    const prompt = buildExtractionPrompt(tzCtx, message)
+    // 1. Load live schedule context so AI can see, update, cancel, reschedule, or clear existing items
+    const existingItems = await fetchActiveScheduleItems(supabase, userId, tzCtx.offsetMinutes)
+
+    // 2. Ask Gemini with full schedule + conversation context
+    const prompt = buildChatAgentPrompt(tzCtx, existingItems, message, history)
     const parsed = await callGemini({
       parts: [{ text: prompt }],
       jsonMode: true,
-      perModelTimeoutMs: 15000,
+      perModelTimeoutMs: 18000,
     })
 
-    const extractedTasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+    // 3. Execute schedule operations FIRST (cancel, reschedule, update, complete, clear_range, clear_all)
+    const operations = Array.isArray(parsed?.operations) ? parsed.operations : []
+    const {
+      updatedTasks,
+      cancelledTasks,
+      completedTasks,
+    } = await executeScheduleOperations(supabase, userId, operations, existingItems, tzCtx)
+
+    // 4. Filter out any task in parsed.tasks that was already handled as an in-place update/completion
+    const handledTitles = new Set(
+      [...updatedTasks, ...completedTasks].map((t) => (t.title || '').trim().toLowerCase())
+    )
+    const rawNewTasks = (Array.isArray(parsed?.tasks) ? parsed.tasks : []).filter(
+      (t) => !handledTitles.has((t?.title || '').trim().toLowerCase())
+    )
+
+    // 5. Add brand-new tasks (with repeated-task detection against the updated schedule)
     const { saved: savedTasks, repeated: repeatedTasks } = await saveExtractedTasks(
       supabase,
       userId,
-      extractedTasks,
+      rawNewTasks,
       tzCtx
     )
+
+    const allDisplayTasks = [...updatedTasks, ...completedTasks, ...savedTasks]
 
     let replyMessage = parsed?.message || ''
     let action = 'chat'
 
-    if (savedTasks.length === 0 && repeatedTasks.length > 0) {
+    if (cancelledTasks.length > 0 && updatedTasks.length === 0 && savedTasks.length === 0) {
+      action = 'schedule_cleared'
+      if (!replyMessage) {
+        replyMessage = `Removed ${cancelledTasks.length} item(s) from your schedule.`
+      }
+    } else if (updatedTasks.length > 0 || completedTasks.length > 0) {
+      action = 'schedule_updated'
+      if (!replyMessage) {
+        replyMessage = `Updated ${updatedTasks.length + completedTasks.length} item(s) on your schedule.`
+      }
+    } else if (savedTasks.length === 0 && repeatedTasks.length > 0) {
       const list = repeatedTasks.map((t) => `• ${t.title}`).join('\n')
       replyMessage = `🔁 Repeated task${repeatedTasks.length > 1 ? 's' : ''} — already on your schedule:\n${list}\n\nNo duplicate was added. Ask me if you want to reschedule or update ${repeatedTasks.length > 1 ? 'them' : 'it'}.`
       action = 'repeated_task'
@@ -70,17 +109,21 @@ export default async function handler(req, res) {
       action = 'schedule_saved'
     } else {
       replyMessage =
-        replyMessage || 'Got it! Let me know if you want me to add any tasks or times to your schedule.'
+        replyMessage || 'Got it! Let me know if you want me to add, update, or clear anything on your schedule.'
     }
 
     return res.status(200).json({
       message: replyMessage,
       action,
-      tasks_saved: savedTasks,
-      tasks_extracted: savedTasks,
+      tasks_saved: allDisplayTasks,
+      tasks_extracted: allDisplayTasks,
+      tasks_updated: updatedTasks,
+      tasks_cancelled: cancelledTasks,
+      tasks_completed: completedTasks,
       repeated_tasks: repeatedTasks,
       clarification_needed: parsed?.clarification_needed || null,
-      schedule_trigger: savedTasks.length > 0,
+      schedule_trigger:
+        allDisplayTasks.length > 0 || cancelledTasks.length > 0,
       quick_actions: [],
     })
   } catch (err) {

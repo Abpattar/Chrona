@@ -111,7 +111,7 @@ export const api = {
   }),
 
   // ── Chat / Natural Language ──────────────────────────────
-  chat: (message, sessionId = null, context = null) => request('/api/chat', {
+  chat: (message, sessionId = null, context = null, history = []) => request('/api/chat', {
     method: 'POST',
     body: JSON.stringify({
       user_id: TEST_USER_ID,
@@ -121,6 +121,7 @@ export const api = {
       timezone_offset: getClientTimezoneOffset(),
       client_time: new Date().toISOString(),
       context,
+      history,
     }),
   }),
 

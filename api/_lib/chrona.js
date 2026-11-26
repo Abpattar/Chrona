@@ -147,6 +147,309 @@ export async function callGemini({ parts, jsonMode = false, perModelTimeoutMs = 
   throw new Error(`Gemini request failed (${errors.slice(-2).join(' | ')})`)
 }
 
+export async function fetchActiveScheduleItems(supabase, userId, offsetMinutes = 330) {
+  if (!supabase) return []
+  try {
+    const { data, error } = await supabase
+      .from('schedule_items')
+      .select('*')
+      .eq('user_id', userId)
+      .neq('status', 'cancelled')
+      .order('start_time', { ascending: true })
+    if (error || !Array.isArray(data)) return []
+    return deduplicateScheduleItems(data.map(enrichScheduleItem), offsetMinutes)
+  } catch (err) {
+    console.warn('fetchActiveScheduleItems error:', err.message)
+    return []
+  }
+}
+
+function formatItemForPrompt(item, tzCtx) {
+  let when = 'Unscheduled / Flexible'
+  if (item.start_time) {
+    const sMs = new Date(item.start_time).getTime()
+    const eMs = item.end_time ? new Date(item.end_time).getTime() : NaN
+    if (!Number.isNaN(sMs)) {
+      const sLoc = new Date(sMs + tzCtx.offsetMinutes * 60000).toISOString().slice(0, 16).replace('T', ' ')
+      const dayIdx = new Date(sMs + tzCtx.offsetMinutes * 60000).getUTCDay()
+      const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayIdx]
+      const eStr = !Number.isNaN(eMs)
+        ? new Date(eMs + tzCtx.offsetMinutes * 60000).toISOString().slice(11, 16)
+        : ''
+      when = `${sLoc}${eStr ? `-${eStr}` : ''} (${dayName})`
+    }
+  }
+  return `- id="${item.id}" | title="${item.title}" | type=${item.task_type || 'task'} | status=${item.status || 'scheduled'} | when=${when} | duration=${item.duration_minutes || 60}m | movability=${item.movability || 'fluid'}`
+}
+
+export function buildChatAgentPrompt(tzCtx, existingItems = [], userMessage = '', history = []) {
+  const scheduleLines =
+    existingItems.length > 0
+      ? existingItems.map((it) => formatItemForPrompt(it, tzCtx)).join('\n')
+      : '(Schedule is currently empty)'
+
+  const historyLines =
+    Array.isArray(history) && history.length > 0
+      ? history
+          .slice(-6)
+          .map((h) => `${h.role === 'user' ? 'User' : 'Chrona'}: ${String(h.content || '').slice(0, 300)}`)
+          .join('\n')
+      : ''
+
+  return `You are Chrona, an intelligent AI time-management copilot with FULL control over the user's schedule.
+
+Current user local date & time: ${tzCtx.nowDisplay} (Timezone: ${tzCtx.tzName}, offset ${tzCtx.offsetStr})
+
+CURRENT SCHEDULE ITEMS IN DATABASE:
+${scheduleLines}
+
+${historyLines ? `RECENT CONVERSATION:\n${historyLines}\n` : ''}USER MESSAGE:
+${userMessage}
+
+You can perform ANY schedule management request:
+1. ADD new task(s)/event(s) -> put them in "tasks".
+2. CANCEL + RESCHEDULE / MOVE / MODIFY an existing item (e.g. "My exam got cancelled on 28 Nov, now it is on 1 Dec", "Move my meeting to 6pm", "Rename X to Y") -> put a "reschedule" or "update" operation in "operations" targeting that item's "target_id" (and KEEP its original title like "Maths Exam" and original time-of-day/duration unless the user changed them). DO NOT also put it in "tasks"!
+3. CANCEL / DELETE / REMOVE specific item(s) (e.g. "Cancel my exam on Nov 28", "Remove all meetings tomorrow") -> put "cancel" operations in "operations" (use "target_id" for a single item, or "match_title" / "match_date" for matching items).
+4. CLEAR A DATE / WEEK / MONTH / ENTIRE SCHEDULE (e.g. "Clear all schedule this month", "Delete everything in December", "Clear today's schedule", "Clear all tasks") -> put "clear_range" (with "range_start" and "range_end" ISO datetimes with offset ${tzCtx.offsetStr}) or "clear_all" in "operations".
+5. MARK COMPLETE -> put "complete" operation in "operations".
+6. ANSWER QUESTIONS (e.g. "What do I have this week?", "Am I free Friday?") -> leave "operations": [] and "tasks": [] and answer accurately from CURRENT SCHEDULE ITEMS above.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "message": "Clear, concise reply confirming exact actions taken or answering the user's question.",
+  "operations": [
+    {
+      "op": "reschedule|update|cancel|delete|complete|clear_range|clear_all",
+      "target_id": "exact UUID from CURRENT SCHEDULE ITEMS if targeting a specific item, else null",
+      "match_title": "optional title/keyword to match when target_id is null (e.g. 'exam' or 'meeting')",
+      "match_date": "optional YYYY-MM-DD local date to match old item(s) (e.g. '2026-11-28')",
+      "all_matching": false,
+      "range_start": "ISO datetime with offset ${tzCtx.offsetStr} (for clear_range only, else null)",
+      "range_end": "ISO datetime with offset ${tzCtx.offsetStr} (for clear_range only, else null)",
+      "updates": {
+        "title": "optional new/preserved title",
+        "start_time": "optional new ISO datetime with offset ${tzCtx.offsetStr}",
+        "end_time": "optional new ISO datetime with offset ${tzCtx.offsetStr}",
+        "duration_minutes": 60,
+        "priority": 2,
+        "movability": "immovable|negotiable|fluid",
+        "completion_note": "optional note (e.g. 'Rescheduled from Nov 28')"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "title": "ONLY brand-new tasks to add (never duplicate items already moved/updated in operations!)",
+      "category": "exam|quiz|assignment|class|meeting|study|workout|family|social|appointment|personal|reminder|project|other",
+      "task_type": "exam|quiz|assignment|class|meeting|study|workout|family|social|appointment|task",
+      "venue": "string or null",
+      "start_time": "ISO 8601 datetime with offset ${tzCtx.offsetStr} or null if flexible",
+      "end_time": "ISO 8601 datetime with offset ${tzCtx.offsetStr} or null",
+      "deadline": "ISO 8601 datetime with offset ${tzCtx.offsetStr} or null",
+      "duration_minutes": 60,
+      "priority": 2,
+      "movability": "immovable|negotiable|fluid",
+      "transition_reason": "short buffer note or null"
+    }
+  ],
+  "clarification_needed": null
+}
+
+Critical Rules:
+- If user says "X on <old date> was cancelled/moved and is now on <new date>", ALWAYS emit ONE "reschedule" operation on X's target_id moving it to <new date> (preserving X's original title, duration, and time-of-day if user didn't specify a new time), OR if it's a different new event, emit "cancel" on the old item AND put the new item in "tasks". NEVER leave the cancelled old event behind!
+- Always use timezone offset ${tzCtx.offsetStr} on all ISO datetimes.
+- For "this month" when today is ${tzCtx.localDateStr}, range_start is "${tzCtx.localDateStr.slice(0, 7)}-01T00:00:00${tzCtx.offsetStr}" and range_end is the last day of that month at "23:59:59${tzCtx.offsetStr}".`
+}
+
+function itemLocalDate(item, offsetMinutes) {
+  if (!item?.start_time) return null
+  const ms = new Date(item.start_time).getTime()
+  if (Number.isNaN(ms)) return null
+  return new Date(ms + offsetMinutes * 60000).toISOString().slice(0, 10)
+}
+
+function findOperationTargets(op, workingItems, offsetMinutes) {
+  if (op.target_id) {
+    const exact = workingItems.find((it) => it.id === op.target_id)
+    if (exact) return [exact]
+  }
+
+  const matchDate = (op.match_date || '').trim()
+  const matchTitle = (op.match_title || '').trim().toLowerCase()
+
+  let candidates = workingItems.filter((it) => it.status !== 'cancelled')
+  if (matchDate) {
+    candidates = candidates.filter((it) => itemLocalDate(it, offsetMinutes) === matchDate)
+  }
+  if (matchTitle) {
+    const tokB = coreTitleTokens(matchTitle)
+    const filtered = candidates.filter((it) => {
+      const tLow = (it.title || '').toLowerCase()
+      const typeLow = (it.task_type || '').toLowerCase()
+      if (tLow.includes(matchTitle) || matchTitle.includes(tLow) || typeLow === matchTitle) {
+        return true
+      }
+      const tokA = coreTitleTokens(it.title)
+      return tokB.some((t) => tokA.includes(t))
+    })
+    candidates = filtered
+  }
+
+  if (op.all_matching) return candidates
+  return candidates.length > 0 ? [candidates[0]] : []
+}
+
+export async function executeScheduleOperations(supabase, userId, operations, existingItems, tzCtx) {
+  const updatedTasks = []
+  const cancelledTasks = []
+  const completedTasks = []
+  let workingItems = [...(existingItems || [])]
+
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return { updatedTasks, cancelledTasks, completedTasks, workingItems }
+  }
+
+  for (const op of operations) {
+    const kind = String(op?.op || '').toLowerCase()
+    if (!kind) continue
+
+    if (kind === 'clear_all') {
+      const targets = workingItems.filter((it) => it.status !== 'cancelled')
+      if (supabase) {
+        await supabase.from('schedule_items').delete().eq('user_id', userId)
+      }
+      cancelledTasks.push(...targets)
+      workingItems = []
+      continue
+    }
+
+    if (kind === 'clear_range') {
+      const rStartIso = normalizeIso(op.range_start, tzCtx.offsetStr)
+      const rEndIso = normalizeIso(op.range_end, tzCtx.offsetStr)
+      if (!rStartIso || !rEndIso) continue
+      const rStartMs = new Date(rStartIso).getTime()
+      const rEndMs = new Date(rEndIso).getTime()
+
+      const targets = workingItems.filter((it) => {
+        const refTime = it.start_time || it.deadline
+        if (!refTime) return false
+        const ms = new Date(refTime).getTime()
+        return !Number.isNaN(ms) && ms >= rStartMs && ms <= rEndMs
+      })
+
+      if (targets.length > 0 && supabase) {
+        const ids = targets.map((t) => t.id).filter(Boolean)
+        if (ids.length > 0) {
+          await supabase
+            .from('schedule_items')
+            .delete()
+            .eq('user_id', userId)
+            .in('id', ids)
+        }
+      }
+
+      const removedIds = new Set(targets.map((t) => t.id))
+      cancelledTasks.push(...targets)
+      workingItems = workingItems.filter((it) => !removedIds.has(it.id))
+      continue
+    }
+
+    const targets = findOperationTargets(op, workingItems, tzCtx.offsetMinutes)
+    if (targets.length === 0) continue
+
+    if (kind === 'cancel' || kind === 'delete') {
+      const ids = targets.map((t) => t.id).filter(Boolean)
+      if (supabase && ids.length > 0) {
+        await supabase
+          .from('schedule_items')
+          .delete()
+          .eq('user_id', userId)
+          .in('id', ids)
+      }
+      const removedIds = new Set(ids)
+      cancelledTasks.push(...targets)
+      workingItems = workingItems.filter((it) => !removedIds.has(it.id))
+      continue
+    }
+
+    if (kind === 'complete') {
+      const ids = targets.map((t) => t.id).filter(Boolean)
+      const nowIso = new Date().toISOString()
+      if (supabase && ids.length > 0) {
+        await supabase
+          .from('schedule_items')
+          .update({ status: 'completed', actual_end: nowIso })
+          .eq('user_id', userId)
+          .in('id', ids)
+      }
+      for (const t of targets) {
+        const doneItem = enrichScheduleItem({ ...t, status: 'completed', actual_end: nowIso })
+        completedTasks.push(doneItem)
+        workingItems = workingItems.map((it) => (it.id === t.id ? doneItem : it))
+      }
+      continue
+    }
+
+    if (kind === 'reschedule' || kind === 'update' || kind === 'move') {
+      const u = op.updates || {}
+      for (const target of targets) {
+        const durMin = Math.max(
+          15,
+          Math.min(720, Number(u.duration_minutes || target.duration_minutes) || 60)
+        )
+        let newStartIso = normalizeIso(u.start_time, tzCtx.offsetStr)
+        let newEndIso = normalizeIso(u.end_time, tzCtx.offsetStr)
+
+        if (!newStartIso && kind === 'reschedule') {
+          const others = workingItems.filter((it) => it.id !== target.id)
+          const oldMs = target.start_time ? new Date(target.start_time).getTime() : null
+          const slot = findNextOpenSlot(durMin, others, tzCtx, oldMs)
+          newStartIso = slot.startIso
+          newEndIso = slot.endIso
+        }
+
+        if (newStartIso && (!newEndIso || new Date(newEndIso).getTime() <= new Date(newStartIso).getTime())) {
+          newEndIso = new Date(new Date(newStartIso).getTime() + durMin * 60000).toISOString()
+        }
+
+        const patch = { status: u.status || 'scheduled' }
+        if (u.title && u.title.trim()) patch.title = u.title.trim()
+        if (newStartIso) patch.start_time = newStartIso
+        if (newEndIso) patch.end_time = newEndIso
+        if (u.priority !== undefined) patch.priority = Math.max(1, Math.min(4, Number(u.priority) || 3))
+        if (u.movability) patch.flexibility = u.movability !== 'immovable'
+        if (u.completion_note !== undefined) patch.completion_note = u.completion_note
+
+        let updatedRow = { ...target, ...patch }
+        if (supabase && target.id) {
+          const { data, error } = await supabase
+            .from('schedule_items')
+            .update(patch)
+            .eq('id', target.id)
+            .eq('user_id', userId)
+            .select()
+            .single()
+          if (!error && data) {
+            updatedRow = data
+          } else if (error) {
+            console.warn('Update schedule_items error:', error.message)
+          }
+        }
+
+        const enriched = enrichScheduleItem({
+          ...updatedRow,
+          movability: u.movability || target.movability,
+          auto_rescheduled: kind === 'reschedule',
+        })
+        updatedTasks.push(enriched)
+        workingItems = workingItems.map((it) => (it.id === target.id ? enriched : it))
+      }
+    }
+  }
+
+  return { updatedTasks, cancelledTasks, completedTasks, workingItems }
+}
+
 export function buildExtractionPrompt(tzCtx, userNote = '') {
   return `You are Chrona, an intelligent AI time-management copilot and schedule extraction engine.
 

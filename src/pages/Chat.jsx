@@ -61,7 +61,7 @@ function TaskCard({ task, onNavigateMap, onNavigateToday }) {
             {isImmovable ? 'Immovable' : 'Fluid Focus'}
           </span>
           <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center gap-1">
-            <span>●</span> Scheduled
+            <span>●</span> {task.status === 'completed' ? 'Completed' : task.auto_rescheduled ? 'Rescheduled' : 'Scheduled'}
           </span>
         </div>
 
@@ -136,6 +136,7 @@ function MessageBubbleItem({ msg, onNavigateMap, onNavigateToday, onQuickAction 
     }
   }
   const repeatedTasks = msg.repeated_tasks || []
+  const cancelledTasks = msg.tasks_cancelled || []
 
   return (
     <div className={`flex gap-3.5 ${isUser ? 'flex-row-reverse' : 'flex-row'} animate-fade-in`}>
@@ -181,6 +182,25 @@ function MessageBubbleItem({ msg, onNavigateMap, onNavigateToday, onQuickAction 
                 onNavigateToday={onNavigateToday}
               />
             ))}
+          </div>
+        )}
+
+        {cancelledTasks.length > 0 && (
+          <div className="mt-3 p-2.5 rounded-xl bg-rose-500/[0.08] border border-rose-500/25 space-y-1.5">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-rose-300 font-semibold">
+              🗑️ Removed from schedule ({cancelledTasks.length})
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {cancelledTasks.map((ct, idx) => (
+                <span
+                  key={ct.id || idx}
+                  className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-200 line-through"
+                >
+                  {ct.title}
+                  {ct.start_time ? ` · ${dayjs(ct.start_time).format('MMM D')}` : ''}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
@@ -365,7 +385,11 @@ export default function Chat() {
         formData.append('session_id', sessionId)
         result = await api.chatUpload(formData)
       } else {
-        result = await api.chat(textToSend, sessionId)
+        const recentHistory = messages
+          .filter((m) => !m.isError && m.id !== '0' && m.content)
+          .slice(-6)
+          .map((m) => ({ role: m.role, content: m.content }))
+        result = await api.chat(textToSend, sessionId, null, recentHistory)
       }
 
       const assistantMsg = {
@@ -375,6 +399,7 @@ export default function Chat() {
         timestamp: new Date().toISOString(),
         tasks_extracted: result.tasks_extracted || [],
         tasks_saved: result.tasks_saved || [],
+        tasks_cancelled: result.tasks_cancelled || [],
         repeated_tasks: result.repeated_tasks || [],
         clarification_needed: result.clarification_needed,
         schedule_trigger: result.schedule_trigger,
