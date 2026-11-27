@@ -82,7 +82,17 @@ function TransitionGapPill({ prevEvent, nextEvent }) {
   )
 }
 
-function EventChip({ event, dayIndex = 0, onComplete, onNudge, onDelete, onExplain }) {
+function EventChip({
+  event,
+  dayIndex = 0,
+  isColumnHovered = false,
+  onHoverStart,
+  onHoverEnd,
+  onComplete,
+  onNudge,
+  onDelete,
+  onExplain,
+}) {
   const [isHovered, setIsHovered] = useState(false)
   const start = dayjs(event.start_time || event.event_datetime)
   const end = event.end_time ? dayjs(event.end_time) : start.add(event.duration_minutes || 60, 'minute')
@@ -92,27 +102,26 @@ function EventChip({ event, dayIndex = 0, onComplete, onNudge, onDelete, onExpla
   const visual = getMovabilityStyle(event)
   const isMovable = (event.movability || (event.flexibility === false ? 'immovable' : 'fluid')) !== 'immovable'
 
-  // If in the rightmost columns (Thu, Fri, Sat, Sun => dayIndex >= 4), pin right and expand leftwards
-  // Otherwise, pin left and expand rightwards to prevent viewport overflow
-  const isRightCol = dayIndex >= 4
-
   return (
     <div
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => {
+        setIsHovered(true)
+        if (onHoverStart) onHoverStart(dayIndex)
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false)
+        if (onHoverEnd) onHoverEnd()
+      }}
       className="rounded-xl px-2.5 py-1.5 transition-all duration-200 flex flex-col justify-between backdrop-blur-2xl shadow-md cursor-pointer select-none"
       style={{
         position: 'absolute',
         top: `${topOffset}px`,
-        left: isHovered ? (isRightCol ? 'auto' : '3px') : '3px',
-        right: isHovered ? (isRightCol ? '3px' : 'auto') : '3px',
-        minWidth: isHovered ? '240px' : undefined,
-        width: isHovered ? 'max-content' : undefined,
-        maxWidth: isHovered ? '320px' : undefined,
+        left: '3px',
+        right: '3px',
         height: isHovered ? 'auto' : `${baseHeight}px`,
-        minHeight: isHovered ? `${Math.max(baseHeight, 92)}px` : undefined,
-        zIndex: isHovered ? 50 : 10,
-        background: isHovered ? 'rgba(18, 20, 32, 0.96)' : visual.bg,
+        minHeight: isHovered ? `${Math.max(baseHeight, 94)}px` : undefined,
+        zIndex: isHovered ? 40 : 10,
+        background: isHovered ? 'rgba(18, 20, 32, 0.98)' : visual.bg,
         border: visual.border,
         borderLeft: visual.borderLeft,
         boxShadow: isHovered
@@ -192,8 +201,22 @@ export default function CalendarView() {
   const [submitting, setSubmitting] = useState(false)
   const [assistantBanner, setAssistantBanner] = useState(null)
   const [explainModal, setExplainModal] = useState(null)
+  const [hoveredDayIndex, setHoveredDayIndex] = useState(null)
+  const hoverTimeoutRef = useRef(null)
   const gridRef = useRef(null)
   const fileInputRef = useRef(null)
+
+  const handleCardHoverStart = useCallback((dayIdx) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    setHoveredDayIndex(dayIdx)
+  }, [])
+
+  const handleCardHoverEnd = useCallback(() => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredDayIndex(null)
+    }, 120)
+  }, [])
 
   const fetchSchedule = useCallback(async () => {
     try {
@@ -290,6 +313,18 @@ export default function CalendarView() {
     [currentWeekStart]
   )
 
+  // Fluid responsive column expansion: when hovering a card in any day column,
+  // that column expands smoothly to minmax(235px, 1.8fr), and adjacent columns shrink gracefully to minmax(0, 1fr)
+  const gridTemplateColumns = useMemo(() => {
+    if (hoveredDayIndex === null) {
+      return '60px repeat(7, minmax(0, 1fr))'
+    }
+    const cols = weekDays
+      .map((_, i) => (i === hoveredDayIndex ? 'minmax(235px, 1.8fr)' : 'minmax(0, 1fr)'))
+      .join(' ')
+    return `60px ${cols}`
+  }, [hoveredDayIndex, weekDays])
+
   const unscheduledTasks = useMemo(
     () => events.filter((ev) => !ev.start_time && ev.status !== 'completed'),
     [events]
@@ -367,30 +402,36 @@ export default function CalendarView() {
           </div>
         )}
 
-        {/* Day Column Headers */}
+        {/* Day Column Headers (Synchronized column expansion with timeline) */}
         <div
           className="flex-shrink-0 grid bg-white/[0.02] border-b border-white/[0.08] backdrop-blur-sm"
-          style={{ gridTemplateColumns: '60px repeat(7, 1fr)' }}
+          style={{
+            gridTemplateColumns,
+            transition: 'grid-template-columns 280ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
         >
           <div className="h-14 border-r border-white/[0.06] flex items-center justify-center">
             <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">TIME</span>
           </div>
-          {weekDays.map((day) => {
+          {weekDays.map((day, dayIdx) => {
             const isToday = day.isSame(dayjs(), 'day')
+            const isColHovered = hoveredDayIndex === dayIdx
             return (
               <div 
                 key={day.format('YYYY-MM-DD')} 
                 className={`h-14 flex flex-col items-center justify-center border-r border-white/[0.06] transition-colors ${
-                  isToday ? 'bg-amber-400/[0.05]' : ''
+                  isToday ? 'bg-amber-400/[0.05]' : isColHovered ? 'bg-white/[0.04]' : ''
                 }`}
               >
-                <span className={`text-[10px] uppercase tracking-wider font-medium ${isToday ? 'text-amber-300' : 'text-slate-400'}`}>
+                <span className={`text-[10px] uppercase tracking-wider font-medium ${isToday ? 'text-amber-300' : isColHovered ? 'text-white' : 'text-slate-400'}`}>
                   {day.format('ddd')}
                 </span>
                 <span
                   className={`text-xs font-bold mt-0.5 w-7 h-7 flex items-center justify-center rounded-full transition-all ${
                     isToday 
                       ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-black shadow-[0_0_12px_rgba(251,191,36,0.5)]' 
+                      : isColHovered
+                      ? 'bg-white/10 text-white'
                       : 'text-slate-200 hover:bg-white/5'
                   }`}
                 >
@@ -401,9 +442,16 @@ export default function CalendarView() {
           })}
         </div>
 
-        {/* Timeline Grid */}
+        {/* Timeline Grid (Synchronized column expansion with headers) */}
         <div ref={gridRef} className="flex-1 overflow-y-auto relative">
-          <div className="grid relative" style={{ gridTemplateColumns: '60px repeat(7, 1fr)', minHeight: `${HOURS.length * HOUR_HEIGHT}px` }}>
+          <div
+            className="grid relative"
+            style={{
+              gridTemplateColumns,
+              minHeight: `${HOURS.length * HOUR_HEIGHT}px`,
+              transition: 'grid-template-columns 280ms cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
             {/* Left Hour Markers */}
             <div className="relative border-r border-white/[0.06]">
               {HOURS.map((hour) => (
@@ -419,10 +467,13 @@ export default function CalendarView() {
             {weekDays.map((day, dayIdx) => {
               const dayEvents = eventsForDay(day)
               const isToday = day.isSame(dayjs(), 'day')
+              const isColHovered = hoveredDayIndex === dayIdx
               return (
                 <div 
                   key={day.format('YYYY-MM-DD')} 
-                  className={`relative border-r border-white/[0.06] ${isToday ? 'bg-amber-400/[0.02]' : ''}`}
+                  className={`relative border-r border-white/[0.06] transition-colors duration-200 ${
+                    isToday ? 'bg-amber-400/[0.02]' : isColHovered ? 'bg-white/[0.02]' : ''
+                  }`}
                 >
                   {/* Hour horizontal grid lines */}
                   {HOURS.map((hour) => (
@@ -457,6 +508,9 @@ export default function CalendarView() {
                       key={ev.id}
                       event={ev}
                       dayIndex={dayIdx}
+                      isColumnHovered={isColHovered}
+                      onHoverStart={handleCardHoverStart}
+                      onHoverEnd={handleCardHoverEnd}
                       onComplete={handleComplete}
                       onNudge={handleNudge}
                       onDelete={handleDelete}

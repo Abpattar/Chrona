@@ -619,6 +619,30 @@ function MindmapFlow({ items, loadSchedule }) {
     [items]
   )
 
+  const handleAutoAdjust = useCallback(() => {
+    const { nodes: newNodes, edges: newEdges } = buildPinBoardLayout(filteredItems, {
+      onComplete: handleComplete,
+      onReschedule: handleReschedule,
+      onDelete: handleDelete,
+      onExplain: handleExplain,
+    })
+    setNodes(newNodes)
+    setEdges(newEdges)
+    showToast('Layout auto-adjusted to grid ✓')
+    setTimeout(() => {
+      rfInstance.current?.fitView({ padding: 0.16, maxZoom: 1.0, duration: 400 })
+    }, 60)
+  }, [
+    filteredItems,
+    handleComplete,
+    handleReschedule,
+    handleDelete,
+    handleExplain,
+    setNodes,
+    setEdges,
+    showToast,
+  ])
+
   useEffect(() => {
     const { nodes: newNodes, edges: newEdges } = buildPinBoardLayout(filteredItems, {
       onComplete: handleComplete,
@@ -738,6 +762,15 @@ function MindmapFlow({ items, loadSchedule }) {
           >
             <span>⛶</span>
             <span className="hidden sm:inline">Fit</span>
+          </button>
+
+          <button
+            onClick={handleAutoAdjust}
+            className="px-3 py-1 rounded-full text-xs text-purple-200 hover:text-white bg-purple-600/20 hover:bg-purple-600/35 border border-purple-500/30 transition-all flex items-center gap-1 font-medium active:scale-95 shadow-xs"
+            title="Auto adjust and reset layout back to organized grid"
+          >
+            <span>✨</span>
+            <span>Auto adjust</span>
           </button>
 
           {items.length > 0 && (
