@@ -335,10 +335,9 @@ function buildPinBoardLayout(
   const colsPerRow = numGroups <= 2 ? numGroups : numGroups <= 6 ? 3 : 4
   const cardWidth = 256
   const zonePadX = 14
-  const colSpacingX = cardWidth + zonePadX * 2 + 24 // 308px
-  const headerHeight = 84
-  const cardSlotY = 182
-  const rowGapY = 52
+  const colSpacingX = cardWidth + zonePadX * 2 + 28 // 312px
+  const headerHeight = 76
+  const rowGapY = 56
 
   let currentRowY = 0
   for (let rowStart = 0; rowStart < numGroups; rowStart += colsPerRow) {
@@ -368,13 +367,32 @@ function buildPinBoardLayout(
         totalDur += Number(i.duration_minutes || 60)
       })
 
-      const colHeight = headerHeight + sortedBranchItems.length * cardSlotY + 18
+      // Calculate each card's dynamic Y position and height so cards NEVER clip or overlap
+      let currentCardY = currentRowY + headerHeight + 16
+      const taskPositions = []
+
+      sortedBranchItems.forEach((task, taskIdx) => {
+        const taskId = `task-${task.id || `${dateKey}-${taskIdx}`}`
+        const taskY = currentCardY
+
+        // Accurate height estimate based on content lines and buffer chips
+        const hasNote = Boolean(task.completion_note || task.reschedule_reason || task.transition_reason)
+        const isLongTitle = (task.title || '').length > 22
+        const cardHeight = 178 + (hasNote ? 36 : 0) + (isLongTitle ? 20 : 0)
+
+        taskPositions.push({ taskId, taskY, task, cardHeight })
+        currentCardY += cardHeight + 24 // Guaranteed 24px vertical breathing gap between cards
+      })
+
+      const colHeight = sortedBranchItems.length > 0
+        ? (currentCardY - currentRowY + 12)
+        : (headerHeight + 28)
 
       // Background zone frame around this day's pinned column
       nodes.push({
         id: `zone-${dateKey}`,
         type: 'boardZoneNode',
-        position: { x: colX - zonePadX, y: currentRowY - 18 },
+        position: { x: colX - zonePadX, y: currentRowY - 14 },
         data: {
           width: cardWidth + zonePadX * 2,
           height: colHeight,
@@ -407,9 +425,7 @@ function buildPinBoardLayout(
         ? 'rgba(192, 132, 252, 0.55)'
         : 'rgba(251, 191, 36, 0.45)'
 
-      sortedBranchItems.forEach((task, taskIdx) => {
-        const taskId = `task-${task.id || `${dateKey}-${taskIdx}`}`
-        const taskY = currentRowY + headerHeight + taskIdx * cardSlotY
+      taskPositions.forEach(({ taskId, taskY, task }, taskIdx) => {
         nodes.push({
           id: taskId,
           type: 'scheduleTaskNode',
