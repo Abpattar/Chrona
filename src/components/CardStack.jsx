@@ -259,7 +259,7 @@ export default function CardStack({
                 }}
                 className={`absolute w-[calc(100vw-48px)] max-w-[290px] sm:max-w-[330px] h-[clamp(280px,44dvh,355px)] rounded-[26px] sm:rounded-[30px] p-4 sm:p-5 flex flex-col justify-between cursor-pointer card-sunset-ideas overflow-hidden ${
                   isCenter
-                    ? 'border-white/[0.16] shadow-[0_30px_70px_rgba(0,0,0,0.85)] ring-1 ring-white/10'
+                    ? 'border-white/[0.16] shadow-[0_24px_50px_rgba(0,0,0,0.6)] ring-1 ring-white/10'
                     : 'opacity-70 hover:opacity-90'
                 }`}
                 style={{

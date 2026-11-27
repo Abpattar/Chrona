@@ -9,8 +9,8 @@ import dayjs from 'dayjs'
 const navLinks = [
   { to: '/dashboard', label: 'Today', icon: '◈' },
   { to: '/chat', label: 'Chrona AI', icon: '✧' },
-  { to: '/calendar', label: 'Mind Map', icon: '🗺️' },
-  { to: '/week', label: 'Week Grid', icon: '📅' },
+  { to: '/calendar', label: 'Mind Map', icon: '❖' },
+  { to: '/week', label: 'Week Grid', icon: '▦' },
 ]
 
 export default function App() {
@@ -80,7 +80,7 @@ export default function App() {
             {/* Digital Clock Style Widget */}
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[#121419]/90 border border-white/10 shadow-inner backdrop-blur-xl font-mono">
               <div className="hidden md:flex items-center gap-1.5 text-[10px] text-neutral-400 font-semibold tracking-wider uppercase">
-                <span>📅</span>
+                <span className="text-neutral-400 text-xs">▦</span>
                 <span>{clock.format('ddd, MMM D')}</span>
                 <span className="text-neutral-600 text-xs ml-0.5">|</span>
               </div>

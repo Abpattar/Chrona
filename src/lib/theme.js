@@ -12,9 +12,9 @@ export function getSkyTheme(hour = new Date().getHours()) {
       phase: 'morning',
       label: 'Sunrise Orange',
       bgClass: 'bg-sky-morning',
-      horizonGlow: 'from-[#f59e0b]/40 via-[#d97706]/25 to-transparent',
-      orbLeft: 'bg-orange-500/22',
-      orbRight: 'bg-amber-400/28',
+      horizonGlow: 'from-[#f59e0b]/25 via-[#d97706]/15 to-transparent',
+      orbLeft: 'bg-orange-500/15',
+      orbRight: 'bg-amber-400/18',
       accentColor: '#f59e0b',
     }
   }
@@ -24,9 +24,9 @@ export function getSkyTheme(hour = new Date().getHours()) {
       phase: 'afternoon',
       label: 'Midday Yellow',
       bgClass: 'bg-sky-afternoon',
-      horizonGlow: 'from-[#fbbf24]/45 via-[#f59e0b]/28 to-transparent',
-      orbLeft: 'bg-amber-400/25',
-      orbRight: 'bg-yellow-300/30',
+      horizonGlow: 'from-[#fbbf24]/28 via-[#f59e0b]/16 to-transparent',
+      orbLeft: 'bg-amber-400/16',
+      orbRight: 'bg-yellow-300/18',
       accentColor: '#fbbf24',
     }
   }
@@ -36,9 +36,9 @@ export function getSkyTheme(hour = new Date().getHours()) {
       phase: 'evening',
       label: 'Sunset Pink-Orange',
       bgClass: 'bg-sky-evening',
-      horizonGlow: 'from-[#f43f5e]/45 via-[#ea580c]/32 to-transparent',
-      orbLeft: 'bg-pink-500/28',
-      orbRight: 'bg-orange-500/32',
+      horizonGlow: 'from-[#f43f5e]/25 via-[#ea580c]/18 to-transparent',
+      orbLeft: 'bg-pink-500/16',
+      orbRight: 'bg-orange-500/18',
       accentColor: '#f43f5e',
     }
   }
@@ -47,9 +47,9 @@ export function getSkyTheme(hour = new Date().getHours()) {
     phase: 'night',
     label: 'Midnight Blue',
     bgClass: 'bg-sky-night',
-    horizonGlow: 'from-[#38bdf8]/25 via-[#1e3a8a]/35 to-transparent',
-    orbLeft: 'bg-blue-600/22',
-    orbRight: 'bg-cyan-500/20',
+    horizonGlow: 'from-[#38bdf8]/18 via-[#1e3a8a]/20 to-transparent',
+    orbLeft: 'bg-blue-600/15',
+    orbRight: 'bg-cyan-500/14',
     accentColor: '#38bdf8',
   }
 }

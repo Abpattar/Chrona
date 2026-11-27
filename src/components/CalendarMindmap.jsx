@@ -37,106 +37,97 @@ export function getNodeTheme(item) {
   if (isCompleted) {
     return {
       border: 'rgba(52, 211, 153, 0.35)',
-      cardBg: 'linear-gradient(160deg, rgba(16, 42, 34, 0.9), rgba(8, 20, 18, 0.95))',
-      pinColor: '#34d399',
-      glow: '0 0 24px rgba(16, 185, 129, 0.2)',
-      badgeBg: 'rgba(16, 185, 129, 0.2)',
+      cardBg: 'linear-gradient(165deg, rgba(16, 36, 30, 0.88), rgba(10, 20, 18, 0.94))',
+      accentColor: '#34d399',
+      glow: '0 0 24px rgba(52, 211, 153, 0.16)',
+      badgeBg: 'rgba(16, 185, 129, 0.16)',
+      badgeBorder: 'rgba(52, 211, 153, 0.3)',
       badgeText: '#34d399',
-      label: '✓ COMPLETED',
-      textStyle: 'line-through text-slate-400',
+      icon: '✓',
+      label: 'FULFILLED',
+      textStyle: 'line-through text-neutral-400',
     }
   }
 
   if (isPending) {
     return {
-      border: 'rgba(192, 132, 252, 0.38)',
-      cardBg: 'linear-gradient(160deg, rgba(38, 24, 58, 0.9), rgba(18, 12, 30, 0.95))',
-      pinColor: '#c084fc',
-      glow: '0 0 24px rgba(168, 85, 247, 0.22)',
-      badgeBg: 'rgba(168, 85, 247, 0.22)',
+      border: 'rgba(192, 132, 252, 0.35)',
+      cardBg: 'linear-gradient(165deg, rgba(32, 22, 48, 0.88), rgba(16, 12, 26, 0.94))',
+      accentColor: '#c084fc',
+      glow: '0 0 24px rgba(192, 132, 252, 0.18)',
+      badgeBg: 'rgba(192, 132, 252, 0.16)',
+      badgeBorder: 'rgba(192, 132, 252, 0.3)',
       badgeText: '#d8b4fe',
-      label: '⏳ UNASSIGNED',
+      icon: '⏳',
+      label: 'FLEXIBLE',
       textStyle: 'text-purple-100 font-medium',
     }
   }
 
   if (movability === 'immovable') {
     return {
-      border: 'rgba(255, 255, 255, 0.2)',
-      cardBg: 'linear-gradient(160deg, rgba(30, 34, 46, 0.92), rgba(15, 18, 28, 0.96))',
-      pinColor: '#f8fafc',
-      glow: '0 0 24px rgba(248, 250, 252, 0.12)',
-      badgeBg: 'rgba(255, 255, 255, 0.14)',
+      border: 'rgba(255, 255, 255, 0.18)',
+      cardBg: 'linear-gradient(165deg, rgba(28, 30, 38, 0.9), rgba(16, 18, 24, 0.95))',
+      accentColor: '#f8fafc',
+      glow: '0 0 24px rgba(255, 255, 255, 0.1)',
+      badgeBg: 'rgba(255, 255, 255, 0.1)',
+      badgeBorder: 'rgba(255, 255, 255, 0.22)',
       badgeText: '#f8fafc',
-      label: '◈ ANCHOR',
-      textStyle: 'text-slate-50 font-semibold',
+      icon: '◈',
+      label: 'ANCHOR',
+      textStyle: 'text-white font-semibold',
     }
   }
 
   if (movability === 'negotiable') {
     return {
-      border: 'rgba(245, 158, 11, 0.38)',
-      cardBg: 'linear-gradient(160deg, rgba(46, 34, 18, 0.92), rgba(22, 16, 10, 0.96))',
-      pinColor: '#fbbf24',
-      glow: '0 0 24px rgba(245, 158, 11, 0.2)',
-      badgeBg: 'rgba(245, 158, 11, 0.2)',
+      border: 'rgba(245, 158, 11, 0.35)',
+      cardBg: 'linear-gradient(165deg, rgba(42, 32, 18, 0.88), rgba(20, 16, 10, 0.94))',
+      accentColor: '#fbbf24',
+      glow: '0 0 24px rgba(245, 158, 11, 0.18)',
+      badgeBg: 'rgba(245, 158, 11, 0.16)',
+      badgeBorder: 'rgba(245, 158, 11, 0.3)',
       badgeText: '#fcd34d',
-      label: isRescheduled ? '↻ ALIGNED' : '✧ PRIORITY',
-      textStyle: 'text-amber-50 font-semibold',
+      icon: '✧',
+      label: isRescheduled ? 'ALIGNED' : 'PRIORITY',
+      textStyle: 'text-amber-100 font-semibold',
     }
   }
 
   return {
-    border: 'rgba(56, 189, 248, 0.35)',
-    cardBg: 'linear-gradient(160deg, rgba(16, 38, 54, 0.92), rgba(10, 20, 32, 0.96))',
-    pinColor: '#38bdf8',
-    glow: '0 0 24px rgba(56, 189, 248, 0.18)',
-    badgeBg: 'rgba(56, 189, 248, 0.2)',
+    border: 'rgba(56, 189, 248, 0.32)',
+    cardBg: 'linear-gradient(165deg, rgba(16, 34, 48, 0.88), rgba(10, 18, 28, 0.94))',
+    accentColor: '#38bdf8',
+    glow: '0 0 24px rgba(56, 189, 248, 0.16)',
+    badgeBg: 'rgba(56, 189, 248, 0.16)',
+    badgeBorder: 'rgba(56, 189, 248, 0.28)',
     badgeText: '#7dd3fc',
-    label: isRescheduled ? '✦ RESCHEDULED' : '✦ FLUID',
-    textStyle: 'text-cyan-50 font-medium',
+    icon: '✦',
+    label: isRescheduled ? 'RESCHEDULED' : 'FLUID',
+    textStyle: 'text-cyan-100 font-medium',
   }
 }
 
-// ── Realistic 3D Push-Pin Cap ─────────────────────────────────────────────────
-function PushPin({ color = '#38bdf8' }) {
-  return (
-    <div
-      className="absolute -top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center pointer-events-none"
-      aria-hidden="true"
-    >
-      <div
-        className="w-4 h-4 rounded-full border border-white/50"
-        style={{
-          background: `radial-gradient(circle at 32% 28%, #ffffff 0%, ${color} 45%, #0f172a 100%)`,
-          boxShadow: `0 0 12px ${color}99, 0 5px 8px rgba(0,0,0,0.9)`,
-        }}
-      />
-      <div className="w-[2px] h-2 bg-gradient-to-b from-slate-200 to-slate-600 -mt-0.5 rounded-b-full shadow" />
-    </div>
-  )
-}
-
-// ── Background Pin-Board Column Zone ──────────────────────────────────────────
+// ── Background Column Zone Frame ───────────────────────────────────────────
 function BoardZoneNode({ data }) {
   const { width, height, accentColor } = data
   return (
     <div
-      className="rounded-3xl pointer-events-none backdrop-blur-sm"
+      className="rounded-3xl pointer-events-none backdrop-blur-xs"
       style={{
         width: `${width}px`,
         height: `${height}px`,
-        background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(20, 16, 35, 0.25) 100%)',
-        border: `1px dashed ${accentColor}28`,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 48px rgba(0,0,0,0.4)',
+        background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(18, 16, 30, 0.15) 100%)',
+        border: `1px dashed ${accentColor}24`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     />
   )
 }
 
-// ── Pinned Task Note Card ─────────────────────────────────────────────────────
+// ── Ultra-Sleek Frosted Task Card Node ───────────────────────────────────────
 function ScheduleTaskNode({ data }) {
-  const { item, tiltDeg = 0, onComplete, onReschedule, onDelete, onExplain } = data
+  const { item, onComplete, onReschedule, onDelete, onExplain } = data
   const theme = getNodeTheme(item)
 
   const hasStartTime = !!item.start_time
@@ -152,85 +143,81 @@ function ScheduleTaskNode({ data }) {
 
   return (
     <div
-      className="relative px-4 pt-4 pb-3.5 w-[252px] rounded-2xl transition-all duration-200 hover:!rotate-0 hover:scale-[1.03] hover:z-30 group cursor-grab active:cursor-grabbing backdrop-blur-xl"
+      className="relative px-4 py-3.5 w-[256px] rounded-2xl transition-all duration-200 hover:scale-[1.02] hover:z-30 group cursor-grab active:cursor-grabbing backdrop-blur-2xl"
       style={{
         background: theme.cardBg,
         border: `1px solid ${theme.border}`,
-        boxShadow: `${theme.glow}, 0 16px 36px rgba(0,0,0,0.7)`,
-        transform: `rotate(${tiltDeg}deg)`,
+        boxShadow: `${theme.glow}, 0 20px 40px rgba(0,0,0,0.65)`,
       }}
     >
-      <PushPin color={theme.pinColor} />
       <Handle type="target" position={Position.Top} className="!opacity-0 !w-2 !h-2" />
 
-      {/* Subtle corner paper fold highlight */}
-      <div
-        className="absolute top-0 right-0 w-4 h-4 pointer-events-none rounded-tr-xl opacity-30"
-        style={{
-          background: 'linear-gradient(225deg, rgba(255,255,255,0.22) 0%, transparent 55%)',
-        }}
-      />
-
-      {/* Top row: Badge & Delete */}
-      <div className="flex items-center justify-between gap-1 mb-1.5">
+      {/* Top Header Row: Status badge pill and delete action */}
+      <div className="flex items-center justify-between gap-1.5 mb-2">
         <span
-          className="text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider"
-          style={{ background: theme.badgeBg, color: theme.badgeText }}
+          className="text-[9px] font-mono font-bold tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 uppercase"
+          style={{ 
+            background: theme.badgeBg, 
+            color: theme.badgeText, 
+            border: `1px solid ${theme.badgeBorder}` 
+          }}
         >
-          {theme.label}
+          <span className="text-[10px]">{theme.icon}</span>
+          <span>{theme.label}</span>
         </span>
+
         <button
           onClick={(e) => {
             e.stopPropagation()
             if (onDelete) onDelete(item.id)
           }}
-          className="opacity-40 group-hover:opacity-100 text-[10px] font-bold text-rose-400 hover:text-rose-200 px-1 transition-opacity"
-          title="Unpin & remove item"
+          className="opacity-0 group-hover:opacity-100 text-xs font-bold text-neutral-400 hover:text-rose-400 p-0.5 transition-opacity"
+          title="Remove item"
         >
           ✕
         </button>
       </div>
 
-      {/* Title */}
-      <h4 className={`text-[13px] leading-snug line-clamp-2 ${theme.textStyle}`}>
+      {/* Title with App Typography */}
+      <h4 className={`text-sm font-sans font-bold leading-snug line-clamp-2 ${theme.textStyle}`}>
         {item.title}
       </h4>
 
-      {/* Date and Time */}
+      {/* Date & Duration Info */}
       <div
-        className="mt-2 pt-2 flex flex-col gap-1 text-[10px]"
-        style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        className="mt-2.5 pt-2 flex flex-col gap-1 text-[10px] font-mono"
+        style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}
       >
         {hasStartTime ? (
-          <div className="flex items-center justify-between font-mono text-[10px] text-slate-200">
-            <span className="font-semibold">
+          <div className="flex items-center justify-between text-neutral-300">
+            <span className="font-semibold tracking-tight">
               {startDay.format('h:mm A')} – {endDay ? endDay.format('h:mm A') : 'TBD'}
             </span>
-            <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/25">
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-neutral-300">
               {durationMin}m
             </span>
           </div>
         ) : (
-          <div className="flex items-center justify-between text-amber-300/90 font-mono">
-            <span>⏳ Flexible slot</span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15">{durationMin}m</span>
+          <div className="flex items-center justify-between text-amber-300/90">
+            <span>⏳ Flexible Window</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20">{durationMin}m</span>
           </div>
         )}
 
         {(item.completion_note || item.reschedule_reason) && (
           <div
-            className="text-[9px] text-amber-200/85 font-mono truncate"
+            className="text-[9px] text-amber-200/85 font-mono truncate bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md mt-0.5"
             title={item.completion_note || item.reschedule_reason}
           >
-            📌 {item.completion_note || item.reschedule_reason}
+            ⚡ {item.completion_note || item.reschedule_reason}
           </div>
         )}
       </div>
 
-      {/* Action buttons */}
+      {/* Action Buttons matching Today & Week views */}
       <div
         className="mt-2.5 pt-2 flex items-center gap-1.5"
-        style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}
       >
         {item.status !== 'completed' && (
           <button
@@ -238,11 +225,7 @@ function ScheduleTaskNode({ data }) {
               e.stopPropagation()
               if (onComplete) onComplete(item.id)
             }}
-            className="flex-1 py-1 rounded-lg text-[10px] font-bold transition-all text-emerald-300 hover:text-emerald-100 hover:bg-emerald-500/25"
-            style={{
-              background: 'rgba(16, 185, 129, 0.14)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-            }}
+            className="flex-1 py-1 rounded-full text-[10px] font-medium text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all active:scale-95"
           >
             ✓ Done
           </button>
@@ -252,12 +235,8 @@ function ScheduleTaskNode({ data }) {
             e.stopPropagation()
             if (onReschedule) onReschedule(item.id)
           }}
-          className="py-1 px-2.5 rounded-lg text-[10px] font-bold text-amber-300 hover:text-amber-100 hover:bg-amber-500/20 transition-all"
-          style={{
-            background: 'rgba(245, 158, 11, 0.12)',
-            border: '1px solid rgba(245, 158, 11, 0.28)',
-          }}
-          title="Move to next open slot"
+          className="py-1 px-3 rounded-full text-[10px] font-medium text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all active:scale-95"
+          title="Move slot"
         >
           ↻ Move
         </button>
@@ -267,12 +246,8 @@ function ScheduleTaskNode({ data }) {
               e.stopPropagation()
               onExplain(item)
             }}
-            className="py-1 px-2 rounded-lg text-[10px] font-bold text-cyan-300 hover:text-cyan-100 hover:bg-cyan-500/25 transition-all"
-            style={{
-              background: 'rgba(6, 182, 212, 0.14)',
-              border: '1px solid rgba(6, 182, 212, 0.3)',
-            }}
-            title="Explain decision"
+            className="py-1 px-2.5 rounded-full text-[10px] font-medium text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 transition-all active:scale-95"
+            title="Reasoning"
           >
             💡
           </button>
@@ -284,46 +259,39 @@ function ScheduleTaskNode({ data }) {
   )
 }
 
-// ── Pinned Day Column Tape Header Card ────────────────────────────────────────
+// ── Frosted Day Column Header Node ─────────────────────────────────────────
 function DateBranchNode({ data }) {
   const { dateLabel, dayName, count, totalDuration, isToday, isPending } = data
   const accentColor = isToday ? '#38bdf8' : isPending ? '#c084fc' : '#fbbf24'
 
   return (
     <div
-      className="relative px-4 pt-3.5 pb-2.5 rounded-2xl w-[252px] text-center select-none cursor-grab active:cursor-grabbing overflow-visible backdrop-blur-xl"
+      className="relative px-4 py-3 rounded-2xl w-[256px] text-center select-none cursor-grab active:cursor-grabbing backdrop-blur-2xl"
       style={{
-        background: 'linear-gradient(150deg, rgba(24, 20, 38, 0.94), rgba(14, 12, 24, 0.98))',
-        border: `1px solid ${accentColor}45`,
-        boxShadow: `0 0 24px ${accentColor}18, 0 12px 28px rgba(0,0,0,0.75)`,
+        background: 'linear-gradient(160deg, rgba(22, 24, 34, 0.92), rgba(12, 14, 20, 0.96))',
+        border: `1px solid ${accentColor}35`,
+        boxShadow: `0 0 20px ${accentColor}14, 0 16px 32px rgba(0,0,0,0.65)`,
       }}
     >
-      {/* Translucent top tape bar */}
-      <div
-        className="absolute top-0 left-6 right-6 h-1 rounded-b-full opacity-75"
-        style={{ background: accentColor }}
-      />
-      <PushPin color={accentColor} />
-
       <div className="flex items-center justify-center gap-1.5">
         <span className="text-xs" style={{ color: accentColor }}>
           {isPending ? '⏳' : isToday ? '✧' : '◈'}
         </span>
-        <span className="font-cinzel text-xs font-bold uppercase tracking-widest text-slate-100">
+        <span className="font-sans text-xs font-bold uppercase tracking-wider text-white">
           {dayName}
         </span>
       </div>
       <div className="mt-1 flex items-center justify-center gap-2 text-[10px] font-mono">
-        <span className="text-slate-300">{dateLabel}</span>
+        <span className="text-neutral-400">{dateLabel}</span>
         <span
           className="px-2 py-0.5 rounded-full text-[9px] font-semibold"
           style={{
-            background: `${accentColor}1a`,
+            background: `${accentColor}18`,
             color: accentColor,
-            border: `1px solid ${accentColor}38`,
+            border: `1px solid ${accentColor}30`,
           }}
         >
-          {count} {count === 1 ? 'pin' : 'pins'}
+          {count} {count === 1 ? 'task' : 'tasks'}
           {totalDuration > 0 ? ` · ${Math.round((totalDuration / 60) * 10) / 10}h` : ''}
         </span>
       </div>
@@ -365,12 +333,12 @@ function buildPinBoardLayout(
 
   const numGroups = dateKeys.length
   const colsPerRow = numGroups <= 2 ? numGroups : numGroups <= 6 ? 3 : 4
-  const cardWidth = 244
-  const zonePadX = 16
-  const colSpacingX = cardWidth + zonePadX * 2 + 28 // 304px
-  const headerHeight = 96
-  const cardSlotY = 188
-  const rowGapY = 56
+  const cardWidth = 256
+  const zonePadX = 14
+  const colSpacingX = cardWidth + zonePadX * 2 + 24 // 308px
+  const headerHeight = 84
+  const cardSlotY = 182
+  const rowGapY = 52
 
   let currentRowY = 0
   for (let rowStart = 0; rowStart < numGroups; rowStart += colsPerRow) {
@@ -442,16 +410,12 @@ function buildPinBoardLayout(
       sortedBranchItems.forEach((task, taskIdx) => {
         const taskId = `task-${task.id || `${dateKey}-${taskIdx}`}`
         const taskY = currentRowY + headerHeight + taskIdx * cardSlotY
-        const tilts = [-1.0, 0.85, -0.55, 0.95]
-        const tiltDeg = tilts[taskIdx % tilts.length]
-
         nodes.push({
           id: taskId,
           type: 'scheduleTaskNode',
           position: { x: colX, y: taskY },
           data: {
             item: task,
-            tiltDeg,
             onComplete,
             onReschedule,
             onDelete,
@@ -470,11 +434,11 @@ function buildPinBoardLayout(
           id: `pin-thread-${sourceId}-${taskId}`,
           source: sourceId,
           target: taskId,
-          type: 'default',
+          type: 'smoothstep',
           style: {
             stroke: threadColor,
-            strokeWidth: 1.6,
-            strokeDasharray: '4 3',
+            strokeWidth: 1.5,
+            opacity: 0.65,
           },
         })
       })
@@ -694,7 +658,7 @@ function MindmapFlow({ items, loadSchedule }) {
       <div className="absolute top-4 left-4 sm:left-8 z-20 flex items-center gap-2 pointer-events-auto">
         <div className="flex items-center gap-2.5 bg-[#12141c]/80 px-3.5 py-1.5 rounded-full border border-white/10 backdrop-blur-xl shadow-lg">
           <span className="text-xs font-bold tracking-wide text-white flex items-center gap-1.5">
-            <span>🗺️</span>
+            <span className="text-purple-300">❖</span>
             <span>Mind Map</span>
           </span>
           <div className="h-3 w-px bg-white/15" />
@@ -801,17 +765,20 @@ function MindmapFlow({ items, loadSchedule }) {
       {/* Empty State */}
       {filteredItems.length === 0 && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="pointer-events-auto rounded-2xl p-6 bg-[#0e1320]/90 border border-slate-700/40 backdrop-blur-xl shadow-2xl text-center max-w-xs">
-            <div className="text-2xl mb-2">📌</div>
-            <h3 className="text-sm font-bold text-slate-100">Pin Board is Empty</h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Add tasks or upload a timetable in Chrona AI to pin them onto your board.
+          <div className="pointer-events-auto rounded-3xl p-7 bg-[#141622]/90 border border-white/10 backdrop-blur-2xl shadow-2xl text-center max-w-sm">
+            <div className="w-12 h-12 mx-auto rounded-full bg-purple-500/10 border border-purple-500/25 flex items-center justify-center text-xl text-purple-300 shadow-[0_0_20px_rgba(168,85,247,0.25)] mb-3">
+              🗺️
+            </div>
+            <h3 className="text-base font-bold text-white tracking-tight">Mind Map is Empty</h3>
+            <p className="text-xs text-neutral-400 mt-1.5 leading-relaxed">
+              Add tasks or chat with Chrona AI to visualize your week's schedule nodes here.
             </p>
             <a
               href="/chat"
-              className="inline-block mt-3 text-xs font-semibold px-3.5 py-1.5 rounded-xl text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-sm"
+              className="inline-flex items-center gap-1.5 mt-4 text-xs font-semibold px-4 py-2 rounded-full text-white bg-purple-600/30 hover:bg-purple-600/45 border border-purple-500/40 shadow-sm transition-all active:scale-95"
             >
-              + Open Chrona AI
+              <span>+</span>
+              <span>Open Chrona AI</span>
             </a>
           </div>
         </div>

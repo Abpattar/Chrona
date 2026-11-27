@@ -82,80 +82,104 @@ function TransitionGapPill({ prevEvent, nextEvent }) {
   )
 }
 
-function EventChip({ event, onComplete, onNudge, onDelete, onExplain }) {
+function EventChip({ event, dayIndex = 0, onComplete, onNudge, onDelete, onExplain }) {
+  const [isHovered, setIsHovered] = useState(false)
   const start = dayjs(event.start_time || event.event_datetime)
   const end = event.end_time ? dayjs(event.end_time) : start.add(event.duration_minutes || 60, 'minute')
   const duration = Math.max(end.diff(start, 'minute'), 30)
   const topOffset = Math.max(0, ((start.hour() - START_HOUR) * HOUR_HEIGHT) + (start.minute() / 60) * HOUR_HEIGHT)
-  const height = Math.max((duration / 60) * HOUR_HEIGHT, 40)
+  const baseHeight = Math.max((duration / 60) * HOUR_HEIGHT, 40)
   const visual = getMovabilityStyle(event)
   const isMovable = (event.movability || (event.flexibility === false ? 'immovable' : 'fluid')) !== 'immovable'
 
+  // If in the rightmost columns (Thu, Fri, Sat, Sun => dayIndex >= 4), pin right and expand leftwards
+  // Otherwise, pin left and expand rightwards to prevent viewport overflow
+  const isRightCol = dayIndex >= 4
+
   return (
     <div
-      className="rounded-xl px-2.5 py-1.5 transition-all duration-200 hover:brightness-110 group overflow-hidden flex flex-col justify-between shadow-md hover:shadow-xl hover:z-30 backdrop-blur-xl"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="rounded-xl px-2.5 py-1.5 transition-all duration-200 flex flex-col justify-between backdrop-blur-2xl shadow-md cursor-pointer select-none"
       style={{
         position: 'absolute',
         top: `${topOffset}px`,
-        height: `${height}px`,
-        left: '3px',
-        right: '3px',
-        zIndex: 10,
-        background: visual.bg,
+        left: isHovered ? (isRightCol ? 'auto' : '3px') : '3px',
+        right: isHovered ? (isRightCol ? '3px' : 'auto') : '3px',
+        minWidth: isHovered ? '240px' : undefined,
+        width: isHovered ? 'max-content' : undefined,
+        maxWidth: isHovered ? '320px' : undefined,
+        height: isHovered ? 'auto' : `${baseHeight}px`,
+        minHeight: isHovered ? `${Math.max(baseHeight, 92)}px` : undefined,
+        zIndex: isHovered ? 50 : 10,
+        background: isHovered ? 'rgba(18, 20, 32, 0.96)' : visual.bg,
         border: visual.border,
         borderLeft: visual.borderLeft,
+        boxShadow: isHovered
+          ? '0 16px 36px -6px rgba(0, 0, 0, 0.75), 0 0 1px 1px rgba(255, 255, 255, 0.15)'
+          : '0 2px 8px rgba(0, 0, 0, 0.3)',
       }}
     >
-      <div className="flex items-start justify-between gap-1">
+      <div className="flex items-start justify-between gap-1.5 w-full">
         <div className="min-w-0 flex-1">
-          <p className={`text-xs font-semibold truncate ${event.status === 'completed' ? 'line-through opacity-60 text-slate-400' : 'text-slate-100'}`}>
+          <p className={`text-xs font-semibold ${isHovered ? 'whitespace-normal text-white' : 'truncate text-slate-100'} ${event.status === 'completed' ? 'line-through opacity-60 text-slate-400' : ''}`}>
             {event.title}
           </p>
-          <p className="text-[10px] font-mono text-slate-400 mt-0.5">
-            {start.format('h:mm A')} – {end.format('h:mm A')}
-            {event.location && event.location !== 'home' ? ` · 📍 ${event.location}` : ''}
-          </p>
+          <div className="text-[10px] font-mono text-slate-300 mt-0.5 flex items-center gap-1.5 flex-wrap whitespace-nowrap">
+            <span>{start.format('h:mm A')} – {end.format('h:mm A')}</span>
+            {isHovered && (
+              <span className="text-[9px] text-amber-300/90 bg-white/10 px-1.5 py-0.5 rounded-sm border border-white/15">
+                {duration}m
+              </span>
+            )}
+            {event.location && event.location !== 'home' ? (
+              <span className="text-slate-400">· 📍 {event.location}</span>
+            ) : null}
+          </div>
         </div>
         <span
           className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider flex-shrink-0"
-          style={{ background: 'rgba(0,0,0,0.4)', color: visual.badgeColor, border: `1px solid ${visual.badgeColor}33` }}
+          style={{ background: 'rgba(0,0,0,0.5)', color: visual.badgeColor, border: `1px solid ${visual.badgeColor}44` }}
         >
           {visual.badge}
         </span>
       </div>
 
-      <div className="hidden group-hover:flex items-center gap-1.5 pt-1 mt-auto">
-        {event.status !== 'completed' && (
+      {isHovered && (
+        <div className="flex items-center gap-1.5 pt-2 mt-2 border-t border-white/10 w-full animate-fade-in flex-wrap">
+          {event.status !== 'completed' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onComplete(event.id) }}
+              className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/40 border border-emerald-500/35 transition-all active:scale-95 whitespace-nowrap shadow-xs"
+            >
+              ✓ Done
+            </button>
+          )}
+          {isMovable && event.status !== 'completed' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onNudge(event) }}
+              className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-sky-500/25 text-sky-300 hover:bg-sky-500/40 border border-sky-500/35 transition-all active:scale-95 whitespace-nowrap shadow-xs"
+              title="Re-optimize slot"
+            >
+              ↻ Re-slot
+            </button>
+          )}
           <button
-            onClick={(e) => { e.stopPropagation(); onComplete(event.id) }}
-            className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35 border border-emerald-500/30 transition-all"
+            onClick={(e) => { e.stopPropagation(); onExplain(event) }}
+            className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/15 text-slate-100 hover:bg-white/25 border border-white/20 transition-all active:scale-95 whitespace-nowrap shadow-xs"
+            title="Why is this here?"
           >
-            ✓ Done
+            Why?
           </button>
-        )}
-        {isMovable && event.status !== 'completed' && (
           <button
-            onClick={(e) => { e.stopPropagation(); onNudge(event) }}
-            className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-500/25 text-sky-300 hover:bg-sky-500/35 border border-sky-500/30 transition-all"
-            title="Re-optimize slot"
+            onClick={(e) => { e.stopPropagation(); onDelete(event.id) }}
+            className="ml-auto px-2 py-1 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 hover:bg-rose-500/35 border border-rose-500/35 transition-all active:scale-95 whitespace-nowrap shadow-xs"
+            title="Delete / cancel task"
           >
-            ↻ Re-slot
+            ✕
           </button>
-        )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onExplain(event) }}
-          className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-white/10 text-slate-200 hover:bg-white/20 border border-white/10 transition-all"
-          title="Why is this here?"
-        >
-          Why?
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(event.id) }}
-          className="ml-auto px-2 py-0.5 rounded-full text-[9px] font-bold bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30 transition-all"
-        >
-          ✕
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -288,7 +312,7 @@ export default function CalendarView() {
         >
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-[#12141c]/80 px-3.5 py-1.5 rounded-full border border-white/10 backdrop-blur-xl shadow-md">
-              <span className="text-xs text-amber-400">📅</span>
+              <span className="text-xs text-amber-400">▦</span>
               <h1 className="text-xs sm:text-sm font-bold tracking-tight text-white">{currentWeekStart.format('MMMM YYYY')}</h1>
             </div>
 
@@ -392,7 +416,7 @@ export default function CalendarView() {
             </div>
 
             {/* 7 Days Columns */}
-            {weekDays.map((day) => {
+            {weekDays.map((day, dayIdx) => {
               const dayEvents = eventsForDay(day)
               const isToday = day.isSame(dayjs(), 'day')
               return (
@@ -432,6 +456,7 @@ export default function CalendarView() {
                     <EventChip
                       key={ev.id}
                       event={ev}
+                      dayIndex={dayIdx}
                       onComplete={handleComplete}
                       onNudge={handleNudge}
                       onDelete={handleDelete}

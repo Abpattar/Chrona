@@ -86,7 +86,7 @@ function TaskCard({ task, onNavigateMap, onNavigateToday }) {
             onClick={onNavigateMap}
             className="px-3.5 py-1.5 rounded-full text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
           >
-            <span>🗺️</span>
+            <span>❖</span>
             <span>Mind Map View</span>
           </button>
         )}
@@ -489,10 +489,10 @@ export default function Chat() {
         ═══════════════════════════════════════════════════════════════════════ */
         <div className="flex-1 min-h-0 overflow-hidden scrollbar-none px-4 sm:px-6 py-2 sm:py-3 max-w-5xl mx-auto w-full flex flex-col justify-between animate-fade-in">
 
-          {/* Section 1: Greeting Exactly Matching Image ("Good morning, Charles / What's on your mind?") */}
+          {/* Section 1: Greeting ("Good morning / What's on your mind?") */}
           <div className="text-center pt-0.5 sm:pt-1 pb-0.5">
             <h1 className="text-xl sm:text-2xl md:text-3xl font-medium tracking-tight text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)]">
-              {greeting}, Charles
+              {greeting}
             </h1>
             <p className="text-base sm:text-xl font-normal text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)] mt-0.5">
               What's on your mind?
@@ -524,7 +524,7 @@ export default function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={attachedFile ? 'Add notes for this file...' : 'Message Copilot'}
+                  placeholder={attachedFile ? 'Add notes for this file...' : 'Message Chrona'}
                   className="w-full bg-transparent text-sm sm:text-base text-slate-900 placeholder-slate-400 focus:outline-none font-normal leading-normal"
                 />
               </div>
@@ -925,7 +925,7 @@ export default function Chat() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={attachedFile ? 'Add a note with this file...' : 'Message Copilot'}
+                placeholder={attachedFile ? 'Add a note with this file...' : 'Message Chrona'}
                 className="flex-1 bg-transparent px-2 py-1 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none font-normal"
               />
 

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import CardStack from '../components/CardStack'
+import FlipCounter from '../components/FlipCounter'
+import GreetingQuote from '../components/GreetingQuote'
 import { getSkyTheme } from '../lib/theme'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -173,19 +175,18 @@ export default function Dashboard() {
       {/* ── Dynamic Sky Horizon Atmosphere (Morphs from Morning Orange to Afternoon Yellow to Sunset Pink to Night Blue) ── */}
       <div className="absolute inset-0 pointer-events-none -z-10 overflow-hidden">
         {/* Soft sunlit clouds across the lower horizon */}
-        <div className={`absolute -bottom-20 inset-x-0 h-[450px] bg-gradient-to-t ${skyTheme.horizonGlow} blur-3xl animate-warm-breath`} />
-        <div className={`absolute bottom-6 left-1/4 w-[600px] h-[350px] rounded-full ${skyTheme.orbLeft} blur-3xl transition-colors duration-1000`} />
-        <div className={`absolute bottom-4 right-1/4 w-[700px] h-[360px] rounded-full ${skyTheme.orbRight} blur-3xl transition-colors duration-1000`} />
+        <div className={`absolute -bottom-16 inset-x-0 h-[280px] bg-gradient-to-t ${skyTheme.horizonGlow} blur-3xl opacity-80 animate-warm-breath`} />
+        <div className={`absolute -bottom-4 left-1/4 w-[500px] h-[220px] rounded-full ${skyTheme.orbLeft} blur-3xl opacity-60 transition-colors duration-1000`} />
+        <div className={`absolute -bottom-4 right-1/4 w-[550px] h-[240px] rounded-full ${skyTheme.orbRight} blur-3xl opacity-60 transition-colors duration-1000`} />
       </div>
 
       {/* Floating Notification */}
       {notification && (
         <div
-          className={`fixed top-16 right-4 sm:right-6 z-50 px-4 py-2.5 rounded-2xl border text-xs font-mono tracking-wide shadow-2xl backdrop-blur-2xl animate-fade-in ${
-            notification.type === 'error'
-              ? 'bg-rose-950/95 border-rose-500/40 text-rose-200'
-              : 'bg-[#1e1c19]/95 border-amber-500/40 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.3)]'
-          }`}
+          className={`fixed top-16 right-4 sm:right-6 z-50 px-4 py-2.5 rounded-2xl border text-xs font-mono tracking-wide shadow-2xl backdrop-blur-2xl animate-fade-in ${notification.type === 'error'
+            ? 'bg-rose-950/95 border-rose-500/40 text-rose-200'
+            : 'bg-[#1e1c19]/95 border-amber-500/40 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.3)]'
+            }`}
         >
           {notification.msg}
         </div>
@@ -318,17 +319,12 @@ export default function Dashboard() {
       </div>
 
       {/* ── Bottom Bar: Truly Page-Centered Down Buttons ("+ Create" & "See all ideas") ── */}
-      <div className="flex-none pt-2 sm:pt-3 pb-1 border-t border-white/[0.08] relative z-20 w-full">
+      <div className="flex-none pt-2 sm:pt-3 pb-1 relative z-20 w-full">
         <div className="relative w-full flex flex-col sm:flex-row items-center justify-between gap-2 min-h-[44px]">
-          
-          {/* Left mini status indicators */}
-          <div className="flex items-center gap-2.5 text-xs font-mono text-neutral-300 flex-none">
-            <span className="px-3 py-1 rounded-full bg-white/[0.05] border border-white/10 shadow-xs backdrop-blur-md">
-              Active: <strong className="text-white ml-1">{allActiveTasks.length}</strong>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-white/[0.05] border border-white/10 shadow-xs backdrop-blur-md">
-              Done: <strong className="text-emerald-400 ml-1">{completedCount}</strong>
-            </span>
+
+          {/* Left mini status indicators: 8-bit digital flip pill counter */}
+          <div className="flex-none">
+            <FlipCounter activeCount={allActiveTasks.length} completedCount={completedCount} />
           </div>
 
           {/* Truly Centered to Page Horizontal Axis */}
@@ -350,17 +346,9 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {/* Right Clear Schedule Action */}
-          <div className="flex items-center gap-2 flex-none">
-            {allActiveTasks.length > 0 && (
-              <button
-                onClick={handleClearSchedule}
-                className="px-3.5 py-1 rounded-full text-[11px] font-mono text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                title="Clear all tasks"
-              >
-                Clear all
-              </button>
-            )}
+          {/* Right: Time-of-day greeting (top) & motivational quotes (below) aligned right without pill */}
+          <div className="flex items-center justify-end flex-none">
+            <GreetingQuote hour={currentTime.hour()} isLight={skyTheme.phase === 'afternoon'} />
           </div>
 
         </div>
